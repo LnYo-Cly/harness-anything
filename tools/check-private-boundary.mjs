@@ -30,7 +30,10 @@ if (topLevel !== process.cwd()) {
 }
 
 try {
-  gitStatus(["check-ignore", "-q", ".harness-private"]);
+  // Probe a phantom child path: works even when .harness-private does not
+  // exist on disk (CI clean checkout), while still failing if the ignore
+  // rule is missing from .gitignore.
+  gitStatus(["check-ignore", "-q", ".harness-private/__boundary_probe__"]);
 } catch {
   record(".harness-private is not ignored by git");
 }

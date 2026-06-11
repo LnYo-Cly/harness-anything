@@ -1,4 +1,5 @@
 .harness-private/
+.harness/
 AGENTS.md
 CLAUDE.md
 docs/
@@ -8,4 +9,4 @@ coverage/
 tmp/
 *.log
 *.tsbuildinfo
-packages/**/src/*.d.ts
+packages/**/src/**/*.d.ts
