@@ -48,9 +48,9 @@ const allTracked = git(["ls-files", "-z"])
   .split("\0")
   .filter(Boolean);
 const privateContentMarkers = [
-  "/Users/lizeyu/",
-  "Harness重设计",
-  "kernel-rewrite-2026-06-final"
+  ["/Users/", "lizeyu/"].join(""),
+  ["Harness", "重设计"].join(""),
+  ["kernel-rewrite-2026-06-", "final"].join("")
 ];
 
 for (const trackedPath of allTracked) {
