@@ -31,7 +31,7 @@ test("CLI creates a local task with generated identity and stable JSON output", 
     assert.equal(result.status, "planned");
     assert.equal(result.packagePath, `harness/planning/tasks/${taskId}-task-one`);
     assert.match(readFileSync(path.join(rootDir, `harness/planning/tasks/${taskId}-task-one/INDEX.md`), "utf8"), /engine: local/);
-    assert.match(readFileSync(path.join(rootDir, ".harness/write-journal/writes.jsonl"), "utf8"), /"schema":"write-journal\/v1"/);
+    assert.match(readFileSync(path.join(rootDir, ".harness/write-journal/watermark.json"), "utf8"), /"projectionHash":"sha256:/);
   });
 });
 
@@ -133,7 +133,7 @@ test("CLI appends progress through the write journal", () => {
   });
 });
 
-test("CLI task archive writes disposition through semantic journal kind", () => {
+test("CLI task archive writes disposition through committed watermark", () => {
   withTempRoot((rootDir) => {
     const created = runJson(rootDir, ["new-task", "--title", "Task One"]);
     const taskId = assertGeneratedTaskId(created.taskId);
@@ -144,7 +144,7 @@ test("CLI task archive writes disposition through semantic journal kind", () => 
     const indexBody = readFileSync(path.join(rootDir, `harness/planning/tasks/${taskId}-task-one/INDEX.md`), "utf8");
     assert.match(indexBody, /packageDisposition: archived/);
     assert.match(indexBody, /superseded by newer plan/);
-    assert.match(readFileSync(path.join(rootDir, ".harness/write-journal/writes.jsonl"), "utf8"), /"kind":"package_archive"/);
+    assert.match(readFileSync(path.join(rootDir, ".harness/write-journal/watermark.json"), "utf8"), /"projectionHash":"sha256:/);
   });
 });
 
@@ -162,7 +162,7 @@ test("CLI task supersede archives old task and creates relation to new task", ()
     assert.equal(result.packagePath, `harness/planning/tasks/${newTaskId}-replacement-task`);
     assert.match(readFileSync(path.join(rootDir, `harness/planning/tasks/${oldTaskId}-original-task/INDEX.md`), "utf8"), /packageDisposition: archived/);
     assert.match(readFileSync(path.join(rootDir, `harness/planning/tasks/${newTaskId}-replacement-task/relations.md`), "utf8"), new RegExp(`type: supersedes[\\s\\S]*task/${oldTaskId}`));
-    assert.match(readFileSync(path.join(rootDir, ".harness/write-journal/writes.jsonl"), "utf8"), /"kind":"package_supersede"/);
+    assert.match(readFileSync(path.join(rootDir, ".harness/write-journal/watermark.json"), "utf8"), /"projectionHash":"sha256:/);
   });
 });
 
@@ -177,7 +177,6 @@ test("CLI task delete soft tombstones and hard delete rejects archived terminal 
     assert.equal(hardResult.mode, "hard");
     assert.equal(existsSync(hardPackagePath), false);
     const journalBody = readFileSync(path.join(rootDir, ".harness/write-journal/writes.jsonl"), "utf8");
-    assert.match(journalBody, /"kind":"package_delete_hard"/);
     assert.match(journalBody, /"schema":"delete-audit\/v1"/);
     assert.match(journalBody, /"kind":"package_delete_hard_applied"/);
     const hardDeletePayloads = readdirSync(path.join(rootDir, ".harness/write-journal/payloads"))
@@ -276,9 +275,26 @@ test("CLI status --json returns local projection health envelope", () => {
     assert.equal(result.projectionPath, ".harness/cache/projections.sqlite");
     assert.equal(result.summary.taskCount, 1);
     assert.equal(result.summary.byPackageDisposition.archived, 1);
-    assert.equal(result.summary.warningCount, 1);
-    assert.equal(result.warnings.some((warning: Record<string, unknown>) => warning.code === "projection_stale" || warning.code === "projection_missing"), true);
+    assert.equal(result.report.schema, "harness-check-report/v1");
+    assert.equal(result.report.summary.warningCount, 0);
+    assert.equal(result.report.axes.some((axis: Record<string, unknown>) => axis.axis === "generated-cache" && axis.warningCount === 0), true);
+    assert.equal(result.report.axes.some((axis: Record<string, unknown>) => axis.axis === "collaboration-gate" && axis.warningCount === 0), true);
+    assert.equal(result.warnings.length, 0);
     assert.equal(result.commands.some((entry: Record<string, unknown>) => entry.kind === "task-supersede" && entry.resultEnvelope === "CliResult/v1"), true);
+  });
+});
+
+test("CLI status --json runs the post-merge collaboration gate", () => {
+  withTempRoot((rootDir) => {
+    mkdirSync(path.join(rootDir, "harness/standards"), { recursive: true });
+    writeFileSync(path.join(rootDir, "harness/standards/repo.md"), "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n", "utf8");
+
+    const result = runJson(rootDir, ["status"], false);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error?.code, "status_check_failed");
+    assert.equal(result.warnings.some((warning: Record<string, unknown>) => warning.code === "conflict_marker_present" && warning.source === "collaboration-gate"), true);
+    assert.equal(result.report.axes.some((axis: Record<string, unknown>) => axis.axis === "collaboration-gate" && axis.hardFailCount === 1), true);
   });
 });
 
@@ -409,7 +425,8 @@ test("CLI check --post-merge reports each hard-fail governance code", () => {
 
       assert.equal(result.ok, false, code);
       assert.equal(result.error?.code, "projection_check_failed", code);
-      assert.equal(result.warnings.some((warning) => warning.code === code && warning.severity === "hard-fail" && typeof warning.repairHint === "string"), true, code);
+      assert.equal(result.warnings.some((warning) => warning.code === code && typeof warning.source === "string" && warning.severity === "hard-fail" && typeof warning.repairHint === "string"), true, code);
+      assert.equal(result.report.summary.hardFailCount >= 1, true, code);
     });
   }
 });

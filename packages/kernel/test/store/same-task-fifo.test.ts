@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Effect } from "effect";
+import { hashTaskProjectionRows, rebuildTaskProjection } from "../../src/index.ts";
 import { makeJournaledWriteCoordinator } from "../../src/store/index.ts";
 import { docWrite, withTempStore } from "./helpers.ts";
 
@@ -38,3 +39,74 @@ test("WriteCoordinator preserves same-task FIFO across two coordinators", () => 
     assert.equal(readFileSync(path.join(rootDir, "harness/planning/tasks/task-1/notes.md"), "utf8"), "second");
   });
 });
+
+test("WriteCoordinator records real projection hash and compacts watermark-covered journal entries", () => {
+  withTempStore((rootDir) => {
+    const coordinator = makeJournaledWriteCoordinator({ rootDir });
+
+    Effect.runSync(coordinator.enqueue(docWrite("op-1", "task-1", "INDEX.md", indexBody("task-1", "Task One", "planned"))));
+    const report = Effect.runSync(coordinator.flush("explicit"));
+    const watermark = JSON.parse(readFileSync(path.join(rootDir, ".harness/write-journal/watermark.json"), "utf8")) as {
+      readonly projectionHash: string;
+    };
+    const expectedHash = hashTaskProjectionRows(rebuildTaskProjection({ rootDir }).rows);
+
+    assert.equal(report.watermark, "op-1");
+    assert.equal(watermark.projectionHash, expectedHash);
+    assert.equal(readFileSync(path.join(rootDir, ".harness/write-journal/writes.jsonl"), "utf8"), "");
+
+    const recovered = Effect.runSync(makeJournaledWriteCoordinator({ rootDir }).recover);
+    assert.equal(recovered.replayedOps, 0);
+    assert.equal(readFileSync(path.join(rootDir, "harness/planning/tasks/task-1/INDEX.md"), "utf8"), indexBody("task-1", "Task One", "planned"));
+  });
+});
+
+test("WriteCoordinator bounds committed op ids in watermark after successful compaction", () => {
+  withTempStore((rootDir) => {
+    const coordinator = makeJournaledWriteCoordinator({ rootDir });
+    for (let index = 0; index < 140; index += 1) {
+      Effect.runSync(coordinator.enqueue(docWrite(`op-${index}`, "task-1", "notes.md", `write ${index}`)));
+    }
+
+    const report = Effect.runSync(coordinator.flush("explicit"));
+    const watermark = JSON.parse(readFileSync(path.join(rootDir, ".harness/write-journal/watermark.json"), "utf8")) as {
+      readonly lastCommittedOpIds: ReadonlyArray<string>;
+    };
+
+    assert.equal(report.watermark, "op-139");
+    assert.equal(watermark.lastCommittedOpIds.length, 128);
+    assert.equal(watermark.lastCommittedOpIds[0], "op-12");
+    assert.equal(watermark.lastCommittedOpIds.at(-1), "op-139");
+    assert.equal(readFileSync(path.join(rootDir, ".harness/write-journal/writes.jsonl"), "utf8"), "");
+
+    const duplicateRecent = Effect.runSync(coordinator.enqueue(docWrite("op-139", "task-1", "notes.md", "duplicate")));
+    assert.equal(duplicateRecent.accepted, true);
+    assert.equal(Effect.runSync(coordinator.flush("explicit")).opCount, 0);
+    assert.equal(readFileSync(path.join(rootDir, "harness/planning/tasks/task-1/notes.md"), "utf8"), "write 139");
+  });
+});
+
+function indexBody(taskId: string, title: string, status: string): string {
+  return [
+    "---",
+    "schema: task-package/v2",
+    `task_id: ${taskId}`,
+    `title: ${title}`,
+    "lifecycle:",
+    "  bindingSchema: lifecycle-binding/v1",
+    "  engine: local",
+    `  status: ${status}`,
+    "  ref: ",
+    `  titleSnapshot: ${title}`,
+    "  url: ",
+    "  bindingCreatedAt: 2026-06-12T00:00:00.000Z",
+    "  bindingFingerprint: sha256:fixture",
+    "packageDisposition: active",
+    "vertical: default",
+    "preset: default",
+    "---",
+    "",
+    `# ${title}`,
+    ""
+  ].join("\n");
+}

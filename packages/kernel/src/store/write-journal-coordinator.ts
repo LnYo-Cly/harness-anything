@@ -38,6 +38,7 @@ import {
   resolveHarnessLayout,
   taskPackagePath
 } from "../layout/index.ts";
+import { hashTaskProjectionRows, rebuildTaskProjection } from "../projection/sqlite-task-projection.ts";
 
 export interface JournaledWriteCoordinatorOptions {
   readonly rootDir: string;
@@ -111,6 +112,9 @@ interface OwnedLock {
 }
 
 const defaultActor: JournalActor = { kind: "agent", id: "local" };
+// Flush writes the full op-id set before compaction for recovery safety, then
+// trims to a bounded recent-id window only after journal compaction succeeds.
+const maxWatermarkCommittedOpIds = 128;
 
 export function makeJournaledWriteCoordinator(options: JournaledWriteCoordinatorOptions): WriteCoordinator {
   const rootDir = path.resolve(options.rootDir);
@@ -179,18 +183,27 @@ function flushRecords(
   }
 
   const lastCommitSha = commitTouchedPaths(rootDir, touchedPaths, committedOpIds);
-  const projectionHash = rebuildProjectionStub(committedOpIds);
+  const projectionHash = committedOpIds.length > 0 ? rebuildProjectionHash(rootDir) : previousWatermark?.projectionHash ?? "no-projection-change";
   const allCommitted = [...(previousWatermark?.lastCommittedOpIds ?? []), ...committedOpIds];
+  const recentCommitted = recentOpIds(allCommitted);
   const watermark = committedOpIds.at(-1);
 
   if (committedOpIds.length > 0) {
-    writeWatermarkDurably(watermarkPath, {
+    const fullWatermark = {
       schema: "write-watermark/v1",
       lastCommittedOpIds: allCommitted,
       lastCommitSha,
       projectionHash,
       updatedAt: new Date().toISOString()
-    });
+    } satisfies WriteWatermark;
+    writeWatermarkDurably(watermarkPath, fullWatermark);
+    if (tryCompactJournal(journalPath, new Set(allCommitted)) && recentCommitted.length < allCommitted.length) {
+      writeWatermarkDurably(watermarkPath, {
+        ...fullWatermark,
+        lastCommittedOpIds: recentCommitted,
+        updatedAt: new Date().toISOString()
+      });
+    }
   }
 
   return {
@@ -764,8 +777,39 @@ function currentGitHead(rootDir: string): string {
   }
 }
 
-function rebuildProjectionStub(opIds: ReadonlyArray<string>): string {
-  return sha256Text(`projection-rebuild:v1:${opIds.join(",")}`);
+function rebuildProjectionHash(rootDir: string): string {
+  return hashTaskProjectionRows(rebuildTaskProjection({ rootDir }).rows);
+}
+
+function recentOpIds(opIds: ReadonlyArray<string>): ReadonlyArray<string> {
+  return opIds.slice(-maxWatermarkCommittedOpIds);
+}
+
+function tryCompactJournal(journalPath: string, coveredOpIds: ReadonlySet<string>): boolean {
+  try {
+    compactJournalDurably(journalPath, coveredOpIds);
+    return true;
+  } catch {
+    // Compaction is an optimization. The watermark is authoritative for replay,
+    // so a failed compaction must not turn a committed flush into a failure.
+    return false;
+  }
+}
+
+function compactJournalDurably(journalPath: string, coveredOpIds: ReadonlySet<string>): void {
+  if (!existsSync(journalPath)) return;
+  const body = readFileSync(journalPath, "utf8");
+  if (body.trim().length === 0) return;
+
+  const retained = body
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .filter((line) => {
+      const parsed = JSON.parse(line) as Partial<JournalRecord | LockTakeoverRecord | DeleteAuditRecord>;
+      if (parsed.schema !== "write-journal/v1") return true;
+      return typeof parsed.opId !== "string" || !coveredOpIds.has(parsed.opId);
+    });
+  writeFileDurably(journalPath, retained.length === 0 ? "" : `${retained.join("\n")}\n`);
 }
 
 function validateOp(rootDir: string, op: WriteOp): void {
