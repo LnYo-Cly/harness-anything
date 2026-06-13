@@ -3,7 +3,7 @@ import path from "node:path";
 import { Effect } from "effect";
 import { makeLocalLifecycleEngine } from "../../adapters/local/src/index.ts";
 import type { DomainStatus } from "../../kernel/src/index.ts";
-import { isDomainStatus, readTaskProjection } from "../../kernel/src/index.ts";
+import { isDomainStatus, isTerminalStatus, readTaskProjection } from "../../kernel/src/index.ts";
 import { taskDocumentPath as harnessTaskDocumentPath, validateTaskIdSyntax } from "../../kernel/src/layout/index.ts";
 export {
   evaluateCompletionGate,
@@ -121,6 +121,17 @@ export function makeLocalControllerService(options: LocalControllerServiceOption
     },
     setTaskStatus: async (payload) => {
       validateTaskId(payload.taskId);
+      if (isTerminalStatus(payload.status)) {
+        return {
+          ok: false,
+          error: {
+            code: "terminal_status_requires_task_complete",
+            hint: payload.status === "done"
+              ? "Use task-complete after review, CI, and closeout gates pass."
+              : "Terminal cancellation requires an audited recovery path."
+          }
+        };
+      }
       return Effect.runPromise(engine.setStatus({ taskId: payload.taskId, status: payload.status }).pipe(
         Effect.match({
           onFailure: (error) => ({ ok: false, error: { code: error._tag, hint: "Status update failed." } }),
