@@ -108,8 +108,8 @@ export interface ParsedCommand {
     | { readonly kind: "preset-seed" }
     | { readonly kind: "preset-audit" }
     | { readonly kind: "preset-uninstall"; readonly presetId: string; readonly layer: "project" | "user" }
-    | { readonly kind: "preset-run"; readonly presetId: string; readonly entrypoint: "plan" | "scaffold" | "check"; readonly taskId: string }
-    | { readonly kind: "preset-action"; readonly presetId: string; readonly actionName: string; readonly taskId: string }
+    | { readonly kind: "preset-run"; readonly presetId: string; readonly entrypoint: "plan" | "scaffold" | "check"; readonly taskId: string; readonly allowScripts: boolean }
+    | { readonly kind: "preset-action"; readonly presetId: string; readonly actionName: string; readonly taskId: string; readonly allowScripts: boolean }
     | { readonly kind: "module-list" }
     | { readonly kind: "module-inspect"; readonly moduleKey: string }
     | { readonly kind: "module-register"; readonly moduleKey: string; readonly title: string; readonly scope: string }
