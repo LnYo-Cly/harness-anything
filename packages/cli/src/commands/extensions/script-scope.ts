@@ -37,3 +37,7 @@ export function isPathInside(parent: string, candidate: string): boolean {
   const relative = path.relative(path.resolve(parent), path.resolve(candidate));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
+
+export function uniquePermissionPaths(paths: ReadonlyArray<string>): ReadonlyArray<string> {
+  return [...new Set(paths.map((candidate) => path.resolve(candidate)))];
+}

@@ -58,6 +58,7 @@ export const testTierManifest = {
     "packages/cli/test/local-lifecycle-cli.test.ts",
     "packages/cli/test/migration-adopt-cli.test.ts",
     "packages/cli/test/preset-module-cli.test.ts",
+    "packages/cli/test/preset-script-cli.test.ts",
     "packages/cli/test/settings-cli.test.ts",
     "packages/kernel/test/store/crash-before-watermark.test.ts",
     "packages/kernel/test/store/global-committer-lock.test.ts",

@@ -17,7 +17,8 @@ import {
   bundledVerticalDefinition,
   loadBundledPresetManifestEntries
 } from "./bundled.ts";
-import { isPathInside, listGeneratedFiles, resolveDeclaredWriteScopes } from "./script-scope.ts";
+import { presetScriptAuthorizationRequiredResult } from "./preset-evidence.ts";
+import { isPathInside, listGeneratedFiles, resolveDeclaredWriteScopes, uniquePermissionPaths } from "./script-scope.ts";
 
 type PresetManifest = Schema.Schema.Type<typeof PresetManifestSchema>;
 
@@ -265,7 +266,8 @@ export function runPresetEntrypoint(
   presetId: string,
   entrypoint: string,
   taskId: string,
-  commandName: "preset-run" | "preset-action"
+  commandName: "preset-run" | "preset-action",
+  allowScripts = false
 ): CliResult {
   const preset = resolvePresetEntry(rootDir, presetId);
   if (!preset) return presetNotFound("preset-run", presetId);
@@ -294,6 +296,18 @@ export function runPresetEntrypoint(
   const generated: string[] = [];
   const declaredEntrypoint = preset.manifest.entrypoints?.[entrypoint];
   if (declaredEntrypoint?.type === "script") {
+    if (!allowScripts) {
+      return presetScriptAuthorizationRequiredResult({
+        rootDir,
+        evidenceDir,
+        commandName,
+        presetSummary: publicPresetSummary(preset),
+        presetId,
+        layer: preset.layer,
+        taskId,
+        entrypoint
+      });
+    }
     const scriptResult = runScriptEntrypoint(rootDir, preset, declaredEntrypoint, entrypoint, taskId, evidenceDir, commandName);
     if (!scriptResult.ok) return scriptResult.result;
     generated.push(...scriptResult.generated);
@@ -317,7 +331,8 @@ export function runPresetEntrypoint(
     taskId,
     entrypoint,
     generated,
-    ok: true
+    ok: true,
+    scriptAuthorized: declaredEntrypoint?.type === "script" ? allowScripts : false
   };
   writeFileSync(path.join(evidenceDir, "evidence.json"), JSON.stringify(evidence, null, 2), "utf8");
   return {
@@ -436,10 +451,6 @@ function runScriptEntrypoint(
       .filter((filePath) => !beforeFiles.has(filePath))
       .map((filePath) => path.relative(rootDir, filePath).split(path.sep).join("/"))
   };
-}
-
-function uniquePermissionPaths(paths: ReadonlyArray<string>): ReadonlyArray<string> {
-  return [...new Set(paths.map((candidate) => path.resolve(candidate)))];
 }
 
 export function readModules(rootDir: string): ModuleRegistry {

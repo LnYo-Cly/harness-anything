@@ -52,7 +52,7 @@ export function runPresetCommand(rootDir: string, action: PresetAction): CliResu
     case "preset-uninstall":
       return runPresetUninstall(rootDir, action);
     case "preset-run":
-      return runPresetEntrypoint(rootDir, action.presetId, action.entrypoint, action.taskId, "preset-run");
+      return runPresetEntrypoint(rootDir, action.presetId, action.entrypoint, action.taskId, "preset-run", action.allowScripts);
     case "preset-action":
       return runPresetAction(rootDir, action);
   }
@@ -230,5 +230,5 @@ function runPresetAction(rootDir: string, action: Extract<PresetAction, { readon
       error: { code: "preset_action_forbidden", hint: `Preset action ${action.actionName} is not declared.` }
     };
   }
-  return runPresetEntrypoint(rootDir, action.presetId, action.actionName, action.taskId, "preset-action");
+  return runPresetEntrypoint(rootDir, action.presetId, action.actionName, action.taskId, "preset-action", action.allowScripts);
 }
