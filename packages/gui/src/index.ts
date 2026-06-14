@@ -1,4 +1,5 @@
 export * from "./api/local-api.ts";
+export * from "./api/api-contract-registry.ts";
 export * from "./api/service-bridge.ts";
 export * from "./api/view-model.ts";
 export * from "./doc-renderer/sanitize.ts";
