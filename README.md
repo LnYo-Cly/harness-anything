@@ -69,8 +69,9 @@ The product model is intentionally composable:
 - A governance surface for checking task packages, file complexity, import
   boundaries, private/public boundaries, schema contracts, and Legacy Intake
   readiness.
-- A supply-chain release gate for high-severity npm advisories and CycloneDX
-  SBOM generation.
+- A supply-chain release gate for high-severity npm advisories, CycloneDX SBOM
+  generation, OSV readiness, license policy, and the AGPL network-service
+  release-note checklist.
 - A clean-room rewrite workspace for the public Harness product surface.
 
 ## What this is not
@@ -155,6 +156,7 @@ workspace packages, not nested Git repositories.
 - [M2.5 product line map](./docs-release/m2-5-product-line.md)
 - [M2.5 GUI distribution and update](./docs-release/m2-5-gui-distribution.md)
 - [M2.5 runtime and release readiness](./docs-release/m2-5-runtime-release.md)
+- [M2.5 supply-chain and license gate](./docs-release/m2-5-supply-chain-license.md)
 - [Harness agent skill](./docs-release/harness-agent-skill.md)
 - [Minimal example project](./examples/minimal-project/)
 
@@ -176,6 +178,8 @@ Current release boundary:
 - No npm package release is claimed.
 - No signed desktop installer, notarized build, or auto-update capability is
   claimed.
+- Release artifacts are not published; future release tasks must include OSV
+  evidence, license evidence, and release artifact SBOM evidence.
 - GitHub Issues and Linear adapter packages remain M4 placeholders.
 - The full local gate is `npm run check`.
 
@@ -199,7 +203,8 @@ Expect breaking changes while the public package surface stabilizes.
 - [x] Product-line docs hardening.
 - [x] Electron browser/preview security hardening.
 - [x] Runtime/release reproducibility.
-- [ ] Supply-chain/license release gate and placeholder/dormant surface cleanup.
+- [x] Supply-chain/license release gate.
+- [ ] Placeholder/dormant surface cleanup.
 
 **Next**
 

@@ -19,6 +19,7 @@ what is shipped, what is foundation-only, and what remains planned.
 | M2.5 CLI dogfood and Legacy Intake | Foundation | `docs-release/harness-agent-skill.md` | Local workflow is usable, but remaining template/preset parity work is tracked separately before full self-host migration. |
 | M2.5 GUI/daemon foundation | Foundation | `docs-release/m2-5-gui-distribution.md` | GUI workspace, daemon API, terminal, remote tunnel, and distribution policies are public contracts/foundation slices, not a complete GUI product. |
 | M2.5 runtime/release readiness | Foundation | `docs-release/m2-5-runtime-release.md` | Source checkout, Node 24/26 CI, GUI build, and CLI package smoke are executable gates; release artifacts remain unshipped. |
+| M2.5 supply-chain/license gate | Foundation | `docs-release/m2-5-supply-chain-license.md` | npm audit, SBOM, OSV readiness, license policy, Dependabot coverage, and AGPL release-note checklist are executable or packet-checkable gates; release artifacts remain unshipped. |
 | M3-M7 | Planned | Roadmap status only | Task hierarchy, external adapters, cross-harness product line, full GUI product, and release hardening remain future work. |
 
 ## M2.5 GUI/daemon foundation
@@ -52,6 +53,7 @@ later packaging, security, and product tasks must reuse.
 - [Harness agent skill](./harness-agent-skill.md): concise operating rules for agents using the current harness surface.
 - [M2.5 GUI distribution and update](./m2-5-gui-distribution.md): distribution/update policy boundaries for desktop app and daemon work.
 - [M2.5 runtime and release readiness](./m2-5-runtime-release.md): source runtime, Node 24/26 CI, package smoke, and non-shipped release boundary.
+- [M2.5 supply-chain and license gate](./m2-5-supply-chain-license.md): OSV readiness, license policy, SBOM checks, Dependabot coverage, and AGPL release checklist.
 
 ## Release boundary
 

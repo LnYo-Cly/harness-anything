@@ -24,6 +24,7 @@ export const testTierManifest = {
     "packages/gui/test/remote-tunnel.test.ts",
     "packages/gui/test/renderer-no-node.test.ts",
     "packages/gui/test/runtime-release-readiness.test.ts",
+    "packages/gui/test/supply-chain-release-readiness.test.ts",
     "packages/gui/test/service-bridge.test.ts",
     "packages/gui/test/window-config.test.ts",
     "packages/kernel/test/contracts/extension-model.test.ts",
@@ -63,7 +64,8 @@ export const testTierManifest = {
     "packages/kernel/test/store/same-task-fifo.test.ts",
     "packages/kernel/test/store/sqlite-rebuild.test.ts",
     "tools/check-docs-release-map.test.mjs",
-    "tools/check-runtime-release-readiness.test.mjs"
+    "tools/check-runtime-release-readiness.test.mjs",
+    "tools/check-supply-chain.test.mjs"
   ]
 };
 
