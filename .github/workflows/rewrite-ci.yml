@@ -100,6 +100,18 @@ jobs:
       - run: npm run harness:check-package-policy
       - run: npm run harness:smoke-cli-package
 
+  supply-chain:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run harness:check-supply-chain
+
   gui-build:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

@@ -7,6 +7,7 @@ const expectedDocs = [
   "docs-release/m2-5-product-line.md",
   "docs-release/m2-5-gui-distribution.md",
   "docs-release/m2-5-runtime-release.md",
+  "docs-release/m2-5-supply-chain-license.md",
   "docs-release/harness-agent-skill.md"
 ];
 

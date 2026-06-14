@@ -5,6 +5,7 @@ export * from "./api/view-model.ts";
 export * from "./daemon/remote-tunnel.ts";
 export * from "./distribution/update-policy.ts";
 export * from "./distribution/runtime-release-readiness.ts";
+export * from "./distribution/supply-chain-release-readiness.ts";
 export * from "./doc-renderer/sanitize.ts";
 export * from "./main/ipc-handlers.ts";
 export * from "./main/security-policy.ts";
