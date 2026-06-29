@@ -29,7 +29,7 @@ test("SQLite task projection rebuild is deterministic after cache deletion", () 
   withTempStore((rootDir) => {
     writeIndex(rootDir, "task-1", "Task One", "active");
     writeIndex(rootDir, "task-2", "Task Two", "done");
-    writeFileSync(path.join(rootDir, "harness/planning/tasks/task-2/walkthrough.md"), "# Closeout\n");
+    writeFileSync(path.join(rootDir, "harness/planning/tasks/task-2/closeout.md"), "# Closeout\n");
 
     const first = rebuildTaskProjection({ rootDir }).rows;
     rmSync(path.join(rootDir, ".harness/cache/projections.sqlite"), { force: true });

@@ -180,10 +180,10 @@ function docEntry(sourceRoot: string, sourcePath: string, storedPath: string, fo
 
 function evidencePointers(fullPath: string, storedPath: string): LegacyIndexEntry["evidencePointers"] {
   if (!statSync(fullPath).isDirectory()) return [];
-  return ["progress.md", "review.md", "walkthrough.md"]
+  return ["progress.md", "review.md"]
     .filter((fileName) => existsSync(path.join(fullPath, fileName)))
     .map((fileName) => ({
-      kind: fileName === "review.md" ? "review" as const : fileName === "walkthrough.md" ? "walkthrough" as const : "progress" as const,
+      kind: fileName === "review.md" ? "review" as const : "progress" as const,
       path: `${storedPath}/${fileName}`,
       label: fileName
     }));

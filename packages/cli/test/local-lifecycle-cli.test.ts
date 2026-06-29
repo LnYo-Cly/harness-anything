@@ -548,7 +548,7 @@ test("CLI task-complete evaluates review, CI, and closeout readiness before sett
   withTempRoot((rootDir) => {
     writeIndex(rootDir, "task-1", "Complete Task", "in_review");
     writeReview(rootDir, "task-1", []);
-    writeFileSync(path.join(rootDir, "harness/planning/tasks/task-1/walkthrough.md"), "# Closeout\n", "utf8");
+    writeFileSync(path.join(rootDir, "harness/planning/tasks/task-1/closeout.md"), "# Closeout\n", "utf8");
 
     const passed = runJson(rootDir, ["task-complete", "task-1", "--reviewer", "reviewer-a", "--ci", "passed"]);
     assert.equal(passed.ok, true);

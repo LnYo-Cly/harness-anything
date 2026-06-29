@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Effect } from "effect";
 import { hashTaskProjectionRows, rebuildTaskProjection } from "../../src/index.ts";
@@ -86,6 +87,95 @@ test("WriteCoordinator bounds committed op ids in watermark after successful com
   });
 });
 
+test("WriteCoordinator commits self-host authored writes inside ignored nested harness repo", () => {
+  withTempStore((rootDir) => {
+    initializeGitRepo(rootDir);
+    writeFileSync(path.join(rootDir, ".gitignore"), "/harness/\n/.harness/\n", "utf8");
+    runGit(rootDir, "add", ".gitignore");
+    runGit(rootDir, "commit", "-m", "ignore private harness");
+
+    mkdirSync(path.join(rootDir, "harness"), { recursive: true });
+    initializeGitRepo(path.join(rootDir, "harness"));
+    writeFileSync(path.join(rootDir, "harness/harness.yaml"), [
+      "schema: harness-anything/v1",
+      "name: self-host-fixture",
+      "layout:",
+      "  authoredRoot: harness",
+      "  localRoot: .harness",
+      "tasks:",
+      "  root: harness/planning/tasks",
+      ""
+    ].join("\n"), "utf8");
+
+    const coordinator = makeJournaledWriteCoordinator({ rootDir });
+    Effect.runSync(coordinator.enqueue(docWrite("op-nested", "task-1", "notes.md", "nested")));
+    const report = Effect.runSync(coordinator.flush("explicit"));
+
+    assert.equal(report.watermark, "op-nested");
+    assert.equal(readFileSync(path.join(rootDir, "harness/planning/tasks/task-1/notes.md"), "utf8"), "nested");
+    assert.match(runGit(path.join(rootDir, "harness"), "log", "--oneline", "-1"), /harness write op-nested/);
+    assert.equal(runGit(rootDir, "status", "--short"), "");
+    assert.equal(existsSync(path.join(rootDir, ".harness/write-journal/watermark.json")), true);
+  });
+});
+
+test("WriteCoordinator records nested harness HEAD when self-host flush has no staged diff", () => {
+  withTempStore((rootDir) => {
+    initializeGitRepo(rootDir);
+    writeFileSync(path.join(rootDir, ".gitignore"), "/harness/\n/.harness/\n", "utf8");
+    runGit(rootDir, "add", ".gitignore");
+    runGit(rootDir, "commit", "-m", "ignore private harness");
+    const parentHead = runGit(rootDir, "rev-parse", "HEAD");
+
+    const harnessRoot = path.join(rootDir, "harness");
+    mkdirSync(path.join(harnessRoot, "planning/tasks/task-1"), { recursive: true });
+    initializeGitRepo(harnessRoot);
+    writeFileSync(path.join(harnessRoot, "harness.yaml"), [
+      "schema: harness-anything/v1",
+      "name: self-host-fixture",
+      "layout:",
+      "  authoredRoot: harness",
+      "  localRoot: .harness",
+      "tasks:",
+      "  root: harness/planning/tasks",
+      ""
+    ].join("\n"), "utf8");
+    writeFileSync(path.join(harnessRoot, "planning/tasks/task-1/notes.md"), "already committed", "utf8");
+    runGit(harnessRoot, "add", ".");
+    runGit(harnessRoot, "commit", "-m", "seed harness");
+    const nestedHead = runGit(harnessRoot, "rev-parse", "HEAD");
+    assert.notEqual(nestedHead, parentHead);
+
+    const coordinator = makeJournaledWriteCoordinator({ rootDir });
+    Effect.runSync(coordinator.enqueue(docWrite("op-noop-nested", "task-1", "notes.md", "already committed")));
+    Effect.runSync(coordinator.flush("explicit"));
+    const watermark = JSON.parse(readFileSync(path.join(rootDir, ".harness/write-journal/watermark.json"), "utf8")) as {
+      readonly lastCommitSha: string;
+    };
+
+    assert.equal(watermark.lastCommitSha, nestedHead);
+  });
+});
+
+test("WriteCoordinator fails closed when ignored authored root has no nested Git repo", () => {
+  withTempStore((rootDir) => {
+    initializeGitRepo(rootDir);
+    writeFileSync(path.join(rootDir, ".gitignore"), "/harness/\n/.harness/\n", "utf8");
+    runGit(rootDir, "add", ".gitignore");
+    runGit(rootDir, "commit", "-m", "ignore private harness");
+    mkdirSync(path.join(rootDir, "harness"), { recursive: true });
+
+    const coordinator = makeJournaledWriteCoordinator({ rootDir });
+    Effect.runSync(coordinator.enqueue(docWrite("op-ignored", "task-1", "notes.md", "ignored")));
+
+    assert.throws(
+      () => Effect.runSync(coordinator.flush("explicit")),
+      /authored root is ignored by Git but is not a nested Git repository/
+    );
+    assert.equal(existsSync(path.join(rootDir, ".harness/write-journal/watermark.json")), false);
+  });
+});
+
 function indexBody(taskId: string, title: string, status: string): string {
   return [
     "---",
@@ -109,4 +199,21 @@ function indexBody(taskId: string, title: string, status: string): string {
     `# ${title}`,
     ""
   ].join("\n");
+}
+
+function initializeGitRepo(repoRoot: string): void {
+  runGit(repoRoot, "init");
+}
+
+function runGit(repoRoot: string, ...args: ReadonlyArray<string>): string {
+  return execFileSync("git", ["-C", repoRoot, ...args], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "Harness Test",
+      GIT_AUTHOR_EMAIL: "harness-test@example.invalid",
+      GIT_COMMITTER_NAME: "Harness Test",
+      GIT_COMMITTER_EMAIL: "harness-test@example.invalid"
+    }
+  }).trim();
 }

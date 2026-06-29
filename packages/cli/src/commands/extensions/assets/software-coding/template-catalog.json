@@ -18,8 +18,8 @@
       "requiredAnchors": ["## Goal", "## Context", "## Implementation Plan", "## Verification"],
       "fallbackLocale": "en-US",
       "locales": [
-        { "locale": "zh-CN", "anchors": ["## Goal", "## Context", "## Implementation Plan", "## Verification"], "body": "# {{title}}\n\nTask Contract: harness-task v1\n\n## Goal\n\n说明本任务要完成的可验证结果。\n\n## Context\n\n记录输入背景、相关约束和不应改变的边界。\n\n## Implementation Plan\n\n- 确认现有代码和契约。\n- 以最小范围实现变更。\n- 用测试和检查验证行为。\n\n## Verification\n\n- 记录本任务需要通过的本地检查、CI 和人工审查。\n" },
-        { "locale": "en-US", "anchors": ["## Goal", "## Context", "## Implementation Plan", "## Verification"], "body": "# {{title}}\n\nTask Contract: harness-task v1\n\n## Goal\n\nDescribe the verifiable result this task must produce.\n\n## Context\n\nRecord input context, relevant constraints, and boundaries that must not change.\n\n## Implementation Plan\n\n- Inspect existing code and contracts.\n- Implement the change with minimal scope.\n- Verify behavior with tests and checks.\n\n## Verification\n\n- Record required local checks, CI, and review evidence.\n" }
+        { "locale": "zh-CN", "anchors": ["## Goal", "## Context", "## Implementation Plan", "## Verification"], "body": "# {{title}}\n\nTask Contract: harness-task v1\n\n## Brief\n\n一句话说明任务目标与范围(取代独立 brief.md)。\n\n## Goal\n\n说明本任务要完成的可验证结果。\n\n## Context\n\n记录输入背景、相关约束和不应改变的边界。\n\n## Implementation Plan\n\n- 确认现有代码和契约。\n- 以最小范围实现变更。\n- 用测试和检查验证行为。\n\n## Verification\n\n- 记录本任务需要通过的本地检查、CI 和人工审查。\n" },
+        { "locale": "en-US", "anchors": ["## Goal", "## Context", "## Implementation Plan", "## Verification"], "body": "# {{title}}\n\nTask Contract: harness-task v1\n\n## Brief\n\nOne-line statement of the task objective and scope (replaces standalone brief.md).\n\n## Goal\n\nDescribe the verifiable result this task must produce.\n\n## Context\n\nRecord input context, relevant constraints, and boundaries that must not change.\n\n## Implementation Plan\n\n- Inspect existing code and contracts.\n- Implement the change with minimal scope.\n- Verify behavior with tests and checks.\n\n## Verification\n\n- Record required local checks, CI, and review evidence.\n" }
       ]
     },
     {
@@ -149,17 +149,17 @@
       ]
     },
     {
-      "id": "planning/walkthrough",
+      "id": "planning/keep-file",
       "version": "1",
-      "documentKind": "walkthrough",
-      "slot": "task.walkthrough",
-      "materializeAs": "walkthrough.md",
-      "frontmatterSchema": "task-package/v2",
-      "requiredAnchors": ["## Walkthrough", "## Evidence"],
+      "documentKind": "note",
+      "slot": "task.keep",
+      "materializeAs": ".gitkeep",
+      "frontmatterSchema": "none",
+      "requiredAnchors": [],
       "fallbackLocale": "en-US",
       "locales": [
-        { "locale": "zh-CN", "anchors": ["## Walkthrough", "## Evidence"], "body": "# Walkthrough\n\n## Walkthrough\n\n按读者顺序解释变更如何工作。\n\n## Evidence\n\n列出测试、审查和命令输出证据。\n" },
-        { "locale": "en-US", "anchors": ["## Walkthrough", "## Evidence"], "body": "# Walkthrough\n\n## Walkthrough\n\nExplain how the change works in reader order.\n\n## Evidence\n\nList tests, reviews, and command evidence.\n" }
+        { "locale": "zh-CN", "anchors": [], "body": "" },
+        { "locale": "en-US", "anchors": [], "body": "" }
       ]
     },
     {

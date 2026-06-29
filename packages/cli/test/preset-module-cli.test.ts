@@ -55,7 +55,7 @@ test("CLI preset CRUD validates, installs, audits, and removes project presets",
 
     const audit = runJson(rootDir, ["preset", "audit"]);
     assert.equal(audit.ok, true);
-    assert.equal(audit.report.totalResolved, 9);
+    assert.equal(audit.report.totalResolved, 10);
 
     const removed = runJson(rootDir, ["preset", "uninstall", "custom-task", "--project"]);
     assert.equal(removed.ok, true);
@@ -123,14 +123,7 @@ test("CLI standard task preset materializes rich planning documents", () => {
     ]);
 
     assert.equal(created.ok, true);
-    assert.equal(created.generated.includes("brief.md"), true);
-    assert.equal(created.generated.includes("execution_strategy.md"), true);
-    assert.equal(created.generated.includes("findings.md"), true);
-    assert.equal(created.generated.includes("visual_map.md"), true);
-    assert.equal(created.generated.includes("walkthrough.md"), true);
-    assert.equal(created.generated.includes("lesson_candidates.md"), true);
-    assert.equal(created.generated.includes("long-running-task-contract.md"), true);
-    assert.match(readFileSync(path.join(rootDir, created.packagePath, "brief.md"), "utf8"), /## Objective/);
+    assert.equal(created.generated.includes("closeout.md"), true);
   });
 });
 
@@ -158,7 +151,7 @@ test("CLI new-task honors harness.yaml custom authored layout", () => {
 
     assert.equal(created.ok, true);
     assert.match(created.packagePath, /^\.harness-private\/coding-agent-harness\/planning\/tasks\/task_/u);
-    assert.equal(existsSync(path.join(rootDir, created.packagePath, "brief.md")), true);
+    assert.equal(existsSync(path.join(rootDir, created.packagePath, "closeout.md")), true);
     assert.equal(existsSync(path.join(rootDir, ".harness-local", "write-journal", "writes.jsonl")), true);
   });
 });
@@ -187,7 +180,7 @@ test("CLI new-task honors private self-host harness structure layout", () => {
 
     assert.equal(created.ok, true);
     assert.match(created.packagePath, /^\.harness-private\/coding-agent-harness\/planning\/tasks\/task_/u);
-    assert.equal(existsSync(path.join(rootDir, created.packagePath, "brief.md")), true);
+    assert.equal(existsSync(path.join(rootDir, created.packagePath, "closeout.md")), true);
   });
 });
 

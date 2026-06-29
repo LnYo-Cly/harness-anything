@@ -9,6 +9,7 @@
 # published with the open-source package.
 /.harness-private/
 /.harness/
+/harness/
 /.worktrees/
 /.gstack/
 
@@ -18,3 +19,4 @@ coverage/
 tmp/
 *.log
 *.tsbuildinfo
+.harness/

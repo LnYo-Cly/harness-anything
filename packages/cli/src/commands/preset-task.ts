@@ -28,7 +28,8 @@ export function runNewTaskWithPreset(
       return customVerticalGateResult(rootDir, "new-task", settings);
     }
 
-    const presetId = action.preset ?? settings?.defaultPreset ?? "standard-task";
+    let presetId = action.preset ?? settings?.defaultPreset ?? "standard-task";
+    if (action.longRunning) presetId = "long-running-task";
     if (presetId === "module" && !action.moduleKey) {
       return {
         ok: false,

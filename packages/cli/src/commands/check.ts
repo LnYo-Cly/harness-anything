@@ -163,8 +163,8 @@ function validateTaskPackageContracts(rootDir: string, taskDir: string, profile:
   }
 
   const status = readScalar(frontmatter, "  status");
-  if ((status === "done" || status === "in_review") && !existsSync(path.join(taskDir, "walkthrough.md")) && !existsSync(path.join(taskDir, "closeout.md"))) {
-    issues.push(profileIssue("completion-consistency", "closeout_missing", strictSeverity(strict), `${relativeTaskDir} is ${status} without closeout evidence.`, "Add walkthrough.md/closeout.md before claiming completion."));
+  if ((status === "done" || status === "in_review") && !existsSync(path.join(taskDir, "closeout.md"))) {
+    issues.push(profileIssue("completion-consistency", "closeout_missing", strictSeverity(strict), `${relativeTaskDir} is ${status} without closeout evidence.`, "Add closeout.md before claiming completion."));
   }
 
   return issues;
