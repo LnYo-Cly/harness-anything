@@ -293,7 +293,7 @@ export const VerticalDefinitionSchema = Schema.Struct({
 });
 
 export const LegacyEvidencePointerSchema = Schema.Struct({
-  kind: Schema.Literal("progress", "review", "walkthrough", "commit", "pr", "artifact", "note"),
+  kind: Schema.Literal("progress", "review", "commit", "pr", "artifact", "note"),
   path: LegacyPathSchema,
   label: OptionalString
 });
@@ -413,7 +413,7 @@ export const DocsReleasePromotionBundleSchema = Schema.Struct({
   publicFiles: Schema.Array(Schema.Struct({
     path: Schema.String,
     sha256: Schema.String,
-    kind: Schema.Literal("guide", "reference", "walkthrough", "release-note")
+    kind: Schema.Literal("guide", "reference", "release-note")
   })),
   redactionReport: PublishableProjectionSchema.fields.redactionReport
 });

@@ -96,7 +96,6 @@
                   "enum": [
                     "progress",
                     "review",
-                    "walkthrough",
                     "commit",
                     "pr",
                     "artifact",

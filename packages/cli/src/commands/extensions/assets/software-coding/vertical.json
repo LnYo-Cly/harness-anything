@@ -16,8 +16,8 @@
         { "slot": "task.progress", "templateRef": "template://planning/progress@1", "materializeAs": "progress.md", "localePolicy": { "prefer": "project", "fallback": "en-US" } },
         { "slot": "task.review", "templateRef": "template://planning/review@1", "materializeAs": "review.md", "localePolicy": { "prefer": "project", "fallback": "en-US" } },
         { "slot": "task.closeout", "templateRef": "template://planning/closeout@1", "materializeAs": "closeout.md", "localePolicy": { "prefer": "project", "fallback": "en-US" } },
-        { "slot": "task.references.index", "templateRef": "template://planning/references-index@1", "materializeAs": "references/INDEX.md", "localePolicy": { "prefer": "project", "fallback": "en-US" } },
-        { "slot": "task.artifacts.index", "templateRef": "template://planning/artifacts-index@1", "materializeAs": "artifacts/INDEX.md", "localePolicy": { "prefer": "project", "fallback": "en-US" } }
+        { "slot": "task.artifacts.keep", "templateRef": "template://planning/keep-file@1", "materializeAs": "artifacts/.gitkeep", "localePolicy": { "prefer": "project", "fallback": "en-US" } },
+        { "slot": "task.references.keep", "templateRef": "template://planning/keep-file@1", "materializeAs": "references/.gitkeep", "localePolicy": { "prefer": "project", "fallback": "en-US" } }
       ]
     }
   ],
@@ -26,8 +26,8 @@
     { "slot": "task.progress", "templateRef": "template://planning/progress@1", "materializeAs": "progress.md", "localePolicy": { "prefer": "project", "fallback": "en-US" } },
     { "slot": "task.review", "templateRef": "template://planning/review@1", "materializeAs": "review.md", "localePolicy": { "prefer": "project", "fallback": "en-US" } },
     { "slot": "task.closeout", "templateRef": "template://planning/closeout@1", "materializeAs": "closeout.md", "localePolicy": { "prefer": "project", "fallback": "en-US" } },
-    { "slot": "task.references.index", "templateRef": "template://planning/references-index@1", "materializeAs": "references/INDEX.md", "localePolicy": { "prefer": "project", "fallback": "en-US" } },
-    { "slot": "task.artifacts.index", "templateRef": "template://planning/artifacts-index@1", "materializeAs": "artifacts/INDEX.md", "localePolicy": { "prefer": "project", "fallback": "en-US" } }
+    { "slot": "task.artifacts.keep", "templateRef": "template://planning/keep-file@1", "materializeAs": "artifacts/.gitkeep", "localePolicy": { "prefer": "project", "fallback": "en-US" } },
+    { "slot": "task.references.keep", "templateRef": "template://planning/keep-file@1", "materializeAs": "references/.gitkeep", "localePolicy": { "prefer": "project", "fallback": "en-US" } }
   ],
   "checkerProfile": "software-coding-standard",
   "projectionSchemas": [

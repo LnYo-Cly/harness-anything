@@ -173,10 +173,10 @@ function forwardPathForOldDoc(relativePath) {
 
 function evidencePointers(fullPath, storedPath) {
   if (!statSync(fullPath).isDirectory()) return [];
-  return ["progress.md", "review.md", "walkthrough.md"]
+  return ["progress.md", "review.md"]
     .filter((fileName) => existsSync(path.join(fullPath, fileName)))
     .map((fileName) => ({
-      kind: fileName === "review.md" ? "review" : fileName === "walkthrough.md" ? "walkthrough" : "progress",
+      kind: fileName === "review.md" ? "review" : "progress",
       path: `${storedPath}/${fileName}`,
       label: fileName
     }));

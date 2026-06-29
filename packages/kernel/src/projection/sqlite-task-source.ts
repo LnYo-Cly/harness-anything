@@ -145,7 +145,7 @@ function closeoutReadiness(rootDir: string, taskId: string, status: ProjectionCa
   if (status === "unknown") return "missing";
   if (!isTerminalStatus(status) && status !== "in_review") return "not_required";
   const taskDir = path.join(resolveHarnessLayout(rootDir).tasksRoot, taskId);
-  if (existsSync(path.join(taskDir, "walkthrough.md")) || existsSync(path.join(taskDir, "closeout.md"))) return "ready";
+  if (existsSync(path.join(taskDir, "closeout.md"))) return "ready";
   return "missing";
 }
 

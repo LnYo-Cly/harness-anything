@@ -149,17 +149,17 @@
       ]
     },
     {
-      "id": "planning/walkthrough",
+      "id": "planning/keep-file",
       "version": "1",
-      "documentKind": "walkthrough",
-      "slot": "task.walkthrough",
-      "materializeAs": "walkthrough.md",
-      "frontmatterSchema": "task-package/v2",
-      "requiredAnchors": ["## Walkthrough", "## Evidence"],
+      "documentKind": "note",
+      "slot": "task.keep",
+      "materializeAs": ".gitkeep",
+      "frontmatterSchema": "none",
+      "requiredAnchors": [],
       "fallbackLocale": "en-US",
       "locales": [
-        { "locale": "zh-CN", "anchors": ["## Walkthrough", "## Evidence"], "body": "# Walkthrough\n\n## Walkthrough\n\n按读者顺序解释变更如何工作。\n\n## Evidence\n\n列出测试、审查和命令输出证据。\n" },
-        { "locale": "en-US", "anchors": ["## Walkthrough", "## Evidence"], "body": "# Walkthrough\n\n## Walkthrough\n\nExplain how the change works in reader order.\n\n## Evidence\n\nList tests, reviews, and command evidence.\n" }
+        { "locale": "zh-CN", "anchors": [], "body": "" },
+        { "locale": "en-US", "anchors": [], "body": "" }
       ]
     },
     {

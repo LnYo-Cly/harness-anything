@@ -443,6 +443,10 @@ function unique(values: ReadonlyArray<string>): ReadonlyArray<string> {
 }
 
 function gitErrorMessage(error: unknown): string {
+  if (typeof error === "object" && error && "code" in error && typeof (error as { readonly code?: unknown }).code === "string") {
+    const code = (error as { readonly code: string }).code;
+    if (code.length > 0) return code;
+  }
   if (typeof error === "object" && error && "stderr" in error) {
     const stderr = (error as { readonly stderr?: unknown }).stderr;
     const text = Buffer.isBuffer(stderr) ? stderr.toString("utf8") : typeof stderr === "string" ? stderr : "";
