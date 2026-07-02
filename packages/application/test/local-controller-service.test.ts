@@ -39,6 +39,19 @@ test("local controller service reads projection and writes through injected task
     const document = service.getTaskDocument({ taskId: "task-1", path: "INDEX.md" });
     assert.equal(document.ok, true);
     assert.match(document.body ?? "", /Task One/);
+    assert.deepEqual(service.getTaskDocument({ taskId: "task-1", path: "C:\\Users\\name\\secret.md" }), {
+      ok: false,
+      error: {
+        code: "invalid_payload",
+        hint: "portable document path is required."
+      }
+    });
+    assert.deepEqual(service.getTaskDocument({ taskId: "task-1", path: "notes/../INDEX.md" }), {
+      ok: true,
+      taskId: "task-1",
+      path: "INDEX.md",
+      body: document.body
+    });
 
     assert.deepEqual(await service.setTaskStatus({ taskId: "task-1", status: "active" }), { ok: true });
     assert.deepEqual(writes, ["status:task-1:active"]);

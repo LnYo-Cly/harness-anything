@@ -38,6 +38,9 @@ export function authorizeLocalApiRequest(session: LocalApiSession, request: Loca
 }
 
 export function validateProjectPath(projectRoot: string, candidatePath: string): ProjectPathDecision {
+  if (isForeignAbsolutePath(candidatePath)) {
+    return { ok: false, normalizedPath: candidatePath, reason: "path_outside_project" };
+  }
   const root = normalizeExistingPath(projectRoot);
   const candidate = normalizePossiblyMissingPath(root, candidatePath);
   if (!isInside(root, candidate)) {
@@ -47,6 +50,10 @@ export function validateProjectPath(projectRoot: string, candidatePath: string):
     return { ok: false, normalizedPath: candidate, reason: "path_is_private" };
   }
   return { ok: true, normalizedPath: candidate };
+}
+
+function isForeignAbsolutePath(inputPath: string): boolean {
+  return process.platform !== "win32" && (path.win32.isAbsolute(inputPath) || inputPath.includes("\\"));
 }
 
 export function isPrivateHarnessPath(projectRoot: string, candidatePath: string): boolean {

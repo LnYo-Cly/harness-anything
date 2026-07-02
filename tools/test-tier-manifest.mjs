@@ -10,6 +10,7 @@ export const testTierManifest = {
     "packages/kernel/test/domain/domain-status.test.ts",
     "packages/kernel/test/domain/entity-ref.test.ts",
     "packages/kernel/test/integrity/stable-hash.test.ts",
+    "packages/kernel/test/layout/portable-path.test.ts",
     "packages/kernel/test/markdown/frontmatter.test.ts",
     "packages/kernel/test/publish/idempotency.test.ts",
     "tools/run-node-tests.test.mjs"
@@ -74,6 +75,7 @@ export const testTierManifest = {
     "packages/kernel/test/store/global-committer-lock.test.ts",
     "packages/kernel/test/store/journal-idempotency.test.ts",
     "packages/kernel/test/store/payload-hash.test.ts",
+    "packages/kernel/test/store/portable-path-collision.test.ts",
     "packages/kernel/test/store/same-task-fifo.test.ts",
     "packages/kernel/test/store/sqlite-rebuild.test.ts",
     "tools/check-import-boundaries.test.mjs",

@@ -3,7 +3,14 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { TaskId } from "../domain/index.ts";
 import { readFrontmatter, readScalar } from "../markdown/frontmatter.ts";
+import { normalizeRelativeDocumentPath } from "./portable-path.ts";
+
 export { readFrontmatter, readScalar } from "../markdown/frontmatter.ts";
+export {
+  assertNoPortablePathCollisions,
+  findPortablePathCollisions,
+  normalizeRelativeDocumentPath
+} from "./portable-path.ts";
 
 export interface HarnessLayout {
   readonly rootDir: string;
@@ -294,15 +301,6 @@ export function findTaskIdByExternalRef(rootDir: string, engine: string, ref: st
     }
   }
   return null;
-}
-
-export function normalizeRelativeDocumentPath(value: string): string {
-  if (path.isAbsolute(value)) throw new Error(`absolute paths are not allowed: ${value}`);
-  const normalized = path.normalize(value);
-  if (normalized.startsWith("..") || normalized === ".") {
-    throw new Error(`path must stay inside task package: ${value}`);
-  }
-  return normalized;
 }
 
 function normalizeTaskSlug(value: string): string {
