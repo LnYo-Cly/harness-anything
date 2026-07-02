@@ -9,7 +9,7 @@ import { cliError, CliErrorCode } from "../cli/error-codes.ts";
 import type { CliResult } from "../cli/types.ts";
 import { applyCollisionReport, buildLegacyCopyPlan, readCollisionReport, writeCollisionReport } from "./migration-collision.ts";
 import { collectLegacyProvenanceWarnings } from "./legacy-provenance-verify.ts";
-import { buildScanReport, copyForwardDocs, copySource, renderIntakePlan, stripScanOnlyFields, summarize, type LegacyScanReport } from "./migration-scan.ts";
+import { buildScanReport, canonicalPath, copyForwardDocs, copySource, renderIntakePlan, stripScanOnlyFields, summarize, type LegacyScanReport } from "./migration-scan.ts";
 import type { LegacyCopySafeDocsAction, LegacyIndexAction, LegacyIntakePlanAction, LegacyScanAction, LegacyVerifyAction, MigratePlanAction, MigrateRunAction, MigrateStructureAction, MigrateVerifyAction } from "./migration-types.ts";
 
 interface LegacyIntakeSession {
@@ -416,11 +416,11 @@ function isUnsafeLegacySourcePath(sourcePath: string): boolean {
 }
 
 function isSamePath(left: string, right: string): boolean {
-  return path.resolve(left) === path.resolve(right);
+  return canonicalPath(left) === canonicalPath(right);
 }
 
 function isPathInside(parent: string, candidate: string): boolean {
-  const relativePath = path.relative(parent, candidate);
+  const relativePath = path.relative(canonicalPath(parent), canonicalPath(candidate));
   return relativePath.length > 0 && !relativePath.startsWith("..") && !path.isAbsolute(relativePath);
 }
 

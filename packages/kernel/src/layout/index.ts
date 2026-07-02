@@ -170,29 +170,50 @@ function resolveProjectRootAndConfig(rootDir: string): {
   readonly config: HarnessLayoutConfig;
 } {
   const startingRoot = path.resolve(rootDir);
-  const configLocation = findHarnessConfigLocation(startingRoot);
-  if (!configLocation) return { projectRoot: startingRoot, config: {} };
+  const discovery = findHarnessConfigLocation(startingRoot);
+  if (!discovery.location) return { projectRoot: discovery.boundaryRoot ?? startingRoot, config: {} };
   return {
-    projectRoot: configLocation.projectRoot,
-    config: readLayoutConfig(configLocation)
+    projectRoot: discovery.location.projectRoot,
+    config: readLayoutConfig(discovery.location)
   };
 }
 
-function findHarnessConfigLocation(startingRoot: string): HarnessConfigLocation | undefined {
+interface HarnessConfigDiscovery {
+  readonly location?: HarnessConfigLocation;
+  readonly boundaryRoot?: string;
+}
+
+function findHarnessConfigLocation(startingRoot: string): HarnessConfigDiscovery {
   let current = startingRoot;
   while (true) {
     const publicCandidate = path.join(current, defaultAuthoredRoot, "harness.yaml");
-    if (existsSync(publicCandidate)) return { path: publicCandidate, projectRoot: current };
+    if (existsSync(publicCandidate)) return { location: { path: publicCandidate, projectRoot: current } };
     const privateRoot = path.join(current, ".harness-private");
     const privateCandidate = path.join(privateRoot, "coding-agent-harness", "harness.yaml");
     if (existsSync(privateCandidate)) {
-      return { path: privateCandidate, projectRoot: current, structureBase: ".harness-private" };
+      return { location: { path: privateCandidate, projectRoot: current, structureBase: ".harness-private" } };
     }
-    if (existsSync(path.join(current, ".git"))) return undefined;
+    const selfHostLocation = findSelfHostConfigLocation(current);
+    if (selfHostLocation) return { location: selfHostLocation };
+    if (existsSync(path.join(current, ".git"))) return { boundaryRoot: current };
     const parent = path.dirname(current);
-    if (parent === current) return undefined;
+    if (parent === current) return {};
     current = parent;
   }
+}
+
+function findSelfHostConfigLocation(current: string): HarnessConfigLocation | undefined {
+  const configPath = path.join(current, "harness.yaml");
+  if (!existsSync(configPath)) return undefined;
+  const parent = path.dirname(current);
+  if (parent === current) return undefined;
+  if (path.basename(current) === defaultAuthoredRoot) {
+    return { path: configPath, projectRoot: parent };
+  }
+  if (path.basename(current) === "coding-agent-harness" && path.basename(parent) === ".harness-private") {
+    return { path: configPath, projectRoot: path.dirname(parent), structureBase: ".harness-private" };
+  }
+  return undefined;
 }
 
 function readLayoutConfig(location: HarnessConfigLocation): HarnessLayoutConfig {
