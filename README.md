@@ -2,22 +2,23 @@
 
 # Harness Anything
 
-**An agent task harness for long-horizon software work.**
+**The durable task layer for coding agents.**
+
+Local markdown task packages, a lifecycle your agent can't fudge, and drift you
+can actually detect — so long-horizon work survives session boundaries.
 
 <p>
-  <a href="#architecture-overview">Architecture</a> ·
-  <a href="#core-concepts">Concepts</a> ·
-  <a href="#getting-started">Getting started</a> ·
-  <a href="#command-reference">Commands</a> ·
-  <a href="#documentation">Documentation</a> ·
-  <a href="#contributing">Contributing</a>
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#recipes">Recipes</a> ·
+  <a href="#documentation">Docs</a> ·
+  <a href="#under-the-hood">Under the hood</a>
 </p>
 
 <p>
   <a href="./LICENSE"><img alt="License: AGPL-3.0-or-later" src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue"></a>
   <a href="https://github.com/FairladyZ625/harness-anything/actions/workflows/rewrite-ci.yml"><img alt="CI" src="https://github.com/FairladyZ625/harness-anything/actions/workflows/rewrite-ci.yml/badge.svg"></a>
   <a href="https://github.com/FairladyZ625/harness-anything/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/FairladyZ625/harness-anything?style=flat&logo=github&color=yellow"></a>
-  <a href="https://github.com/FairladyZ625/harness-anything/issues"><img alt="Issues" src="https://img.shields.io/github/issues/FairladyZ625/harness-anything"></a>
+  <img alt="Node 24+" src="https://img.shields.io/badge/node-24%2B-brightgreen">
   <img alt="Status: early" src="https://img.shields.io/badge/status-early%20%26%20unstable-orange">
 </p>
 
@@ -30,270 +31,269 @@
 
 ---
 
-Harness Anything gives coding agents a durable task layer: local task packages,
-governance checks, migration evidence, and a small kernel that adapters, CLIs,
-and GUIs can build on without owning lifecycle state.
+```console
+$ ha init
+✓ harness ready  ·  tasks live in ./harness/planning/tasks/ as plain markdown
 
-Agents are getting better at changing code. They still need a reliable way to
-carry work across long sessions, split tasks, preserve review evidence, and
-prove that local state has not drifted from the repository. Harness Anything
-treats that operating layer as a first-class, inspectable artifact.
+$ ha new-task --title "Add rate limiting to /api/upload" \
+      --vertical software/coding --preset standard-task
+✓ task_01JQ8F3K2M  ·  planned
 
-## What this is
+$ ha status
+  task_01JQ8F3K2M   planned     Add rate limiting to /api/upload
+  task_01JQ2A9X7P   in_review   Refactor upload MIME sniffing
+  task_01JP7Z0C4B   blocked     Migrate legacy job queue
 
-- A local-first task harness for coding-agent work.
-- A TypeScript monorepo with kernel, CLI, GUI, application, and adapter
-  packages.
-- A governance surface for checking task packages, file complexity, import
-  boundaries, private/public boundaries, schema contracts, and Legacy Intake
-  readiness.
-- A supply-chain release gate: high-severity npm advisory checks, CycloneDX
-  SBOM generation, OSV readiness, license policy, and the AGPL network-service
-  release-note checklist all run before anything is allowed to ship.
-- A clean-room rewrite workspace for the public Harness product surface.
+# …the agent writes the code, opens a PR, CI goes green…
 
-## What this is not
+$ ha task-complete task_01JQ8F3K2M --ci passed --reviewer alex
+✓ done  ·  review + CI evidence sealed to the task
 
-- Not an agent runtime, model router, or chat UI.
-- Not a replacement for Git, GitHub, or CI.
-- Not a cloud task database.
-- Not a published npm release yet. All workspace packages stay private at
-  version `0.0.0`; publication is gated behind OSV, license, and SBOM
-  evidence.
+$ ha check --post-merge
+✓ lifecycle valid    ✓ evidence intact    ✓ local state matches repo
+```
 
-## Architecture overview
+## Why
+
+Your agent nailed the task an hour ago. Now the session's compacted, the plan is
+three scrollbacks up, and *"what was I working on?"* is genuinely hard to answer.
+
+- Why should an agent's task state live in a chat transcript?
+- Why should *"is this actually done?"* mean re-reading the conversation?
+- Why should splitting, resuming, or **proving** work take anything more than a file?
+
+Coding agents are great at writing code. They're bad at remembering what they
+were doing and worse at proving it. Harness Anything fixes the second half:
+durable task packages on disk, a lifecycle that can't be hand-waved, and one
+command that tells you whether your local state still matches the repo.
+
+*Harness Anything manages its own development — the harness is its own first user.*
+
+## Highlights
+
+- **Local-first, markdown-native.** Your tasks are just files under Git — grep
+  them, diff them, review them in a PR. No database to babysit, no lock-in.
+- **A lifecycle the agent can't fudge.** Six states, validated in exactly one
+  place. "Done" means reviewed, CI-passed, and evidenced — not "the agent said so."
+- **Drift is detectable.** Every task carries typed evidence, and one command
+  proves your local state hasn't quietly diverged from the repository.
+- **Built to be built on.** A small kernel owns the rules; CLI, GUI, and
+  adapters compose on top without ever redefining them.
+
+## Quickstart
+
+> **Not on npm yet.** Harness Anything runs from source while the CLI surface
+> stabilizes. Requires **Node.js 24+**.
+
+```bash
+git clone https://github.com/FairladyZ625/harness-anything
+cd harness-anything
+npm ci
+npm run check   # typecheck, tests, governance + supply-chain gates
+```
+
+The CLI runs straight from source (Node's built-in TypeScript execution). The
+examples in this README use `ha` for readability — alias it once:
+
+```bash
+alias ha="node $(pwd)/packages/cli/src/index.ts"
+ha doctor --json    # sanity-check your environment
+```
+
+Then drive the minimal loop inside any project:
+
+```bash
+ha --root /path/to/project init             # scaffold ./harness
+ha --root /path/to/project new-task --title "First task"
+ha --root /path/to/project status
+ha --root /path/to/project check --post-merge
+```
+
+That's it — you now have durable, inspectable task state that any agent (or
+human) can pick up cold.
+
+## Recipes
+
+```bash
+# Start a task in the coding vertical, with a preset workflow
+ha new-task --title "Implement slice" --vertical software/coding --preset standard-task
+
+# Move a task's state, on the record
+ha task status set task_01JQ8F3K2M active --reason "picked up"
+
+# Close it through the review + CI gate
+ha task-complete task_01JQ8F3K2M --ci passed --reviewer alex
+
+# Capture a Git diff as evidence against a base ref
+ha git-diff --base origin/main --json
+
+# Rebuild an unfinished old task into a fresh one, with provenance
+ha new-task --from-legacy <legacy-id>
+
+# Prove local state still matches the repo
+ha check --post-merge --json
+```
+
+The CLI (`harness-anything`, alias `ha`) exposes 50+ commands across project
+setup, task creation, lifecycle, review/CI gates, migration intake, evidence,
+and an extension surface. The full catalog lives in
+[the coding-vertical guide](./docs-release/m2-coding-vertical.md).
+
+## Documentation
+
+- [Minimal loop](./docs-release/m1-minimal-loop.md) — the basic task model and post-merge check
+- [Coding vertical](./docs-release/m2-coding-vertical.md) — full command reference, doctor, legacy intake
+- [Harness agent skill](./docs-release/harness-agent-skill.md) — operating rules for agents
+- [Product line map](./docs-release/m2-5-product-line.md) · [GUI distribution](./docs-release/m2-5-gui-distribution.md) · [Runtime & release](./docs-release/m2-5-runtime-release.md) · [Supply chain & license](./docs-release/m2-5-supply-chain-license.md)
+- [Minimal example project](./examples/minimal-project/)
+
+## Under the hood
+
+<details>
+<summary><b>Architecture</b> — a small kernel, everything else consumes it</summary>
+
+<br>
 
 The kernel is the single semantic authority. It owns the domain model — task
 identity, the six-state lifecycle, external bindings, package disposition,
-closeout readiness — plus the schemas and storage ports that everything else
+closeout readiness — plus the schemas and storage ports everything else
 consumes. Lifecycle transitions are validated in exactly one place; no edge
-layer redefines what "done" means.
+layer gets to redefine what "done" means.
 
 Everything around the kernel is a consumer. The CLI parses commands and renders
 receipts, the GUI foundation maps daemon and API contracts, the application
-layer keeps controller/service orchestration out of UI code, and adapters
-collect or publish evidence at the boundary. Contracts — command receipts,
-API registries, schema definitions — derive from one canonical source rather
-than being re-declared per surface, and governance checks enforce that
-derivation stays intact.
+layer keeps orchestration out of UI code, and adapters collect or publish
+evidence at the boundary. Contracts — command receipts, API registries, schemas
+— derive from one canonical source rather than being re-declared per surface.
 
 Authored state is plain markdown under Git; generated state is a rebuildable
-local cache. The markdown task package is the source of truth, a SQLite
-projection is derived from it, and checks can always prove whether the two
-agree.
+cache. The markdown task package is the truth, a SQLite projection is derived
+from it, and checks can always prove whether the two agree.
 
-| Layer | What it does | Current status |
-| --- | --- | --- |
-| **Kernel** | Owns domain types, the six-state lifecycle, schemas, task projection, lifecycle validation, and storage ports. | Implemented in `@harness-anything/kernel`. |
-| **CLI** | Exposes local commands for init, doctor, status, checks, task operations, presets, modules, migration evidence, and Git diff evidence. | Implemented in `@harness-anything/cli`. |
-| **Application layer** | Keeps controller/service orchestration out of UI and adapter code. | Implemented in `@harness-anything/application`. |
-| **GUI foundation** | Provides the Electron desktop shell, daemon/API contracts, terminal/session policies, workspace shell model, and distribution/update policy boundary. | M2.5 GUI/daemon foundation in `@harness-anything/gui`; not a complete GUI product. |
-| **Adapters** | Connect external systems without taking ownership of harness state. | Local and Multica surfaces exist; GitHub Issues and Linear packages are explicit M4 placeholders. |
+| Layer | What it does |
+| --- | --- |
+| **Kernel** | Domain types, six-state lifecycle, schemas, task projection, lifecycle validation, storage ports. |
+| **CLI** | Local commands for init, doctor, status, checks, tasks, presets, modules, migration, and Git diff evidence. |
+| **Application** | Keeps controller/service orchestration out of UI and adapter code. |
+| **GUI foundation** | Electron shell, daemon/API contracts, session policies, distribution/update boundary. Foundation, not a finished product. |
+| **Adapters** | Connect external systems without owning harness state. |
 
-## Core concepts
+</details>
 
-- **Task package.** A markdown package under `harness/planning/tasks/` with a
-  random `task_<ULID>` identity. It is the source of truth for one unit of
-  work; slugs and titles are display metadata, not identity.
-- **Evidence.** Typed pointers (`type:path:summary`) attached to task progress,
-  review, and completion — plus dedicated evidence commands for Git diffs and
-  legacy migration. Evidence is recorded, not inferred.
-- **Binding.** A fingerprinted link between a task and an external engine
-  reference. Core binding fields are immutable after creation, so tampering
-  with an external link is detectable.
-- **Lifecycle.** Six states: `planned`, `active`, `blocked`, `in_review`,
+<details>
+<summary><b>Core concepts</b> — task package, evidence, binding, lifecycle</summary>
+
+<br>
+
+- **Task package** — a markdown package under `harness/planning/tasks/` with a
+  random `task_<ULID>` identity. It's the source of truth for one unit of work;
+  slugs and titles are display metadata, not identity.
+- **Evidence** — typed pointers (`type:path:summary`) attached to progress,
+  review, and completion, plus dedicated evidence for Git diffs and legacy
+  migration. Evidence is recorded, not inferred.
+- **Binding** — a fingerprinted link between a task and an external engine
+  reference. Core fields are immutable after creation, so tampering is detectable.
+- **Lifecycle** — six states: `planned`, `active`, `blocked`, `in_review`,
   `done`, `cancelled`. `done` and `cancelled` are terminal; follow-up work uses
-  supersede, not reopen. Archive and tombstone are package dispositions, not
-  extra states.
-- **Vertical and preset.** A vertical (like `software/coding`) defines the task
+  supersede, not reopen. Archive and tombstone are dispositions, not states.
+- **Vertical & preset** — a vertical (like `software/coding`) defines the task
   domain and its contracts; a preset (like `standard-task`) layers workflow
-  choices — templates, checks, actions — on top for a concrete use case.
-- **Module.** A registered slice of the project (key, title, source scope)
-  that tasks can target, so multi-module work stays filterable and scoped.
+  choices — templates, checks, actions — on top.
+- **Module** — a registered slice of the project that tasks can target, so
+  multi-module work stays filterable and scoped.
 
-## Getting started
+</details>
 
-Use Node.js 24 or newer.
+<details>
+<summary><b>Packages</b> — the monorepo layout</summary>
 
-```bash
-npm ci
-npm run check
-```
+<br>
 
-`npm run check` is the full local gate: typecheck, tests, governance checks,
-package smoke, and supply-chain checks. The `rewrite-ci` workflow runs the same
-public gates on Node 24 and Node 26.
-
-During development the CLI runs straight from source (Node's built-in
-TypeScript execution). Confirm your environment first:
-
-```bash
-node packages/cli/src/index.ts doctor --json
-```
-
-The minimal project loop:
-
-```bash
-node packages/cli/src/index.ts --root /path/to/project init --json
-node packages/cli/src/index.ts --root /path/to/project new-task --title "First task" --json
-node packages/cli/src/index.ts --root /path/to/project status --json
-node packages/cli/src/index.ts --root /path/to/project check --post-merge --json
-```
-
-For coding-agent work, create tasks through the coding vertical and preset
-surface, then close them through the review/CI gate:
-
-```bash
-node packages/cli/src/index.ts --root /path/to/project new-task --title "Implement slice" --vertical software/coding --preset standard-task --json
-node packages/cli/src/index.ts --root /path/to/project task-complete <task-id> --ci passed --reviewer <reviewer-id>
-```
-
-Unfinished old task state is treated as Legacy Intake evidence. Rebuild it into
-a new Harness task with provenance instead of expecting bulk conversion:
-
-```bash
-node packages/cli/src/index.ts --root /path/to/project new-task --from-legacy <legacy-id> --json
-```
-
-## Command reference
-
-The CLI is `harness-anything`, with `ha` as the short alias. It exposes 50+
-commands across these families; every command supports `--json` receipts.
-
-| Family | What it covers | Example |
-| --- | --- | --- |
-| Project setup | Initialize the harness layout; read-only environment diagnostics. | `harness-anything init --name my-project` |
-| Task creation | Create task packages, optionally through a vertical, preset, or module, or from legacy evidence. | `harness-anything new-task --title "Implement slice" --vertical software/coding --preset standard-task` |
-| Task lifecycle | Status transitions, progress with evidence, archive, supersede, delete, reopen. | `harness-anything task status set task_01ABC active --reason "work started"` |
-| Task gates | Review and completion gates tied to reviewer and CI results. | `harness-anything task-complete task_01ABC --ci passed --reviewer reviewer-id` |
-| Query and checks | Task listing with filters, harness status, governance health checks, lesson promotion. | `harness-anything check --post-merge --json` |
-| Migration and Legacy Intake | Scan, plan, index, and verify legacy state; adopt external Multica snapshots. | `harness-anything legacy verify --json` |
-| Evidence and diagnostics | Git diff evidence against a base ref; doctor. | `harness-anything git-diff --base origin/main --json` |
-| Extension surface | Templates, presets, modules, vertical validation, and the GUI launcher. | `harness-anything preset list --json` |
-
-The full command surface, receipts, and check profiles are documented in
-[M2 coding vertical](./docs-release/m2-coding-vertical.md).
-
-## Packages
-
-This repository is a single Git monorepo. Packages under `packages/` are npm
-workspace packages, not nested Git repositories. All workspace packages are
-`private: true` at version `0.0.0`; nothing is published to npm.
+One Git monorepo. Packages under `packages/` are npm workspace packages (not
+nested repos), all `private: true` at version `0.0.0` — nothing is published to
+npm yet.
 
 | Package | Purpose |
 | --- | --- |
 | `@harness-anything/kernel` | Domain model, six-state lifecycle, schemas, task projection, storage ports. |
-| `@harness-anything/cli` | Local command surface for project, task, preset, module, migration, evidence, and check workflows. |
-| `@harness-anything/application` | Shared controller/service layer used by CLI and GUI surfaces. |
-| `@harness-anything/gui` | Electron GUI foundation, daemon/API contracts, and renderer boundary. |
+| `@harness-anything/cli` | Local command surface for project, task, preset, module, migration, evidence, and checks. |
+| `@harness-anything/application` | Shared controller/service layer used by CLI and GUI. |
+| `@harness-anything/gui` | Electron GUI foundation, daemon/API contracts, renderer boundary. |
 | `@harness-anything/adapter-local` | Local adapter surface. |
 | `@harness-anything/adapter-multica` | Multica issue snapshot/adopt surface. |
-| `@harness-anything/adapter-github-issues` | M4 placeholder slot for GitHub Issues integration. |
-| `@harness-anything/adapter-linear` | M4 placeholder slot for Linear integration. |
+| `@harness-anything/adapter-github-issues` | M4 placeholder for GitHub Issues. |
+| `@harness-anything/adapter-linear` | M4 placeholder for Linear. |
 
-## Documentation
+</details>
 
-- [M1 minimal loop](./docs-release/m1-minimal-loop.md)
-- [M2 coding vertical](./docs-release/m2-coding-vertical.md)
-- [M2.5 product line map](./docs-release/m2-5-product-line.md)
-- [M2.5 GUI distribution and update](./docs-release/m2-5-gui-distribution.md)
-- [M2.5 runtime and release readiness](./docs-release/m2-5-runtime-release.md)
-- [M2.5 supply-chain and license gate](./docs-release/m2-5-supply-chain-license.md)
-- [Harness agent skill](./docs-release/harness-agent-skill.md)
-- [Minimal example project](./examples/minimal-project/)
+<details>
+<summary><b>Release boundary & roadmap</b> — what's real today</summary>
 
-Architecture decision records live in the private planning tree; the public
-docs above cover the shipped and foundation contracts.
+<br>
 
-## Current release boundary
+**Shipped:** kernel, CLI, application layer, governance checks, and Legacy
+Intake readiness (M2); GUI/daemon foundation, runtime/release reproducibility,
+and the supply-chain/license release gate (M2.5).
 
-**Shipped in this repository:**
+**Foundation, not product:** the GUI daemon contracts exist and are checked, but
+there is no finished desktop GUI, signed installer, notarized build, or
+auto-update yet.
 
-- Kernel, CLI, application layer, governance checks, behavior corpus, and
-  Legacy Intake readiness evidence (M2).
-- GUI/daemon foundation: service/API mappability, daemon API contract
-  registry, terminal session registry, durable terminal backend policy, remote
-  daemon tunnel policy, workspace shell model, and distribution/update policy
-  (M2.5).
-- Supply-chain/license release gate and runtime/release reproducibility
-  (M2.5).
+**Not shipped:** no npm publication (packages stay `private: true` at `0.0.0`;
+any future release must ship OSV, license, and SBOM evidence); GitHub Issues and
+Linear adapters are still M4 placeholders.
 
-**Foundation, not product:**
+**M2.5 GUI/daemon foundation:** public contracts exist for GUI workspace,
+daemon/API, terminal, remote tunnel, and distribution policy, but release
+artifacts remain unshipped. No npm package release is claimed.
 
-- The GUI daemon contracts exist and are checked, but there is no complete
-  desktop GUI product, signed installer, notarized build, or auto-update
-  capability.
+**Runtime and release gates:** Use Node.js 24 or newer. The source-run smoke is
+`node packages/cli/src/index.ts --json doctor`; the full local gate is
+`npm run check`. Public CI covers Node 24 and Node 26, and package smoke runs
+through `npm run harness:smoke-cli-package`. No signed desktop installer, notarized build, or auto-update capability is
+  claimed. OSV readiness and the AGPL network-service release-note checklist are tracked in the supply-chain gate.
 
-**Not shipped:**
+**Roadmap:** M2 ✓ · M2.5 ✓ · **M3** task hierarchy & relation semantics · **M4**
+external adapter implementation · **M5–M7** cross-harness product line, full GUI
+product, npm publication, release hardening.
 
-- No npm package release. Packages remain `private: true` at `0.0.0`; any
-  future release must include OSV evidence, license evidence, and release
-  artifact SBOM evidence.
-- GitHub Issues and Linear adapters remain M4 placeholders.
+Expect breaking changes while the public surface stabilizes.
 
-Expect breaking changes while the public package surface stabilizes. The full
-local gate is `npm run check`.
+</details>
 
-## Roadmap
+<details>
+<summary><b>Design principles</b> — the rules the checks enforce</summary>
 
-**M2 — coding vertical workflow** ✓
+<br>
 
-- [x] Kernel, CLI, package layout, governance checks, behavior corpus, and
-  Legacy Intake readiness evidence.
-- [x] Local smoke coverage for the Legacy Intake and private CLI package
-  artifact.
-
-**M2.5 — GUI/daemon foundation** ✓
-
-- [x] Service/API mappability, daemon API contract registry, terminal session
-  registry, durable terminal backend policy, remote daemon tunnel policy,
-  workspace shell model, and distribution/update policy.
-- [x] Product-line docs hardening.
-- [x] Electron browser/preview security hardening.
-- [x] Runtime/release reproducibility.
-- [x] Supply-chain/license release gate.
-
-**Next**
-
-- [ ] Placeholder/dormant surface cleanup before claiming self-host migration
-  readiness.
-- [ ] M3 task hierarchy and relation semantics.
-- [ ] M4 external adapter implementation after the kernel/CLI contract is
-  stable.
-- [ ] M5–M7 cross-harness product line, full GUI product surface, npm
-  publication, and release hardening.
-
-## Design principles
-
-- **Semantics live in the kernel.** Edge layers — CLI, GUI, adapters — consume
-  the domain model; they never redefine lifecycle, identity, or validation.
+- **Semantics live in the kernel.** Edge layers consume the domain model; they
+  never redefine lifecycle, identity, or validation.
 - **Contracts derive from one canonical source.** Command receipts, API
-  registries, and schemas are generated or checked against a single authority,
-  and governance checks fail when a surface drifts.
+  registries, and schemas align to a single authority; governance checks fail
+  when a surface drifts.
 - **Authored state is truth; generated state is a cache.** Markdown task
-  packages under Git are canonical; the SQLite projection is rebuildable and
-  its integrity is verifiable.
-- **Dormant code does not ship.** Placeholder surfaces are named as
-  placeholders, and release gates require evidence — OSV, license, SBOM —
-  before anything is published.
+  packages under Git are canonical; the SQLite projection is rebuildable and its
+  integrity is verifiable.
+- **Dormant code does not ship.** Placeholders are named as placeholders, and
+  release gates require evidence — OSV, license, SBOM — before anything is published.
+
+</details>
 
 ## Contributing
 
 The most useful contributions right now are sharp bug reports, failing test
-cases, architecture questions, and small documentation fixes. See
-[CONTRIBUTING.md](./CONTRIBUTING.md).
-
-Before opening a pull request:
+cases, architecture questions, and small documentation fixes. Before opening a
+pull request, run the full local gate:
 
 ```bash
 npm run check
 ```
 
-Please keep public changes out of private harness state. Do not add
+Please keep public changes out of private harness state — don't add
 `.harness-private/`, root-local agent instructions, or private planning docs to
-public commits.
+public commits. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
 
-[AGPL-3.0-or-later](./LICENSE). Harness Anything keeps the task harness open,
-including when someone offers it as a service.
+[AGPL-3.0-or-later](./LICENSE). Harness Anything stays open — including when
+someone offers it as a service.
