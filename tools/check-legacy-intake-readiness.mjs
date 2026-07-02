@@ -272,17 +272,44 @@ async function collectPublicTextFiles(root) {
   return candidates.filter((rel) => !ignoredFiles.has(rel));
 }
 
-function collectGitIgnoredFiles(root, files) {
+const gitCheckIgnoreChunkBytes = 64 * 1024;
+
+export function collectGitIgnoredFiles(root, files, options = {}) {
   if (files.length === 0) return new Set();
 
-  const result = spawnSync("git", ["-C", root, "check-ignore", "-z", "--stdin"], {
-    encoding: "utf8",
-    input: `${files.join("\0")}\0`,
-    stdio: ["pipe", "pipe", "ignore"]
-  });
-  if (result.status !== 0) return new Set();
+  const ignored = new Set();
+  const run = options.spawnSync ?? spawnSync;
+  const maxInputBytes = options.maxInputBytes ?? gitCheckIgnoreChunkBytes;
+  for (const chunk of chunkGitCheckIgnoreInput(files, maxInputBytes)) {
+    const result = run("git", ["-C", root, "check-ignore", "-z", "--stdin"], {
+      encoding: "utf8",
+      input: `${chunk.join("\0")}\0`,
+      stdio: ["pipe", "pipe", "ignore"]
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) continue;
+    for (const file of result.stdout.split("\0").filter(Boolean)) ignored.add(file);
+  }
 
-  return new Set(result.stdout.split("\0").filter(Boolean));
+  return ignored;
+}
+
+function chunkGitCheckIgnoreInput(files, maxInputBytes) {
+  const chunks = [];
+  let current = [];
+  let currentBytes = 0;
+  for (const file of files) {
+    const bytes = Buffer.byteLength(`${file}\0`, "utf8");
+    if (current.length > 0 && currentBytes + bytes > maxInputBytes) {
+      chunks.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(file);
+    currentBytes += bytes;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
 }
 
 async function collectFiles(directory) {
