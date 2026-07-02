@@ -15,7 +15,7 @@ import { isPackageDisposition } from "../domain/index.ts";
 import type { ArtifactStoreError, EngineId, ExternalRef, PackageDisposition, TaskId } from "../domain/index.ts";
 import { sha256Text } from "../integrity/stable-hash.ts";
 import { readFrontmatter, readScalar } from "../markdown/frontmatter.ts";
-import { createTaskPackagePath, findTaskIdByExternalRef, normalizeRelativeDocumentPath, resolveHarnessLayout, taskDocumentPath, taskPackagePath, validateTaskIdSyntax } from "../layout/index.ts";
+import { assertNoPortablePathCollisions, createTaskPackagePath, findTaskIdByExternalRef, normalizeRelativeDocumentPath, resolveHarnessLayout, taskDocumentPath, taskPackagePath, validateTaskIdSyntax } from "../layout/index.ts";
 
 export interface MarkdownArtifactStoreOptions {
   readonly rootDir: string;
@@ -157,6 +157,7 @@ function readDocuments(rootPath: string): ReadonlyArray<ArtifactDocument> {
   }
 
   visit(rootPath);
+  assertNoPortablePathCollisions(documents.map((document) => document.path));
   return documents.sort((left, right) => left.path.localeCompare(right.path));
 }
 

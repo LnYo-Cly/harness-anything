@@ -3,7 +3,7 @@ import path from "node:path";
 import { Effect } from "effect";
 import type { DomainStatus, EngineError, ProjectionWarning, TaskProjectionRow, WriteError } from "../../kernel/src/index.ts";
 import { isDomainStatus, isTerminalStatus, readTaskProjection } from "../../kernel/src/index.ts";
-import { taskDocumentPath as harnessTaskDocumentPath, validateTaskIdSyntax } from "../../kernel/src/layout/index.ts";
+import { normalizeRelativeDocumentPath, taskDocumentPath as harnessTaskDocumentPath, validateTaskIdSyntax } from "../../kernel/src/layout/index.ts";
 export {
   evaluateCompletionGate,
   evaluateReviewGate,
@@ -142,13 +142,14 @@ export function makeLocalControllerService(options: LocalControllerServiceOption
     },
     getTaskDocument: (payload) => {
       validateTaskId(payload.taskId);
-      validateRelativeDocumentPath(payload.path);
-      const documentPath = taskDocumentPath(rootDir, payload.taskId, payload.path);
-      if (!existsSync(documentPath)) return { ok: false, error: { code: "document_not_found", hint: payload.path } };
+      const parsed = readTaskDocumentPayload(payload);
+      if (!parsed.ok) return parsed;
+      const documentPath = taskDocumentPath(rootDir, parsed.taskId, parsed.path);
+      if (!existsSync(documentPath)) return { ok: false, error: { code: "document_not_found", hint: parsed.path } };
       return {
         ok: true,
-        taskId: payload.taskId,
-        path: payload.path,
+        taskId: parsed.taskId,
+        path: parsed.path,
         body: readFileSync(documentPath, "utf8")
       };
     },
@@ -219,7 +220,6 @@ function listKnownTaskDocuments(rootDir: string, taskId: string): ReadonlyArray<
 
 function taskDocumentPath(rootDir: string, taskId: string, documentPath: string): string {
   validateTaskId(taskId);
-  validateRelativeDocumentPath(documentPath);
   return harnessTaskDocumentPath(rootDir, taskId, documentPath);
 }
 
@@ -242,11 +242,10 @@ export function readTaskDocumentPayload(payload: unknown): { readonly ok: true; 
     return invalidPayload("path is required.");
   }
   try {
-    validateRelativeDocumentPath(payload.path);
+    return { ok: true, taskId: taskPayload.taskId, path: normalizeRelativeDocumentPath(payload.path) };
   } catch {
-    return invalidPayload("path must stay inside the task package.");
+    return invalidPayload("portable document path is required.");
   }
-  return { ok: true, taskId: taskPayload.taskId, path: payload.path };
 }
 
 export function readSetStatusPayload(payload: unknown): { readonly ok: true; readonly taskId: string; readonly status: DomainStatus } | LocalControllerFailure {
@@ -269,12 +268,6 @@ export function readAppendProgressPayload(payload: unknown): { readonly ok: true
 
 function validateTaskId(taskId: string): void {
   validateTaskIdSyntax(taskId);
-}
-
-function validateRelativeDocumentPath(documentPath: string): void {
-  if (path.isAbsolute(documentPath)) throw new Error("absolute document paths are not allowed");
-  const normalized = path.normalize(documentPath);
-  if (normalized === "." || normalized.startsWith("..")) throw new Error("document path must stay inside the task package");
 }
 
 function invalidPayload(hint: string): LocalControllerFailure {

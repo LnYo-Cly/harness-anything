@@ -6,6 +6,7 @@ import {
   readTaskDocumentPayload,
   readTaskIdPayload
 } from "../../../application/src/index.ts";
+import { normalizeRelativeDocumentPath } from "../../../kernel/src/layout/index.ts";
 import type { PreloadApiMethod } from "../preload/allowlist.ts";
 import { apiRouteContracts, deferredGuiBridgeContracts } from "./api-contract-registry.ts";
 import { validateProjectPath } from "./local-api.ts";
@@ -133,7 +134,13 @@ function validateTaskDocumentPayloadPath(rootDir: string, payload: unknown): { r
   if (typeof record.taskId !== "string" || typeof record.path !== "string") {
     return { ok: false, error: { code: "invalid_payload", hint: "taskId and path are required." } };
   }
-  const decision = validateProjectPath(rootDir, path.join("harness", "planning", "tasks", record.taskId, record.path));
+  let documentPath: string;
+  try {
+    documentPath = normalizeRelativeDocumentPath(record.path);
+  } catch {
+    return { ok: false, error: { code: "invalid_payload", hint: "Portable document path is required." } };
+  }
+  const decision = validateProjectPath(rootDir, path.join("harness", "planning", "tasks", record.taskId, documentPath));
   if (!decision.ok) {
     return {
       ok: false,

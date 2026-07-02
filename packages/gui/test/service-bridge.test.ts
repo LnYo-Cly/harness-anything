@@ -21,7 +21,11 @@ test("GUI service bridge reaches application service while enforcing document pa
 
     const rejected = await bridge.invoke("getTaskDocument", { taskId: "task-1", path: "../../../../.harness-private/review.md" }) as { readonly ok: boolean; readonly error?: { readonly code: string } };
     assert.equal(rejected.ok, false);
-    assert.equal(rejected.error?.code, "path_is_private");
+    assert.equal(rejected.error?.code, "invalid_payload");
+
+    const windowsPath = await bridge.invoke("getTaskDocument", { taskId: "task-1", path: "C:\\Users\\name\\secret.md" }) as { readonly ok: boolean; readonly error?: { readonly code: string } };
+    assert.equal(windowsPath.ok, false);
+    assert.equal(windowsPath.error?.code, "invalid_payload");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

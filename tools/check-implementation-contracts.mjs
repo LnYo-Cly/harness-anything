@@ -24,6 +24,7 @@ const expectedRuntimeTestFiles = {
     "packages/kernel/test/store/global-committer-lock.test.ts",
     "packages/kernel/test/store/crash-before-watermark.test.ts",
     "packages/kernel/test/store/payload-hash.test.ts",
+    "packages/kernel/test/store/portable-path-collision.test.ts",
     "packages/kernel/test/store/sqlite-rebuild.test.ts"
   ],
   publish: [
@@ -130,6 +131,50 @@ for (const tsconfigPath of workspaceTsconfigs) {
 }
 
 const files = await walk(path.join(root, "packages"));
+const portablePathPath = path.join(root, "packages/kernel/src/layout/portable-path.ts");
+if (!existsSync(portablePathPath)) {
+  record("kernel layout must expose a portable path contract at packages/kernel/src/layout/portable-path.ts");
+} else {
+  const portablePathText = readFileSync(portablePathPath, "utf8");
+  for (const requiredSnippet of [
+    "normalizeRelativeDocumentPath",
+    "path.posix.isAbsolute",
+    "path.win32.isAbsolute",
+    "windowsReservedName",
+    "windowsForbiddenChars",
+    "findPortablePathCollisions",
+    "toLocaleLowerCase(\"en-US\")"
+  ]) {
+    if (!portablePathText.includes(requiredSnippet)) record(`portable path contract must include ${requiredSnippet}`);
+  }
+}
+
+const portablePathTestPath = path.join(root, "packages/kernel/test/layout/portable-path.test.ts");
+if (!existsSync(portablePathTestPath)) {
+  record("portable path contract requires packages/kernel/test/layout/portable-path.test.ts");
+} else {
+  const portablePathTestText = readFileSync(portablePathTestPath, "utf8");
+  for (const requiredEvidence of [
+    "C:\\\\Users\\\\name\\\\secret.md",
+    "\\\\\\\\server\\\\share\\\\secret.md",
+    "notes\\\\progress.md",
+    "con.md",
+    "findPortablePathCollisions"
+  ]) {
+    if (!portablePathTestText.includes(requiredEvidence)) record(`portable path tests must prove: ${requiredEvidence}`);
+  }
+}
+
+const portablePathCollisionTestPath = path.join(root, "packages/kernel/test/store/portable-path-collision.test.ts");
+if (!existsSync(portablePathCollisionTestPath)) {
+  record("authored document reads require a portable path collision test");
+} else {
+  const collisionTestText = readFileSync(portablePathCollisionTestPath, "utf8");
+  if (!/readTaskPackage[\s\S]*assertNoPortablePathCollisions[\s\S]*portable path collision/.test(collisionTestText)) {
+    record("portable path collision test must prove store read and helper coverage for case-insensitive collisions");
+  }
+}
+
 const hasGuiImplementation = files.some((file) => /packages\/gui\/src\/(?:main|preload|renderer|api|terminal|doc-renderer)\//.test(relative(file)));
 const hasStoreImplementation = files.some((file) => /packages\/kernel\/src\/store\//.test(relative(file)));
 const hasPublishImplementation = files.some((file) => /packages\/(?:kernel|cli|gui)\/src\/.*publish/i.test(relative(file)));
@@ -427,6 +472,20 @@ for (const file of files) {
 
   if (!rel.startsWith("packages/cli/src/") && !rel.startsWith("packages/application/src/") && /\b(?:Effect|E|Fx)\.runPromise\w*\s*\(|\brunPromise\w*\s*\(/.test(text)) {
     record(`${rel}: Effect.runPromise* is only allowed at controller composition roots`);
+  }
+
+  if (
+    (rel === "packages/application/src/index.ts" || rel === "packages/gui/src/api/service-bridge.ts") &&
+    /function\s+validateRelativeDocumentPath|path\.isAbsolute\s*\(\s*documentPath|path\.normalize\s*\(\s*documentPath/.test(text)
+  ) {
+    record(`${rel}: controller document paths must use kernel normalizeRelativeDocumentPath instead of a local validator`);
+  }
+
+  if (
+    (rel === "packages/application/src/index.ts" || rel === "packages/gui/src/api/service-bridge.ts") &&
+    !text.includes("normalizeRelativeDocumentPath")
+  ) {
+    record(`${rel}: controller document paths must import kernel normalizeRelativeDocumentPath`);
   }
 
   if (!rel.startsWith("packages/kernel/src/store/") && !isTestOrFixture && /\.(?:writeDocument|archivePackage)\s*\(/.test(text)) {
