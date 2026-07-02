@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { sha256Text } from "../../../kernel/src/integrity/stable-hash.ts";
 import type { HarnessLayoutInput } from "../../../kernel/src/layout/index.ts";
@@ -263,12 +263,29 @@ function isSafeRelativePath(relativePath: string): boolean {
 }
 
 function isPathInside(parent: string, candidate: string): boolean {
-  const relativePath = path.relative(parent, candidate);
+  const relativePath = path.relative(canonicalPath(parent), canonicalPath(candidate));
   return relativePath === "" || isSafeRelativePath(relativePath);
 }
 
 function isSamePath(left: string, right: string): boolean {
-  return path.resolve(left) === path.resolve(right);
+  return canonicalPath(left) === canonicalPath(right);
+}
+
+export function canonicalPath(target: string): string {
+  const resolved = path.resolve(target);
+  let current = resolved;
+  let suffix = "";
+  while (true) {
+    try {
+      const real = realpathSync(current);
+      return suffix ? path.join(real, suffix) : real;
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return resolved;
+      suffix = suffix ? path.join(path.basename(current), suffix) : path.basename(current);
+      current = parent;
+    }
+  }
 }
 
 export function copySource(source: string, target: string): void {

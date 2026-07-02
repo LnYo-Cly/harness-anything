@@ -98,6 +98,38 @@ test("layout resolver does not cross a git worktree boundary to borrow parent ha
   });
 });
 
+test("layout resolver anchors at the worktree root when invoked from a subdirectory", () => {
+  withTempRoot((rootDir) => {
+    const parentConfigPath = path.join(rootDir, "harness", "harness.yaml");
+    mkdirSync(path.dirname(parentConfigPath), { recursive: true });
+    writeFileSync(parentConfigPath, "schema: harness-anything/v1\nlayout:\n  authoredRoot: harness\n", "utf8");
+    const worktreeRoot = path.join(rootDir, ".worktrees", "feature");
+    const nestedRoot = path.join(worktreeRoot, "packages", "cli");
+    mkdirSync(nestedRoot, { recursive: true });
+    writeFileSync(path.join(worktreeRoot, ".git"), "gitdir: ../../.git/worktrees/feature\n", "utf8");
+
+    const layout = resolveHarnessLayout(nestedRoot);
+
+    assert.equal(layout.rootDir, worktreeRoot);
+    assert.equal(layout.authoredRoot, path.join(worktreeRoot, "harness"));
+  });
+});
+
+test("layout resolver finds the outer project config from inside a self-hosted nested harness repo", () => {
+  withTempRoot((rootDir) => {
+    const authoredRoot = path.join(rootDir, "harness");
+    mkdirSync(path.join(authoredRoot, ".git"), { recursive: true });
+    writeFileSync(path.join(authoredRoot, "harness.yaml"), "schema: harness-anything/v1\nlayout:\n  authoredRoot: harness\n", "utf8");
+    const nestedCwd = path.join(authoredRoot, "planning", "tasks");
+    mkdirSync(nestedCwd, { recursive: true });
+
+    const layout = resolveHarnessLayout(nestedCwd);
+
+    assert.equal(layout.rootDir, rootDir);
+    assert.equal(layout.authoredRoot, authoredRoot);
+  });
+});
+
 test("legacy index schema decodes and encodes valid fixture", async () => {
   const fixture = JSON.parse(await readFile(legacyIndexValidUrl, "utf8")) as unknown;
   const decoded = Schema.decodeUnknownSync(LegacyIndexSchema)(fixture);
