@@ -1,3 +1,9 @@
+import {
+  directPtyCapability,
+  selectTerminalBackend,
+  type TerminalBackendCapability
+} from "./backend-policy.ts";
+
 export type TerminalBackend = "direct-pty" | "tmux" | "remote";
 export type TerminalSessionStatus = "active" | "idle" | "exited";
 
@@ -100,6 +106,8 @@ export interface TerminalSessionRegistryOptions {
   readonly createId?: () => string;
   readonly now?: () => string;
   readonly defaultBackend?: TerminalBackend;
+  readonly backendCapabilities?: ReadonlyArray<TerminalBackendCapability>;
+  readonly allowDirectPtyFallback?: boolean;
   readonly defaultHostLabel?: string;
   readonly scrollback?: ScrollbackConfig;
 }
@@ -115,6 +123,7 @@ export function createInMemoryTerminalSessionService(options: TerminalSessionReg
   const createId = options.createId ?? randomSessionId;
   const now = options.now ?? (() => new Date().toISOString());
   const defaultBackend = options.defaultBackend ?? "direct-pty";
+  const backendCapabilities = options.backendCapabilities ?? [directPtyCapability()];
   const defaultHostLabel = options.defaultHostLabel ?? "local";
   const scrollback = options.scrollback ?? defaultScrollback;
 
@@ -129,6 +138,17 @@ export function createInMemoryTerminalSessionService(options: TerminalSessionReg
     return session;
   }
 
+  function selectBackend(requestedBackend?: TerminalBackend): TerminalBackend | TerminalSessionFailure {
+    const selection = selectTerminalBackend({
+      requestedBackend,
+      defaultBackend,
+      capabilities: backendCapabilities,
+      allowDirectPtyFallback: options.allowDirectPtyFallback
+    });
+    if (!selection.ok) return failure(selection.error.code, selection.error.hint);
+    return selection.backend;
+  }
+
   return {
     createSession: (payload) => {
       const timestamp = now();
@@ -138,12 +158,14 @@ export function createInMemoryTerminalSessionService(options: TerminalSessionReg
         if (source.status !== "exited") {
           return failure("terminal_session_not_exited", "Only exited terminal sessions can be reopened.");
         }
+        const selectedBackend = selectBackend(payload.backend ?? source.backend);
+        if (typeof selectedBackend !== "string") return selectedBackend;
         return {
           ok: true,
           session: save({
             sessionId: createId(),
             name: payload.name ?? source.name,
-            backend: payload.backend ?? source.backend,
+            backend: selectedBackend,
             envProfileId: payload.envProfileId ?? source.envProfileId,
             hostProfileId: payload.hostProfileId ?? source.hostProfileId,
             hostLabel: payload.hostLabel ?? source.hostLabel,
@@ -158,12 +180,14 @@ export function createInMemoryTerminalSessionService(options: TerminalSessionReg
         };
       }
 
+      const selectedBackend = selectBackend(payload.backend);
+      if (typeof selectedBackend !== "string") return selectedBackend;
       return {
         ok: true,
         session: save({
           sessionId: createId(),
           name: payload.name ?? "Terminal",
-          backend: payload.backend ?? defaultBackend,
+          backend: selectedBackend,
           status: "active",
           envProfileId: payload.envProfileId,
           hostProfileId: payload.hostProfileId,
