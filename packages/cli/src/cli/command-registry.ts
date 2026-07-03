@@ -1,6 +1,7 @@
 import type { CommandRegistryEntry, ParsedCommand } from "./types.ts";
 import { commandReceiptEnvelope } from "./receipt.ts";
 import { commandReceiptContractsByKind, type CommandReceiptContract } from "./receipt-contracts.ts";
+import { optionDescription } from "./command-option-descriptions.ts";
 
 export const cliCommandName = "harness-anything";
 export const cliCommandAlias = "ha";
@@ -13,6 +14,7 @@ export type CommandParserId =
   | "new-task"
   | "decision"
   | "record"
+  | "runtime-event"
   | "status-check"
   | "migration"
   | "git-diff"
@@ -30,6 +32,7 @@ export type CommandRunnerId =
   | "new-task"
   | "decision"
   | "fact"
+  | "runtime-event"
   | "task-lifecycle"
   | "task-gates"
   | "task-query"
@@ -66,6 +69,8 @@ const commandUsages = [
   { kind: "decision-amend", usage: "decision amend <decision-id> [--title <title>] [--body <text>] [--dry-run] [--json]" },
   { kind: "decision-retire", usage: "decision retire <decision-id> [--arbiter kind:id] [--decided-at <iso>] [--dry-run] [--json]" },
   { kind: "record-fact", usage: "record fact --task <task-id> --statement <text> --source <text> [--id F-DEADBEEF] [--confidence low|medium|high] [--memory-class semantic|episodic|procedural] [--memory-tag <tag>] [--observed-at <iso>] [--dry-run] [--json]" },
+  { kind: "runtime-event-append", usage: "runtime-event append --session <session-id> --kind session|turn|step|tool|approval|interrupt|result|cost [--runtime <runtime>] [--id <event-id>] [--at <iso>] [--task <task-id>] [--turn <turn-id>] [--step <step-id>] [--tool <name>] [--approval approved|rejected|timeout|unknown] [--interrupt pause|cancel|resume|append|branch|unknown] [--result started|succeeded|failed|cancelled|unknown] [--summary <text>] [--total-tokens <n>] [--json]" },
+  { kind: "runtime-event-list", usage: "runtime-event list --session <session-id> [--json]" },
   { kind: "template-list", usage: "template list [--catalog <path>] [--json]" },
   { kind: "template-render", usage: "template render <template-ref> [--catalog <path>] [--locale zh-CN|en-US] [--json]" },
   { kind: "task-list", usage: "task list [--state <state>] [--module <key>] [--queue <queue>] [--preset <id>] [--review <state>] [--lesson [present|missing]] [--missing-materials] [--include-archived] [--search <text>] [--json]" },
@@ -126,6 +131,8 @@ const commandParserIds = {
   "decision-amend": "decision",
   "decision-retire": "decision",
   "record-fact": "record",
+  "runtime-event-append": "runtime-event",
+  "runtime-event-list": "runtime-event",
   "status-set": "core-task",
   "progress-append": "core-task",
   "task-archive": "core-task",
@@ -192,6 +199,8 @@ const commandRunnerIds = {
   "decision-amend": "decision",
   "decision-retire": "decision",
   "record-fact": "fact",
+  "runtime-event-append": "runtime-event",
+  "runtime-event-list": "runtime-event",
   "status-set": "task-lifecycle",
   "progress-append": "task-lifecycle",
   "task-archive": "task-lifecycle",
@@ -266,6 +275,8 @@ const commandSummaries = {
   "decision-amend": "Amend a decision without changing its lifecycle state.",
   "decision-retire": "Retire a decision through the decision write service.",
   "record-fact": "Record a stable task-local fact anchor through the fact write service.",
+  "runtime-event-append": "Append one structured runtime event to the local JSONL event ledger.",
+  "runtime-event-list": "Read structured runtime events for one session from the local JSONL ledger.",
   "template-list": "List available task and document templates.",
   "template-render": "Render a template reference with a selected locale.",
   "task-list": "List task packages with state, module, review, and search filters.",
@@ -332,6 +343,8 @@ const commandExamples = {
   "decision-amend": [`${cliCommandName} decision amend dec_01ABC --title "Updated title"`],
   "decision-retire": [`${cliCommandName} decision retire dec_01ABC --arbiter human:ZeyuLi`],
   "record-fact": [`${cliCommandName} record fact --task task_01ABC --statement "CLI fallback passed" --source "manual verification" --confidence high`],
+  "runtime-event-append": [`${cliCommandName} runtime-event append --session codex-session-1 --kind interrupt --runtime codex --interrupt append --summary "User appended task guidance"`],
+  "runtime-event-list": [`${cliCommandName} runtime-event list --session codex-session-1 --json`],
   "template-list": [`${cliCommandName} template list --json`],
   "template-render": [`${cliCommandName} template render template://planning/task@1 --locale zh-CN`],
   "task-list": [`${cliCommandName} task list --state active --module kernel --review missing`],
@@ -476,102 +489,4 @@ function samePath(left: ReadonlyArray<string>, right: ReadonlyArray<string>): bo
 
 function isPrefix(prefix: ReadonlyArray<string>, pathTokens: ReadonlyArray<string>): boolean {
   return prefix.length < pathTokens.length && prefix.every((token, index) => token === pathTokens[index]);
-}
-
-function optionDescription(flag: string): string {
-  const descriptions: Record<string, string> = {
-    "--add-npm-scripts": "Add npm script shortcuts during initialization.",
-    "--allow-dirty": "Allow running while the working tree has changes.",
-    "--allow-open-findings": "Allow superseding work with unresolved findings.",
-    "--allow-scripts": "Allow preset script execution.",
-    "--apply": "Apply the operation instead of planning it.",
-    "--archive": "Archive generated governance output.",
-    "--archive-field": "Set the field used for archive disposition.",
-    "--archived-by": "Record the actor archiving the task.",
-    "--arbiter": "Set the decision arbiter as agent:<id>, human:<id>, or system:<id>.",
-    "--assume-locale": "Set the assumed locale for migrated content.",
-    "--base": "Set the git base ref.",
-    "--branch": "Set the module branch.",
-    "--body": "Set authored body content for the generated decision document.",
-    "--by": "Supersede by an existing task id.",
-    "--catalog": "Use a template catalog file.",
-    "--chosen": "Set the selected decision option text.",
-    "--ci": "Set the completion CI gate result.",
-    "--claim": "Set the primary supporting claim text for a decision.",
-    "--confirm": "Confirm a destructive or relation-changing action.",
-    "--confirm-plan": "Confirm a migration plan before applying it.",
-    "--current-step": "Set the current module step.",
-    "--decided-at": "Set the decision timestamp for transition commands.",
-    "--deleted-by": "Record the actor deleting or superseding the task.",
-    "--depends-on": "Register a module dependency.",
-    "--dry-run": "Preview the operation without writing changes.",
-    "--evidence": "Attach evidence in type:path:summary format.",
-    "--evidence-relation": "Attach a decision anchor to a task or fact evidence ref as anchor:type:target:rationale; repeat for multiple relations.",
-    "--confidence": "Set fact confidence as low, medium, or high.",
-    "--force": "Force the lifecycle transition with audit metadata.",
-    "--from-legacy": "Create from a legacy task id.",
-    "--hard": "Hard-delete the selected task.",
-    "--help": "Show help output.",
-    "--id": "Set the explicit entity id when the command supports one.",
-    "--include-archived": "Include archived task packages.",
-    "--input": "Provide one script input as key=value; repeat for multiple inputs.",
-    "--json": "Emit CommandReceipt/v1 JSON.",
-    "--kernel-version": "Validate against a kernel version.",
-    "--lesson": "Filter by lesson state.",
-    "--limit": "Limit the number of planned items.",
-    "--locale": "Set generated content locale.",
-    "--long-running": "Mark the task as long-running.",
-    "--memory-class": "Classify fact memory as semantic, episodic, or procedural.",
-    "--memory-tag": "Attach a fact memory tag; repeat or comma-separate values.",
-    "--missing-materials": "Filter tasks missing required materials.",
-    "--module": "Select a registered module key; use module list to discover keys.",
-    "--module-scope": "Set the registered module source scope, such as packages/name/**.",
-    "--module-title": "Set the human-readable title for a registered module.",
-    "--name": "Set the project name written to harness.yaml.",
-    "--observed-at": "Set the observation timestamp for a fact record.",
-    "--out": "Write the generated plan to a file.",
-    "--out-dir": "Set the output directory.",
-    "--owner": "Set the module owner.",
-    "--plan": "Plan without applying changes.",
-    "--plan-only": "Create a migration plan without applying it.",
-    "--post-merge": "Run checks intended for post-merge validation.",
-    "--prefix": "Set the module id prefix.",
-    "--preset": "Select a preset id; new-task defaults to standard-task and preset list shows installed presets.",
-    "--product-line": "Attach a comma-separated product line list to a decision.",
-    "--profile": "Select a check or task profile; new-task defaults to baseline.",
-    "--project": "Use the project preset layer.",
-    "--proposed-by": "Set the decision proposer as agent:<id>, human:<id>, or system:<id>.",
-    "--purpose": "Filter script entries by declared purpose.",
-    "--question": "Set the decision question being answered.",
-    "--queue": "Filter by queue.",
-    "--reason": "Record the reason for the lifecycle change.",
-    "--rejected": "Set a rejected decision option text.",
-    "--register-module": "Register a module while creating the task.",
-    "--review": "Filter by review state.",
-    "--reviewer": "Set the reviewer id.",
-    "--risk-tier": "Set decision risk tier as low, medium, or high.",
-    "--search": "Search task metadata and prose.",
-    "--session-dir": "Set the migration session directory.",
-    "--shared": "Register a shared path for the module.",
-    "--slug": "Set the task slug.",
-    "--scope": "Set the module scope.",
-    "--soft": "Soft-delete the selected task.",
-    "--source": "Set the fact evidence source or filter extension entries by source layer.",
-    "--state": "Set or filter by state.",
-    "--statement": "Set the fact statement text.",
-    "--status": "Set the external or module status.",
-    "--strict": "Run strict checks.",
-    "--task": "Set the task id.",
-    "--text": "Progress text appended as-is (no Markdown formatting or normalization).",
-    "--title": "Set the required task title used for generated package metadata and slug.",
-    "--urgency": "Set decision urgency as low, medium, or high.",
-    "--vertical": "Select a vertical definition; new-task defaults to software/coding.",
-    "--version": "Print the installed CLI version.",
-    "--why-not": "Set the rationale for rejecting the alternative."
-  };
-  const description = descriptions[flag];
-  if (!description) {
-    throw new Error(`missing CLI help option description: ${flag}`);
-  }
-  return description;
 }
