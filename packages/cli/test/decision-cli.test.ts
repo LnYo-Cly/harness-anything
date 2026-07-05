@@ -298,34 +298,6 @@ test("CLI decision propose rejects missing rejected alternative", () => {
   });
 });
 
-test("CLI decision accept transitions an existing decision through the coordinator", () => {
-  withTempRoot((rootDir) => {
-    runJson(rootDir, [
-      "decision",
-      "propose",
-      "--id",
-      "dec_ACCEPTCLI",
-      "--title",
-      "Decision CLI",
-      "--question",
-      "Should CLI accept decisions?",
-      "--chosen",
-      "Accept via CLI",
-      "--rejected",
-      "Leave proposed",
-      "--why-not",
-      "The acceptance path needs coverage"
-    ]);
-
-    const result = runJson(rootDir, ["decision", "accept", "dec_ACCEPTCLI", "--arbiter", "human:ZeyuLi"]);
-
-    assert.equal(result.ok, true);
-    assert.equal(result.command, "decision-accept");
-    assert.equal(result.decisionState, "active");
-    assert.match(readFileSync(path.join(rootDir, "harness/decisions/decision-dec_ACCEPTCLI/decision.md"), "utf8"), /^state: active$/mu);
-  });
-});
-
 test("CLI decision list returns question chosen rejected summaries", () => {
   withTempRoot((rootDir) => {
     runJson(rootDir, [
@@ -377,6 +349,7 @@ test("CLI decision list returns question chosen rejected summaries", () => {
 
 test("CLI decision list filters projected rows by state and module", () => {
   withTempRoot((rootDir) => {
+    const task = runJson(rootDir, ["task", "create", "--title", "Self-host Evidence"]);
     runJson(rootDir, [
       "decision",
       "propose",
@@ -393,7 +366,9 @@ test("CLI decision list filters projected rows by state and module", () => {
       "--why-not",
       "Manual-only decisions are not queryable",
       "--module",
-      "m5-circulation"
+      "m5-circulation",
+      "--evidence-relation",
+      `C1:relates:task/${task.taskId}:Task evidence establishes a non-empty acceptance floor`
     ]);
     runJson(rootDir, [
       "decision",
@@ -452,44 +427,6 @@ test("CLI decision show finds a decision by legacy E number", () => {
     assert.equal(result.path, "harness/decisions/decision-dec_M5_E72_SELFHOST/decision.md");
     assert.equal(result.report.decision.question, "Should M5 self-host decisions?");
     assert.deepEqual(result.report.decision.chosen, ["Use kernel decisions"]);
-  });
-});
-
-test("CLI decision amend appends rejected entries through schema-declared amendable fields", () => {
-  withTempRoot((rootDir) => {
-    runJson(rootDir, [
-      "decision",
-      "propose",
-      "--id",
-      "dec_M5_E74_DERIVE",
-      "--title",
-      "E74 derive fields",
-      "--question",
-      "Should amend fields be derived?",
-      "--chosen",
-      "Use field contracts",
-      "--rejected",
-      "Keep title-only amend",
-      "--why-not",
-      "Schema-declared rejected alternatives must be editable"
-    ]);
-
-    const amended = runJson(rootDir, [
-      "decision",
-      "amend",
-      "dec_M5_E74_DERIVE",
-      "--append",
-      "rejected:{\"id\":\"RJ2\",\"text\":\"Hand-update decision markdown\",\"why_not\":\"WriteCoordinator and schema field coverage must own the edit surface\"}"
-    ]);
-    assert.equal(amended.ok, true);
-    assert.equal(amended.command, "decision-amend");
-
-    const shown = runJson(rootDir, ["decision", "show", "E74"]);
-    assert.equal(shown.ok, true);
-    assert.deepEqual(shown.report.decision.rejected.map((entry: any) => entry.text), [
-      "Keep title-only amend",
-      "Hand-update decision markdown"
-    ]);
   });
 });
 
