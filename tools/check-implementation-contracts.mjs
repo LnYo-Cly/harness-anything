@@ -405,8 +405,7 @@ for (const file of files) {
     record(`${rel}: store must not import engine adapter implementations`);
   }
   const allowedGitProcessImplementations = new Set([
-    "packages/kernel/src/store/local-version-control-system.ts",
-    "packages/kernel/src/store/write-journal-git.ts"
+    "packages/kernel/src/store/local-version-control-system.ts"
   ]);
   if (
     rel.startsWith("packages/kernel/src/store/") &&

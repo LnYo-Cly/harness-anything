@@ -2,8 +2,8 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { resolveEntityRootForLayout } from "./entity-root-resolver.ts";
 import type { EntityRootIntent, EntityRootResolution } from "./entity-root-resolver.ts";
-import { layoutFileSystem } from "./file-system.ts";
 import type { TaskId } from "../domain/index.ts";
+import { localLayoutFileSystem } from "../local/local-layout-file-system.ts";
 import { readFrontmatter, readScalar } from "../markdown/frontmatter.ts";
 import { normalizeRelativeDocumentPath } from "./portable-path.ts";
 
@@ -58,6 +58,7 @@ const crockfordBase32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const taskIdPattern = /^task_[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$/u;
 const defaultAuthoredRoot = "harness";
 const defaultLocalRoot = ".harness";
+const layoutFileSystem = localLayoutFileSystem;
 
 export interface HarnessLayoutOverrides {
   readonly authoredRoot?: string;
