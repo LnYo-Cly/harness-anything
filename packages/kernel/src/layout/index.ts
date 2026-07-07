@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { resolveEntityRootForLayout } from "./entity-root-resolver.ts";
 import type { EntityRootIntent, EntityRootResolution } from "./entity-root-resolver.ts";
+import { layoutFileSystem } from "./file-system.ts";
 import type { TaskId } from "../domain/index.ts";
 import { readFrontmatter, readScalar } from "../markdown/frontmatter.ts";
 import { normalizeRelativeDocumentPath } from "./portable-path.ts";
@@ -249,15 +249,15 @@ function findHarnessConfigLocation(startingRoot: string): HarnessConfigDiscovery
   let current = startingRoot;
   while (true) {
     const publicCandidate = path.join(current, defaultAuthoredRoot, "harness.yaml");
-    if (existsSync(publicCandidate)) return { location: { path: publicCandidate, projectRoot: current } };
+    if (layoutFileSystem.exists(publicCandidate)) return { location: { path: publicCandidate, projectRoot: current } };
     const privateRoot = path.join(current, ".harness-private");
     const privateCandidate = path.join(privateRoot, "coding-agent-harness", "harness.yaml");
-    if (existsSync(privateCandidate)) {
+    if (layoutFileSystem.exists(privateCandidate)) {
       return { location: { path: privateCandidate, projectRoot: current, structureBase: ".harness-private" } };
     }
     const selfHostLocation = findSelfHostConfigLocation(current);
     if (selfHostLocation) return { location: selfHostLocation };
-    if (existsSync(path.join(current, ".git"))) return { boundaryRoot: current };
+    if (layoutFileSystem.exists(path.join(current, ".git"))) return { boundaryRoot: current };
     const parent = path.dirname(current);
     if (parent === current) return {};
     current = parent;
@@ -266,7 +266,7 @@ function findHarnessConfigLocation(startingRoot: string): HarnessConfigDiscovery
 
 function findSelfHostConfigLocation(current: string): HarnessConfigLocation | undefined {
   const configPath = path.join(current, "harness.yaml");
-  if (!existsSync(configPath)) return undefined;
+  if (!layoutFileSystem.exists(configPath)) return undefined;
   const parent = path.dirname(current);
   if (parent === current) return undefined;
   if (path.basename(current) === defaultAuthoredRoot) {
@@ -279,7 +279,7 @@ function findSelfHostConfigLocation(current: string): HarnessConfigLocation | un
 }
 
 function readLayoutConfig(location: HarnessConfigLocation): HarnessLayoutConfig {
-  const lines = readFileSync(location.path, "utf8").split(/\r?\n/u);
+  const lines = layoutFileSystem.readText(location.path).split(/\r?\n/u);
   let section: "layout" | "tasks" | "structure" | undefined;
   let authoredRoot: string | undefined;
   let localRoot: string | undefined;
@@ -373,11 +373,11 @@ export function listTaskIndexPaths(input: HarnessLayoutInput): ReadonlyArray<str
 }
 
 function listTaskIndexPathsInTasksRoot(tasksRoot: string): ReadonlyArray<string> {
-  if (!existsSync(tasksRoot)) return [];
-  return readdirSync(tasksRoot, { withFileTypes: true })
+  if (!layoutFileSystem.exists(tasksRoot)) return [];
+  return layoutFileSystem.readDirents(tasksRoot)
     .filter((entry) => entry.isDirectory())
     .map((entry) => path.join(tasksRoot, entry.name, "INDEX.md"))
-    .filter((indexPath) => existsSync(indexPath))
+    .filter((indexPath) => layoutFileSystem.exists(indexPath))
     .sort();
 }
 
@@ -388,9 +388,9 @@ export function findTaskPackagePath(input: HarnessLayoutInput, taskId: TaskId): 
 function findTaskPackagePathInTasksRoot(tasksRoot: string, taskId: TaskId): string | null {
   validateTaskIdSyntax(taskId);
   const exact = path.join(tasksRoot, taskId, "INDEX.md");
-  if (existsSync(exact)) return path.dirname(exact);
+  if (layoutFileSystem.exists(exact)) return path.dirname(exact);
   for (const indexPath of listTaskIndexPathsInTasksRoot(tasksRoot)) {
-    const frontmatter = readFrontmatter(readFileSync(indexPath, "utf8")) ?? "";
+    const frontmatter = readFrontmatter(layoutFileSystem.readText(indexPath)) ?? "";
     if (readScalar(frontmatter, "task_id") === taskId) return path.dirname(indexPath);
   }
   return null;
@@ -398,7 +398,7 @@ function findTaskPackagePathInTasksRoot(tasksRoot: string, taskId: TaskId): stri
 
 export function findTaskIdByExternalRef(input: HarnessLayoutInput, engine: string, ref: string): TaskId | null {
   for (const indexPath of listTaskIndexPaths(input)) {
-    const frontmatter = readFrontmatter(readFileSync(indexPath, "utf8")) ?? "";
+    const frontmatter = readFrontmatter(layoutFileSystem.readText(indexPath)) ?? "";
     if (readScalar(frontmatter, "  engine") === engine && readScalar(frontmatter, "  ref") === ref) {
       return (readScalar(frontmatter, "task_id") || path.basename(path.dirname(indexPath))) as TaskId;
     }
