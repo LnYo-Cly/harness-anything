@@ -73,7 +73,8 @@
     "harness:check-bypass-write-boundary": "node tools/check-bypass-write-boundary.mjs",
     "harness:check-kernel-dead-exports": "node tools/check-kernel-dead-exports.mjs",
     "harness:check-relation-cycle-substrate": "node tools/check-relation-cycle-substrate.mjs",
-    "harness:check-enforcement-debt-sunset": "node tools/check-enforcement-debt-sunset.mjs"
+    "harness:check-enforcement-debt-sunset": "node tools/check-enforcement-debt-sunset.mjs",
+    "pr:doctor": "node tools/pr-doctor.mjs"
   },
   "engines": {
     "node": ">=24"
