@@ -105,6 +105,29 @@ test("concurrent daemon client startup converges on one lock owner and both clie
   });
 });
 
+test("concurrent daemon client writes serialize into linear git history", async () => {
+  await withTempRootAsync(async (rootDir) => {
+    initGitRepo(rootDir);
+    runRawJson(rootDir, ["init"], { HARNESS_DAEMON_MODE: "direct" });
+    const harnessRoot = path.join(rootDir, "harness");
+    const beforeCount = Number(git(harnessRoot, "rev-list", "--count", "HEAD"));
+
+    const [left, right] = await Promise.all([
+      runRawJsonAsync(rootDir, ["new-task", "--title", "Concurrent Daemon Write Left"], { HARNESS_DAEMON_MODE: "local", HARNESS_DAEMON_IDLE_MS: "1500" }),
+      runRawJsonAsync(rootDir, ["new-task", "--title", "Concurrent Daemon Write Right"], { HARNESS_DAEMON_MODE: "local", HARNESS_DAEMON_IDLE_MS: "1500" })
+    ]);
+
+    assert.equal(left.ok, true);
+    assert.equal(right.ok, true);
+    assert.equal(Number(git(harnessRoot, "rev-list", "--count", "HEAD")), beforeCount + 2);
+    const parentCounts = git(harnessRoot, "log", "--format=%P")
+      .split(/\r?\n/u)
+      .map((line) => line.trim().length === 0 ? 0 : line.trim().split(/\s+/u).length);
+    assert.equal(parentCounts.every((count) => count <= 1), true);
+    assert.equal(git(harnessRoot, "status", "--short"), "");
+  });
+});
+
 test("daemon start service status and stop expose productized status contract", () => {
   withTempRoot((rootDir) => {
     try {
