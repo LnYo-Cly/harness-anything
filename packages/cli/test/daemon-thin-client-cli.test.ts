@@ -99,8 +99,8 @@ test("concurrent daemon client startup converges on one lock owner and both clie
     runRawJson(rootDir, ["init"], { HARNESS_DAEMON_MODE: "direct" });
 
     const [left, right] = await Promise.all([
-      runRawJsonAsync(rootDir, ["task", "list"], { HARNESS_DAEMON_MODE: "local", HARNESS_DAEMON_IDLE_MS: "1500" }),
-      runRawJsonAsync(rootDir, ["task", "list"], { HARNESS_DAEMON_MODE: "local", HARNESS_DAEMON_IDLE_MS: "1500" })
+      runRawJsonAsync(rootDir, ["task", "list"], { HARNESS_DAEMON_MODE: "local", HARNESS_DAEMON_IDLE_MS: "10000" }),
+      runRawJsonAsync(rootDir, ["task", "list"], { HARNESS_DAEMON_MODE: "local", HARNESS_DAEMON_IDLE_MS: "10000" })
     ]);
 
     assert.equal(left.ok, true);

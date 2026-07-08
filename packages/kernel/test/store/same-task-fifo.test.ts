@@ -102,7 +102,10 @@ test("WriteCoordinator stages hard-deleted task packages and clears replay journ
     runGit(rootDir, "add", ".");
     runGit(rootDir, "commit", "-m", "seed task");
 
-    const coordinator = makeJournaledWriteCoordinator({ rootDir });
+    const coordinator = makeJournaledWriteCoordinator({
+      rootDir,
+      commitAuthor: testCommitAuthor
+    });
     Effect.runSync(coordinator.enqueue({
       opId: "op-hard-delete",
       entityId: taskEntityId("task-1"),
@@ -141,7 +144,10 @@ test("WriteCoordinator rejects hard delete for task packages with anchored facts
     runGit(rootDir, "add", ".");
     runGit(rootDir, "commit", "-m", "seed anchored task");
 
-    const coordinator = makeJournaledWriteCoordinator({ rootDir });
+    const coordinator = makeJournaledWriteCoordinator({
+      rootDir,
+      commitAuthor: testCommitAuthor
+    });
 
     assert.throws(
       () => Effect.runSync(coordinator.enqueue({
@@ -166,7 +172,10 @@ test("WriteCoordinator force-adds explicit harness paths ignored by target repo 
     runGit(rootDir, "add", ".gitignore");
     runGit(rootDir, "commit", "-m", "ignore artifacts");
 
-    const coordinator = makeJournaledWriteCoordinator({ rootDir });
+    const coordinator = makeJournaledWriteCoordinator({
+      rootDir,
+      commitAuthor: testCommitAuthor
+    });
     Effect.runSync(coordinator.enqueue(docWrite("op-ignored-artifact", "task-1", "artifacts/.gitkeep", "")));
     const report = Effect.runSync(coordinator.flush("explicit"));
 
@@ -226,7 +235,10 @@ test("WriteCoordinator commits self-host authored writes inside ignored nested h
     runGit(path.join(rootDir, "harness"), "commit", "-m", "seed nested harness");
     writeFileSync(path.join(rootDir, "harness/notes/unrelated.md"), "after\n", "utf8");
 
-    const coordinator = makeJournaledWriteCoordinator({ rootDir });
+    const coordinator = makeJournaledWriteCoordinator({
+      rootDir,
+      commitAuthor: testCommitAuthor
+    });
     Effect.runSync(coordinator.enqueue(docWrite("op-nested", "task-1", "notes.md", "nested")));
     const report = Effect.runSync(coordinator.flush("explicit"));
 
@@ -360,6 +372,11 @@ function indexBody(taskId: string, title: string, status: string): string {
 function initializeGitRepo(repoRoot: string): void {
   runGit(repoRoot, "init");
 }
+
+const testCommitAuthor = {
+  name: "Harness Test",
+  email: "harness@example.test"
+};
 
 function caseVariantPath(inputPath: string): string | null {
   const basename = path.basename(inputPath);
