@@ -148,8 +148,78 @@ async function invokeDaemonGuiRoute(
       }
     };
   }
-  const receipt = await request(route, payload);
+  const validation = validateGuiRoutePayload(route, payload);
+  if (!validation.ok) return validation.failure;
+  const receipt = await request(route, validation.payload);
   return unwrapDaemonReceipt(receipt);
+}
+
+type PayloadValidation = { readonly ok: true; readonly payload: unknown } | { readonly ok: false; readonly failure: JsonObject };
+const domainStatuses = new Set(["planned", "active", "blocked", "in_review", "done", "cancelled"]);
+
+export function validateGuiRoutePayload(route: ApiRouteContract, payload: unknown): PayloadValidation {
+  switch (route.inputSchemaId) {
+    case "gui.empty/v1":
+      return payload === undefined || payload === null || isRecord(payload)
+        ? { ok: true, payload }
+        : invalidPayload("empty payload is required.");
+    case "application.task-id-payload/v1":
+      return validateTaskIdPayload(payload);
+    case "application.task-document-payload/v1":
+      return validateTaskDocumentPayload(payload);
+    case "application.set-task-status-payload/v1":
+      return validateSetStatusPayload(payload);
+    case "application.append-task-progress-payload/v1":
+      return validateAppendProgressPayload(payload);
+    default:
+      return { ok: true, payload };
+  }
+}
+
+function validateTaskIdPayload(payload: unknown): PayloadValidation {
+  if (!isRecord(payload) || typeof payload.taskId !== "string") return invalidPayload("taskId is required.");
+  if (!isValidTaskId(payload.taskId)) return invalidPayload("taskId is invalid.");
+  return { ok: true, payload };
+}
+
+function validateTaskDocumentPayload(payload: unknown): PayloadValidation {
+  const taskPayload = validateTaskIdPayload(payload);
+  if (!taskPayload.ok) return taskPayload;
+  if (!isRecord(payload) || typeof payload.path !== "string") return invalidPayload("path is required.");
+  return { ok: true, payload };
+}
+
+function validateSetStatusPayload(payload: unknown): PayloadValidation {
+  const taskPayload = validateTaskIdPayload(payload);
+  if (!taskPayload.ok) return taskPayload;
+  if (!isRecord(payload) || typeof payload.status !== "string" || !domainStatuses.has(payload.status)) {
+    return invalidPayload("valid status is required.");
+  }
+  return { ok: true, payload };
+}
+
+function validateAppendProgressPayload(payload: unknown): PayloadValidation {
+  const taskPayload = validateTaskIdPayload(payload);
+  if (!taskPayload.ok) return taskPayload;
+  if (!isRecord(payload) || typeof payload.text !== "string" || payload.text.length === 0) return invalidPayload("text is required.");
+  return { ok: true, payload };
+}
+
+function invalidPayload(hint: string): PayloadValidation {
+  return {
+    ok: false,
+    failure: {
+      ok: false,
+      error: {
+        code: "invalid_payload",
+        hint
+      }
+    }
+  };
+}
+
+function isValidTaskId(taskId: string): boolean {
+  return taskId.length > 0 && !taskId.includes("/") && !taskId.includes("..");
 }
 
 function unwrapDaemonReceipt(receipt: JsonObject): unknown {
