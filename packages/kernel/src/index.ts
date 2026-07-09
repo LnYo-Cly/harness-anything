@@ -39,6 +39,9 @@ export {
   TaskReleaseNotHolderError,
   isTaskHolderError,
   makeTaskHolderService,
+  runtimeEventActorFromTaskHolderPrincipal,
+  taskHolderActor,
+  taskHolderExecutorFromJournalActor,
   taskHolderPrincipalFromActor,
   taskHolderPrincipalFromJournalActor
 } from "./local/task-holder-state.ts";
@@ -46,6 +49,8 @@ export type {
   TaskHolderAcquiredVia,
   TaskHolderClaimResult,
   TaskHolderCredential,
+  TaskHolderExecutor,
+  TaskHolderPersonPrincipal,
   TaskHolderPrincipal,
   TaskHolderRecord,
   TaskHolderReleaseResult,

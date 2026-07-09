@@ -73,6 +73,28 @@ test("CLI failed command results append failed command events", () => {
   });
 });
 
+test("CLI task transition runtime event records dual-axis actor", () => {
+  withTempRoot((rootDir) => {
+    const created = runJson(rootDir, ["new-task", "--title", "Transition Actor Task"]);
+    const sessionId = "codex-transition-actor";
+    const transitioned = runJson(rootDir, ["task", "transition", created.taskId, "active"], true, {
+      CODEX_SESSION_ID: sessionId,
+      CODEX_THREAD_ID: "",
+      HARNESS_ACTOR: "agent:codex-cli"
+    });
+    const ledgerPath = path.join(rootDir, ".harness/generated/runtime-events", `${sessionId}.jsonl`);
+    const events = readJsonl(ledgerPath);
+
+    assert.equal(transitioned.ok, true);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].tool.toolName, "status-set");
+    assert.equal(events[0].session.taskId, created.taskId);
+    assert.equal(events[0].actor.principal.personId, "codex-cli");
+    assert.deepEqual(events[0].actor.executor, { kind: "agent", id: "codex-cli" });
+    assert.equal(events[0].actor.responsibleHuman, "person:codex-cli");
+  });
+});
+
 test("CLI parse failures append safe failed command events", () => {
   withTempRoot((rootDir) => {
     const sessionId = "codex-w2-parse-failure";
@@ -213,7 +235,14 @@ function runJson(
   try {
     const stdout = execFileSync(process.execPath, [cliEntry, "--root", rootDir, "--json", ...args], {
       encoding: "utf8",
-      env: { ...process.env, ...cleanRuntimeEnv, ...env }
+      env: {
+        ...process.env,
+        ...cleanRuntimeEnv,
+        HARNESS_ACTOR: "human:tester",
+        HARNESS_GIT_AUTHOR_NAME: "Harness Tester",
+        HARNESS_GIT_AUTHOR_EMAIL: "tester@example.test",
+        ...env
+      }
     });
     return unwrapCommandReceipt(JSON.parse(stdout) as Record<string, any>);
   } catch (error) {

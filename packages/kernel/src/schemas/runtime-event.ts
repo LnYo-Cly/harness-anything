@@ -10,25 +10,34 @@ import {
 const OptionalString = Schema.optional(Schema.String);
 const OptionalNumber = Schema.optional(Schema.Number);
 
-const RuntimeEventActorSchema = Schema.Struct({
+const RuntimeEventPersonPrincipalSchema = Schema.Struct({
   personId: Schema.String,
-  displayName: Schema.String,
+  displayName: OptionalString,
   primaryEmail: OptionalString,
-  providerId: Schema.String,
-  credential: Schema.Struct({
+  providerId: OptionalString,
+  credential: Schema.optional(Schema.Struct({
     kind: Schema.String,
     issuer: Schema.String,
     subject: Schema.String
-  })
+  }))
+});
+
+const RuntimeEventActorSchema = Schema.Struct({
+  principal: RuntimeEventPersonPrincipalSchema,
+  executor: Schema.NullOr(Schema.Struct({
+    kind: Schema.Literal("agent"),
+    id: Schema.String
+  })),
+  responsibleHuman: Schema.String
 });
 
 const RuntimeEventActorAxesSchema = Schema.Struct({
-  principal: Schema.NullOr(RuntimeEventActorSchema),
+  principal: Schema.NullOr(RuntimeEventPersonPrincipalSchema),
   executor: Schema.NullOr(Schema.Struct({
     runtime: Schema.Union(CurrentSessionRuntimeSchema, Schema.Literal("unknown")),
     sessionId: OptionalString
   })),
-  responsibleHuman: Schema.NullOr(RuntimeEventActorSchema)
+  responsibleHuman: Schema.NullOr(RuntimeEventPersonPrincipalSchema)
 });
 
 export const RuntimeEventRecordSchema = Schema.Struct({

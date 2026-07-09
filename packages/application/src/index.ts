@@ -21,6 +21,9 @@ export {
   TaskReleaseNotHolderError,
   isTaskHolderError,
   makeTaskHolderService,
+  runtimeEventActorFromTaskHolderPrincipal,
+  taskHolderActor,
+  taskHolderExecutorFromJournalActor,
   taskHolderPrincipalFromActor,
   taskHolderPrincipalFromJournalActor
 } from "../../kernel/src/index.ts";
@@ -58,6 +61,8 @@ export type {
   TaskHolderAcquiredVia,
   TaskHolderClaimResult,
   TaskHolderCredential,
+  TaskHolderExecutor,
+  TaskHolderPersonPrincipal,
   TaskHolderPrincipal,
   TaskHolderRecord,
   TaskHolderReleaseResult,

@@ -7,13 +7,16 @@ import {
   TaskClaimCollisionError,
   TaskLeaseRequiredError,
   makeTaskHolderService,
+  taskHolderActor,
   type TaskHolderPrincipal,
   type TaskHolderRecord
 } from "../src/index.ts";
 
 const taskId = "task_01KX19GEKWMEJNGSMRT6JJH6HY";
-const alice = { principalId: "alice", displayName: "Alice" } satisfies TaskHolderPrincipal;
-const bob = { principalId: "bob", displayName: "Bob" } satisfies TaskHolderPrincipal;
+const alice = taskHolderActor({ personId: "alice", displayName: "Alice" }, null) satisfies TaskHolderPrincipal;
+const aliceCodex = taskHolderActor({ personId: "alice", displayName: "Alice" }, { kind: "agent", id: "codex" }) satisfies TaskHolderPrincipal;
+const aliceClaude = taskHolderActor({ personId: "alice", displayName: "Alice" }, { kind: "agent", id: "claude-code" }) satisfies TaskHolderPrincipal;
+const bob = taskHolderActor({ personId: "bob", displayName: "Bob" }, null) satisfies TaskHolderPrincipal;
 
 test("claim collision exposes current holder and lease expiry", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "ha-task-holder-"));
@@ -36,6 +39,24 @@ test("claim collision exposes current holder and lease expiry", async () => {
         return true;
       }
     );
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("same person with a different executor renews the lease instead of colliding", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "ha-task-holder-"));
+  let now = new Date("2026-07-10T00:00:00.000Z");
+  try {
+    const service = makeTaskHolderService({ rootInput: rootDir, now: () => now });
+
+    await service.claim({ taskId, principal: aliceCodex, ttlMs: 60_000 });
+    now = new Date("2026-07-10T00:00:10.000Z");
+    const renewed = await service.claim({ taskId, principal: aliceClaude, ttlMs: 60_000 });
+
+    assert.deepEqual(renewed.effectiveHolder, aliceClaude);
+    assert.equal(renewed.leaseExpiresAt, "2026-07-10T00:01:10.000Z");
+    assert.equal(renewed.orphan, false);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -121,6 +142,8 @@ test("holder record stays in local runtime state with acquiredVia claim", async 
     assert.equal(record.schema, "task-holder/v1");
     assert.equal(record.acquiredVia, "claim");
     assert.deepEqual(record.holder, alice);
+    assert.equal(record.holder?.executor, null);
+    assert.equal(record.holder?.responsibleHuman, "person:alice");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

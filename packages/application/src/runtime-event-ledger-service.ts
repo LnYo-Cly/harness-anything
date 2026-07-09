@@ -109,7 +109,7 @@ function toRuntimeEventRecord(
     eventId: id,
     recordedAt: input.recordedAt ?? timestamp(),
     kind: input.kind,
-    ...(input.actor ? { actor: input.actor } : {}),
+    ...(input.actor ? { actor: normalizeRuntimeEventActor(input.actor) } : {}),
     ...(input.actorAxes ? { actorAxes: input.actorAxes } : {}),
     session: {
       sessionId: input.session.sessionId,
@@ -204,7 +204,7 @@ function readRuntimeEventSession(
 function decodeRuntimeEventLine(line: string, sessionId: string, lineNumber: number): RuntimeEventRecord {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(line);
+    parsed = normalizeRuntimeEventRecord(JSON.parse(line) as unknown);
   } catch (error) {
     throw new Error(`invalid JSONL line ${lineNumber}: ${runtimeEventErrorMessage(error)}`);
   }
@@ -213,6 +213,35 @@ function decodeRuntimeEventLine(line: string, sessionId: string, lineNumber: num
     throw new Error(`event line ${lineNumber} belongs to session ${decoded.session.sessionId}`);
   }
   return decoded;
+}
+
+function normalizeRuntimeEventRecord(value: unknown): unknown {
+  if (!isRecord(value) || !isRecord(value.actor) || isRecord(value.actor.principal)) return value;
+  const actor = value.actor;
+  if (typeof actor.personId !== "string") return value;
+  return {
+    ...value,
+    actor: {
+      principal: actor,
+      executor: null,
+      responsibleHuman: `person:${actor.personId}`
+    }
+  };
+}
+
+function normalizeRuntimeEventActor(actor: unknown): RuntimeEventRecord["actor"] | undefined {
+  if (!isRecord(actor)) return undefined;
+  if (isRecord(actor.principal)) return actor as unknown as RuntimeEventRecord["actor"];
+  if (typeof actor.personId !== "string") return undefined;
+  return {
+    principal: actor as unknown as NonNullable<RuntimeEventRecord["actor"]>["principal"],
+    executor: null,
+    responsibleHuman: `person:${actor.personId}`
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function resolveRuntimeEventLedgerPath(rootInput: HarnessLayoutInput, sessionId: string): { readonly absolutePath: string; readonly relativePath: string } {

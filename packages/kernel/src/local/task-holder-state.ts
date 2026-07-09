@@ -12,12 +12,23 @@ export interface TaskHolderCredential {
   readonly subject: string;
 }
 
-export interface TaskHolderPrincipal {
-  readonly principalId: string;
+export interface TaskHolderPersonPrincipal {
+  readonly personId: string;
   readonly displayName?: string;
   readonly primaryEmail?: string;
   readonly providerId?: string;
   readonly credential?: TaskHolderCredential;
+}
+
+export interface TaskHolderExecutor {
+  readonly kind: "agent";
+  readonly id: string;
+}
+
+export interface TaskHolderPrincipal {
+  readonly principal: TaskHolderPersonPrincipal;
+  readonly executor: TaskHolderExecutor | null;
+  readonly responsibleHuman: string;
 }
 
 export interface TaskHolderRecord {
@@ -58,7 +69,7 @@ export class TaskClaimCollisionError extends Error {
   readonly leaseExpiresAt: string;
 
   constructor(input: { readonly taskId: string; readonly holder: TaskHolderPrincipal; readonly leaseExpiresAt: string }) {
-    super(`task ${input.taskId} is already claimed by ${input.holder.principalId} until ${input.leaseExpiresAt}`);
+    super(`task ${input.taskId} is already claimed by ${input.holder.principal.personId} until ${input.leaseExpiresAt}`);
     this.name = "TaskClaimCollisionError";
     this.taskId = input.taskId;
     this.holder = input.holder;
@@ -82,11 +93,11 @@ export class TaskLeaseRequiredError extends Error {
     readonly orphan: boolean;
   }) {
     const current = input.holder
-      ? `current holder ${input.holder.principalId} until ${input.leaseExpiresAt ?? "unknown"}`
+      ? `current holder ${input.holder.principal.personId} until ${input.leaseExpiresAt ?? "unknown"}`
       : input.orphan
         ? "current holder lease is orphaned"
         : "no current holder";
-    super(`task ${input.taskId} requires an active lease for ${input.principal.principalId}; ${current}`);
+    super(`task ${input.taskId} requires an active lease for ${input.principal.principal.personId}; ${current}`);
     this.name = "TaskLeaseRequiredError";
     this.taskId = input.taskId;
     this.principal = input.principal;
@@ -112,11 +123,11 @@ export class TaskReleaseNotHolderError extends Error {
     readonly orphan: boolean;
   }) {
     const current = input.holder
-      ? `current holder ${input.holder.principalId} until ${input.leaseExpiresAt ?? "unknown"}`
+      ? `current holder ${input.holder.principal.personId} until ${input.leaseExpiresAt ?? "unknown"}`
       : input.orphan
         ? "current holder lease is orphaned"
         : "no current holder";
-    super(`task ${input.taskId} is not held by ${input.principal.principalId}; ${current}`);
+    super(`task ${input.taskId} is not held by ${input.principal.principal.personId}; ${current}`);
     this.name = "TaskReleaseNotHolderError";
     this.taskId = input.taskId;
     this.principal = input.principal;
@@ -233,23 +244,54 @@ export function taskHolderPrincipalFromActor(input: {
   readonly primaryEmail?: string;
   readonly providerId?: string;
   readonly resolvedCredential?: TaskHolderCredential;
-}): TaskHolderPrincipal {
-  return {
-    principalId: input.personId,
+}, options: { readonly executor?: TaskHolderExecutor | null } = {}): TaskHolderPrincipal {
+  const principal = {
+    personId: input.personId,
     ...(input.displayName ? { displayName: input.displayName } : {}),
     ...(input.primaryEmail ? { primaryEmail: input.primaryEmail } : {}),
     ...(input.providerId ? { providerId: input.providerId } : {}),
     ...(input.resolvedCredential ? { credential: input.resolvedCredential } : {})
   };
+  return taskHolderActor(principal, options.executor ?? null);
 }
 
 export function taskHolderPrincipalFromJournalActor(input: {
   readonly kind: "agent" | "human" | "system";
   readonly id: string;
 }): TaskHolderPrincipal {
-  return {
-    principalId: input.id,
+  return taskHolderActor({
+    personId: input.id,
     displayName: `${input.kind}:${input.id}`
+  }, taskHolderExecutorFromJournalActor(input));
+}
+
+export function taskHolderExecutorFromJournalActor(input: {
+  readonly kind: "agent" | "human" | "system";
+  readonly id: string;
+}): TaskHolderExecutor | null {
+  return input.kind === "agent" ? { kind: "agent", id: input.id } : null;
+}
+
+export function taskHolderActor(
+  principal: TaskHolderPersonPrincipal,
+  executor: TaskHolderExecutor | null
+): TaskHolderPrincipal {
+  return {
+    principal,
+    executor,
+    responsibleHuman: `person:${principal.personId}`
+  };
+}
+
+export function runtimeEventActorFromTaskHolderPrincipal(input: TaskHolderPrincipal): {
+  readonly principal: TaskHolderPersonPrincipal;
+  readonly executor: TaskHolderExecutor | null;
+  readonly responsibleHuman: string;
+} {
+  return {
+    principal: input.principal,
+    executor: input.executor,
+    responsibleHuman: input.responsibleHuman
   };
 }
 
@@ -320,7 +362,7 @@ function normalizeTtlMs(value: number): number {
 }
 
 function samePrincipal(left: TaskHolderPrincipal, right: TaskHolderPrincipal): boolean {
-  return left.principalId === right.principalId;
+  return left.principal.personId === right.principal.personId;
 }
 
 function holderVersion(at: string): string {

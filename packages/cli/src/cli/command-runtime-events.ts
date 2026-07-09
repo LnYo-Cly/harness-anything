@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { runtimeEventActorFromTaskHolderPrincipal, taskHolderPrincipalFromJournalActor } from "../../../application/src/index.ts";
 import { runtimeEventPolicyForAction } from "./command-event-policy.ts";
 import { cliError, CliErrorCode } from "./error-codes.ts";
 import { actionTaskId } from "./parse-args.ts";
@@ -13,9 +14,11 @@ export function appendCommandRuntimeEvent(
   if (runtimeEventPolicyForAction(command.action) !== "auto") return Effect.succeed(result);
   const entityRefs = eventEntityRefs(command.action, result);
   const errorCode = result.ok ? undefined : result.error?.code;
+  const actor = commandRuntimeEventActor(context);
   return context.currentSessionProbe.currentSession.pipe(
     Effect.flatMap((session) => context.runtimeEventLedgerService.append({
       kind: "result",
+      ...(actor ? { actor } : {}),
       session: {
         sessionId: session.sessionId,
         runtime: session.runtime,
@@ -60,4 +63,12 @@ function eventEntityRefs(
     ...(decisionId ? { decisionId } : {}),
     ...(factRef ? { factRef } : {})
   };
+}
+
+function commandRuntimeEventActor(context: CommandRunnerContext) {
+  try {
+    return runtimeEventActorFromTaskHolderPrincipal(taskHolderPrincipalFromJournalActor(context.actorAttribution().actor));
+  } catch {
+    return undefined;
+  }
 }

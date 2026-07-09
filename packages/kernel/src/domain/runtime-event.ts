@@ -16,21 +16,32 @@ export interface RuntimeEventActorCredential {
   readonly subject: string;
 }
 
-export interface RuntimeEventActor {
+export interface RuntimeEventPersonPrincipal {
   readonly personId: string;
-  readonly displayName: string;
+  readonly displayName?: string;
   readonly primaryEmail?: string;
-  readonly providerId: string;
-  readonly credential: RuntimeEventActorCredential;
+  readonly providerId?: string;
+  readonly credential?: RuntimeEventActorCredential;
+}
+
+export interface RuntimeEventExecutor {
+  readonly kind: "agent";
+  readonly id: string;
+}
+
+export interface RuntimeEventActor {
+  readonly principal: RuntimeEventPersonPrincipal;
+  readonly executor: RuntimeEventExecutor | null;
+  readonly responsibleHuman: string;
 }
 
 export interface RuntimeEventActorAxes {
-  readonly principal: RuntimeEventActor | null;
+  readonly principal: RuntimeEventPersonPrincipal | null;
   readonly executor: {
     readonly runtime: RuntimeEventRuntime | "unknown";
     readonly sessionId?: string;
   } | null;
-  readonly responsibleHuman: RuntimeEventActor | null;
+  readonly responsibleHuman: RuntimeEventPersonPrincipal | null;
 }
 
 export interface RuntimeEventRecord {

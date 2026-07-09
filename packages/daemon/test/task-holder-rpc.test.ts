@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { LocalControllerService } from "../../application/src/index.ts";
+import type { LocalControllerService, RuntimeEventAppendInput } from "../../application/src/index.ts";
 import { makeTaskHolderService } from "../../application/src/index.ts";
 import { createInMemoryTerminalSessionService } from "../../gui/src/terminal/session-registry.ts";
 import {
@@ -27,22 +27,57 @@ test("task holder RPC claims, reports collisions with holder and expiry, and rel
     assert.equal(claimed.ok, true);
     assert.equal(claimed.command, "repo.task.claim");
     assert.equal(claimed.details.data.leaseExpiresAt, "2026-07-10T00:01:00.000Z");
-    assert.equal(claimed.details.data.effectiveHolder.principalId, "person_alice");
+    assert.equal(claimed.details.data.effectiveHolder.principal.personId, "person_alice");
+    assert.equal(claimed.details.data.effectiveHolder.executor, null);
+    assert.equal(claimed.details.data.effectiveHolder.responsibleHuman, "person:person_alice");
 
     const collision = resultReceipt(await maint.handle(taskHolderRequest("repo.task.claim", taskId, { ttlMs: 60_000 })));
     assert.equal(collision.ok, false);
     assert.equal(collision.error?.code, "task_claim_collision");
-    assert.equal(collision.details.holder.principalId, "person_alice");
+    assert.equal(collision.details.holder.principal.personId, "person_alice");
     assert.equal(collision.details.leaseExpiresAt, "2026-07-10T00:01:00.000Z");
 
     const holder = resultReceipt(await maint.handle(taskHolderRequest("repo.task.holder", taskId)));
     assert.equal(holder.ok, true);
-    assert.equal(holder.details.data.effectiveHolder.principalId, "person_alice");
+    assert.equal(holder.details.data.effectiveHolder.principal.personId, "person_alice");
 
     const released = resultReceipt(await alice.handle(taskHolderRequest("repo.task.release", taskId)));
     assert.equal(released.ok, true);
-    assert.equal(released.details.data.previousHolder.principalId, "person_alice");
+    assert.equal(released.details.data.previousHolder.principal.personId, "person_alice");
     assert.equal(released.details.data.effectiveHolder, null);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("task holder RPC records asserted executor and responsible human in holder events", async () => {
+  const rootDir = createHarnessRoot();
+  const events: RuntimeEventAppendInput[] = [];
+  try {
+    const taskId = "task_01KX19GEKWMEJNGSMRT6JJH6HY";
+    const { alice } = makeActorServers(rootDir, emptyLocalController(), (event) => {
+      events.push(event);
+      return Promise.resolve();
+    });
+    await hello(alice);
+
+    const executor = { kind: "agent", id: "codex" } as const;
+    const claimed = resultReceipt(await alice.handle(taskHolderRequest("repo.task.claim", taskId, { ttlMs: 60_000, executor })));
+    assert.equal(claimed.ok, true);
+    assert.deepEqual(claimed.details.data.effectiveHolder.executor, executor);
+    assert.equal(claimed.details.data.effectiveHolder.responsibleHuman, "person:person_alice");
+
+    const released = resultReceipt(await alice.handle(taskHolderRequest("repo.task.release", taskId, { executor })));
+    assert.equal(released.ok, true);
+
+    const claimEvent = events.find((event) => event.tool?.toolName === "repo.task.claim");
+    const releaseEvent = events.find((event) => event.tool?.toolName === "repo.task.release");
+    assert.equal(claimEvent?.actor?.principal.personId, "person_alice");
+    assert.deepEqual(claimEvent?.actor?.executor, executor);
+    assert.equal(claimEvent?.actor?.responsibleHuman, "person:person_alice");
+    assert.equal(releaseEvent?.actor?.principal.personId, "person_alice");
+    assert.deepEqual(releaseEvent?.actor?.executor, executor);
+    assert.equal(releaseEvent?.actor?.responsibleHuman, "person:person_alice");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
@@ -79,7 +114,7 @@ test("task lease enforcement guards daemon task progress API writes when enabled
     }));
     assert.equal(denied.ok, false);
     assert.equal(denied.error?.code, "task_lease_required");
-    assert.equal(denied.details.holder.principalId, "person_alice");
+    assert.equal(denied.details.holder.principal.personId, "person_alice");
     assert.equal(denied.details.leaseExpiresAt, "2026-07-10T00:01:00.000Z");
     assert.equal(progressWrites, 0);
   } finally {
@@ -92,7 +127,11 @@ test("task lease enforcement guards daemon task progress API writes when enabled
   }
 });
 
-function makeActorServers(rootDir: string, localController: LocalControllerService = emptyLocalController()) {
+function makeActorServers(
+  rootDir: string,
+  localController: LocalControllerService = emptyLocalController(),
+  appendRuntimeEvent?: Parameters<typeof createJsonRpcProtocolServer>[0]["appendRuntimeEvent"]
+) {
   const roster = sampleRoster();
   const taskHolderService = makeTaskHolderService({
     rootInput: rootDir,
@@ -104,8 +143,8 @@ function makeActorServers(rootDir: string, localController: LocalControllerServi
     TaskHolderService: taskHolderService
   };
   return {
-    alice: createActorServer(rootDir, roster, "alice", services),
-    maint: createActorServer(rootDir, roster, "maint", services)
+    alice: createActorServer(rootDir, roster, "alice", services, appendRuntimeEvent),
+    maint: createActorServer(rootDir, roster, "maint", services, appendRuntimeEvent)
   };
 }
 
@@ -113,7 +152,8 @@ function createActorServer(
   rootDir: string,
   roster: PeopleRoster,
   username: "alice" | "maint",
-  services: Parameters<typeof createJsonRpcProtocolServer>[0]["services"]
+  services: Parameters<typeof createJsonRpcProtocolServer>[0]["services"],
+  appendRuntimeEvent?: Parameters<typeof createJsonRpcProtocolServer>[0]["appendRuntimeEvent"]
 ) {
   return createJsonRpcProtocolServer({
     daemonId: "daemon-task-holder-test",
@@ -124,7 +164,8 @@ function createActorServer(
       transportKind: "ssh-exec",
       sshExecUser: { username, host: "team-host", source: "ssh-authenticated-exec" }
     },
-    services
+    services,
+    appendRuntimeEvent
   });
 }
 

@@ -3,12 +3,14 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import {
   isTaskHolderError,
+  runtimeEventActorFromTaskHolderPrincipal,
   taskHolderPrincipalFromActor,
   type CommandFailureReceipt,
   type CommandReceipt,
   type DocSyncSubmitRequestV1,
   type DocSyncSubmitResultV1,
   type LocalControllerService,
+  type TaskHolderExecutor,
   type TaskHolderService
 } from "../../../application/src/index.ts";
 import type { RuntimeEventAppendInput } from "../../../application/src/runtime-event-ledger-service.ts";
@@ -18,7 +20,7 @@ import { failureReceipt, serviceResultReceipt, successReceipt } from "./receipt-
 import { isJsonObject, type JsonObject, type JsonRpcId, type JsonRpcRequest, type JsonRpcResponse, type JsonValue } from "./json-rpc-types.ts";
 import type { DaemonAuthenticationContext } from "../transport/auth-context.ts";
 import { authorizeActorForMethod } from "../identity/authorization.ts";
-import { actorStamp, actorStampJson, type AuthenticatedActor, type IdentityProvider, type PeopleRoster } from "../identity/types.ts";
+import { actorStampJson, type AuthenticatedActor, type IdentityProvider, type PeopleRoster } from "../identity/types.ts";
 
 export interface DaemonRepoNamespace {
   readonly repoId: string;
@@ -305,7 +307,8 @@ async function callTaskHolderMethod(
       return successReceipt(contract.method, "read task holder", toJsonValue(await services.TaskHolderService.holder({ taskId })) as JsonObject);
     }
     if (!actor) return failureReceipt(contract.method, "actor_required", "Task holder writes require a per-request authenticated actor.");
-    const principal = taskHolderPrincipalFromActor(actor);
+    const executor = readTaskHolderExecutor(payload);
+    const principal = taskHolderPrincipalFromActor(actor, { executor });
     if (contract.method === "repo.task.claim") {
       const ttlMs = typeof payload?.ttlMs === "number" ? payload.ttlMs : undefined;
       return successReceipt(contract.method, "claimed task", toJsonValue(await services.TaskHolderService.claim({ taskId, principal, ttlMs })) as JsonObject);
@@ -489,9 +492,14 @@ async function appendCommandEvent(
   if (!options.appendRuntimeEvent) return;
   const command = commandEventDetails(params);
   const session = runtimeSession(params, options.daemonId, command.taskId);
+  const executor = readTaskHolderExecutorForEvent(isJsonObject(params.payload) ? params.payload : undefined);
+  const eventActor = actor
+    ? runtimeEventActorFromTaskHolderPrincipal(taskHolderPrincipalFromActor(actor, { executor }))
+    : undefined;
   await options.appendRuntimeEvent({
     kind: "result",
-    actorAxes: actorAxes(session, actor),
+    ...(eventActor ? { actor: eventActor } : {}),
+    actorAxes: actorAxes(session, eventActor),
     session,
     tool: {
       toolName: command.toolName ?? contract.method,
@@ -501,18 +509,37 @@ async function appendCommandEvent(
       status,
       summary,
       ...(errorCode ? { errorCode } : {})
-    },
-    ...(actor ? { actor: actorStamp(actor) } : {})
+    }
   }, repo ? { repo } : undefined).catch(() => undefined);
 }
 
-function actorAxes(session: ReturnType<typeof runtimeSession>, actor: AuthenticatedActor | undefined): RuntimeEventAppendInput["actorAxes"] {
-  const principal = actor ? actorStamp(actor) : null;
+function actorAxes(
+  session: ReturnType<typeof runtimeSession>,
+  actor: ReturnType<typeof runtimeEventActorFromTaskHolderPrincipal> | undefined
+): RuntimeEventAppendInput["actorAxes"] {
+  const principal = actor?.principal ?? null;
   return {
     principal,
     executor: { runtime: session.runtime, sessionId: session.sessionId },
     responsibleHuman: principal
   };
+}
+
+function readTaskHolderExecutor(payload: JsonObject | undefined): TaskHolderExecutor | null {
+  const executor = payload?.executor;
+  if (executor === undefined || executor === null) return null;
+  if (!isJsonObject(executor) || executor.kind !== "agent" || typeof executor.id !== "string" || !executor.id.trim()) {
+    throw new Error("payload.executor must be null or { kind: \"agent\", id: string }.");
+  }
+  return { kind: "agent", id: executor.id.trim() };
+}
+
+function readTaskHolderExecutorForEvent(payload: JsonObject | undefined): TaskHolderExecutor | null {
+  try {
+    return readTaskHolderExecutor(payload);
+  } catch {
+    return null;
+  }
 }
 
 function commandEventDetails(params: JsonObject): { readonly toolName?: string; readonly taskId?: string } {

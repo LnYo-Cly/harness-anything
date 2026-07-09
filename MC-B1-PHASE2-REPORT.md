@@ -86,3 +86,48 @@ If the checker discovers a distinct new runtime event callsite, I will register 
   - `npm run harness:check-write-road-registry`
   - `node --test packages/application/test/task-holder-service.test.ts`
   - `node --test packages/daemon/test/task-holder-rpc.test.ts packages/cli/test/task-lease-cli.test.ts`
+
+## Phase2 Correction Follow-up
+
+### 改动清单
+
+- `packages/kernel/src/local/task-holder-state.ts`: holder actor 改为 `{ principal, executor, responsibleHuman }`; `samePrincipal` 只按 `principal.personId` 判等, executor 不参与碰撞/lease 判定。
+- `packages/daemon/src/protocol/json-rpc-server.ts` and `packages/cli/src/daemon/client.ts`: daemon task-holder payload 与 `repo.command.run` payload 接收/传递可选 executor 断言; daemon 仍只用 `AuthenticatedActor` 作为被鉴别 person。
+- `packages/kernel/src/domain/runtime-event.ts`, `packages/kernel/src/schemas/runtime-event.ts`, `packages/application/src/runtime-event-ledger-service.ts`: runtime event actor 改为双轴,并兼容读取/写入旧单轴 actor 行。
+- `packages/cli/src/cli/command-runtime-events.ts`: CLI 自动 runtime event 写入双轴 actor; `task transition` 路径覆盖 C4。
+- Tests updated in `packages/application/test/task-holder-service.test.ts`, `packages/daemon/test/task-holder-rpc.test.ts`, `packages/cli/test/runtime-event-cli.test.ts`, `packages/application/test/runtime-event-ledger-service.test.ts`, `packages/daemon/test/json-rpc-protocol.test.ts`, and `packages/kernel/test/contracts/public-surface.test.ts`.
+
+### 测试补充 7-10
+
+- 7: `same person with a different executor renews the lease instead of colliding` verifies executor does not participate in holder equality.
+- 8: daemon task-holder RPC collision test verifies different person receives `task_claim_collision` with current holder and `leaseExpiresAt`.
+- 9: daemon holder RPC event test verifies holder record and claim/release runtime events contain `executor` and `responsibleHuman`; human direct claim records `executor: null`.
+- 10: `CLI task transition runtime event records dual-axis actor` verifies existing transition path emits双轴 actor.
+
+### Verification
+
+- `npm run check:local` passed: local check fast tier, 16 steps, completed in 29.5s.
+- `npm run harness:check-write-road-registry` passed: 32 registry rows, 301 discovered write surfaces.
+- Hermetic focused actor checks passed with `HOME=$(mktemp -d) GIT_CONFIG_GLOBAL=/dev/null`: 20 tests across holder service, daemon holder RPC, CLI runtime events, and runtime event ledger.
+- Focused pre-gate checks also passed: `npm run typecheck -- --pretty false`, `npm run lint -- --max-warnings=0`, `node --test packages/application/test/task-holder-service.test.ts`, `node --test packages/daemon/test/task-holder-rpc.test.ts`, `node --test packages/cli/test/runtime-event-cli.test.ts`.
+
+### Branch / Base
+
+- Branch: `codex/mc-b1-claim-lease`.
+- Rebased base: `origin/main` at `970526910643b0f7cbb705d555d122b58bb74ad4`.
+
+### Residual Risk / 未做
+
+- No full B4 PrincipalRef / roster / delegation model added.
+- No agent credential issuance or agent authentication added.
+- `AuthenticatedActor` remains person-only.
+- No new write-road registry row was required; this correction reused the existing task-holder runtime-state and runtime-event rows.
+
+### Unverified
+
+- Cloud CI integration and GUI lanes are unverified locally; `check:local` reports they are covered by cloud CI, not the fast tier.
+
+### 台账代写素材
+
+- Progress: corrected MC-B1 holder/event actor model from single-axis person to dual-axis `{ principal, executor, responsibleHuman }`.
+- Closeout: cost gate respected; correction scoped to holder/lease/event audit surfaces; local gates and hermetic focused identity checks passed.

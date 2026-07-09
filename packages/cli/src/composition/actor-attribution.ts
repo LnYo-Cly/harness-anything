@@ -24,7 +24,7 @@ export class CliActorAttributionError extends Error {
 }
 
 export function resolveLocalCliActorAttribution(env: NodeJS.ProcessEnv = process.env): CliActorAttribution {
-  const actor = readEnvActor(env);
+  const actor = readCliJournalActorFromEnv(env);
   const name = readEnv(env, "HARNESS_GIT_AUTHOR_NAME") ?? readEnv(env, "GIT_AUTHOR_NAME");
   const email = readEnv(env, "HARNESS_GIT_AUTHOR_EMAIL") ?? readEnv(env, "GIT_AUTHOR_EMAIL");
   const missing = [
@@ -60,7 +60,7 @@ export function daemonActorAttribution(actor: AuthenticatedActor): CliActorAttri
   };
 }
 
-function readEnvActor(env: NodeJS.ProcessEnv): CliJournalActor | undefined {
+export function readCliJournalActorFromEnv(env: NodeJS.ProcessEnv): CliJournalActor | undefined {
   const raw = readEnv(env, "HARNESS_ACTOR");
   if (!raw) return undefined;
   const separator = raw.indexOf(":");
