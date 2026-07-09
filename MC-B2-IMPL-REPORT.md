@@ -9,7 +9,8 @@ request/response schema, and conflict/forbidden report shape. Phase 1 and Phase
 ## 1. Inputs Read
 
 - Worker handbook:
-  `/Users/lizeyu/.claude/skills/fable-gpt-worker-orchestration/references/codex-worker-handbook.md`
+  local worker handbook for fable GPT worker orchestration (private absolute
+  path omitted)
 - Task contract:
   `harness/tasks/task_01KX3W4V1EDPHPTGWYYBQQ2J75-mc-b2-impl-doc-write-intent-daemon-doc-sync-submit-forbidden-touch-valid/task_plan.md`
 - Accepted design:
@@ -414,3 +415,103 @@ Proceed to Phase 1 only after CEO accepts this shape.
 
 Current checkpoint does not change code, registry, or reckon behavior. It also
 does not claim `dec_mrcda9kw` coverage.
+
+## 12. CEO Verdict Revisions Applied Before Phase 1
+
+Checkpoint 1 verdict file read:
+`harness/tasks/task_01KX3W4V1EDPHPTGWYYBQQ2J75-mc-b2-impl-doc-write-intent-daemon-doc-sync-submit-forbidden-touch-valid/artifacts/orchestration/checkpoint1-verdict.md`.
+
+The Phase 2 design is revised as follows:
+
+1. Registry rule freshness must key on the registry file content `sha256`, not
+   mtime. If the registry cannot be read, parsed, or validated during submit,
+   submit must fail closed. Phase 1 reports the registry sha256 in
+   `doc-sync-status/v1`.
+2. Forbidden touch has one authority path: derive a touched `bearing +
+   zoneClass`, resolve registry row(s), then read each row's
+   `channel.pathClass`. There is no separate `forbiddenZoneClasses` decision
+   path. If no row resolves, submit must fail closed. Phase 1 surfaces these
+   as `unresolvedTouches`.
+3. `doc.sync.submit` runtime events must reserve actor fields
+   `{ principal, executor, responsibleHuman }`. Phase 1 does not implement
+   submit events. Human anchoring remains pending `dec_mrdrbkp7`; do not map an
+   agent id into a fake person id.
+4. Deletion through doc sync remains undefined. Phase 1 reports deletions with
+   `deletionPolicy: "undefined-pending-phase-2"` and excludes them from
+   submittable preview changes. Phase 2 must either define an explicit delete
+   change type or reject with a replacement path.
+
+## 13. Phase 1 Implementation
+
+Implemented scope:
+
+- `ha doc status` is read-only and reports dirty authored files, registry
+  sha256, forbidden touches, unresolved touches, explicit deletion gaps, and
+  candidate blobs.
+- `ha doc sync --dry-run` builds a `daemon.doc-sync-submit-request/v1-preview`
+  style preview from doc-sync candidates only; it does not submit or write.
+- `task complete` and `decision propose` attach a soft `doc_sync_dirty` warning
+  when authored doc-sync state is dirty. The warning is advisory and does not
+  block the command.
+
+Files changed:
+
+- `packages/cli/src/commands/core/doc-sync.ts`: Phase 1 doc-sync status and
+  preview builder. Registry decision uses registry rows only; parser code emits
+  registry zone names but does not keep an independent allow/deny list.
+- `packages/cli/src/commands/core/doc.ts`,
+  `packages/cli/src/cli/parsers/doc.ts`,
+  `packages/cli/src/cli/types.ts`, and
+  `packages/cli/src/cli/command-spec/command-spec-runtime-docs.ts`: command
+  surface for `doc-status` and `doc-sync-dry-run`.
+- `packages/cli/src/commands/core/task-gates.ts` and
+  `packages/cli/src/commands/core/decision-propose.ts`: soft dirty reminders.
+- `packages/cli/test/docmap-cli.test.ts` and
+  `packages/cli/test/parse-args.test.ts`: parser and CLI behavior coverage.
+- `tools/write-road-registry.json`: added the new read-only git inspection
+  callsite to the existing `public-code-change.git` direct git coverage row so
+  the registry checker remains authoritative.
+
+Phase 1 classifier notes:
+
+- Task prose/stage documents under `tasks/**` map to
+  `task-document/task-authored-prose-or-stage` and resolve through
+  `task.document.write-stage`.
+- `tasks/**/facts.md`, decision documents, module registry, and task
+  `INDEX.md` frontmatter map to registry structured zones and report matching
+  `rpc-only` rows as forbidden touches.
+- Multiple registry rows can share a `bearing + zoneClass` pair. Phase 1
+  expands all matching rows in the report rather than inventing a second
+  selector. Phase 2 submit may need a finer registry selector if CEO wants
+  one-row hunk attribution for fact/decision variants.
+
+## 14. Phase 1 Verification Evidence
+
+Commands run in this session:
+
+- `npm run typecheck` -> passed.
+- `node --test packages/cli/test/docmap-cli.test.ts packages/cli/test/parse-args.test.ts`
+  -> passed, 140 tests.
+- `npm run harness:check-cli-structure` -> passed.
+- `npm run harness:check-cli-help-contract` -> passed.
+- `npm run harness:check-write-road-registry` -> passed, 31 registry rows and
+  297 discovered write surfaces.
+- `npm run check:local` -> passed fast tier in 25.4s.
+
+The new negative control is
+`CLI doc status reports prose candidates and forbidden structured touches`: it
+mutates a prose task document and `facts.md` in the same dirty tree, then
+asserts only the prose file appears as a candidate blob while the structured
+fact file reports an RPC-only forbidden touch.
+
+## 15. Remaining Phase 2 Work / Known Gaps
+
+- `doc.sync.submit`, submit validator, CAS, post-apply checker, rollback, and
+  runtime event emission are intentionally not implemented in Phase 1.
+- `dec_mrcda9kw` coverage is not claimed in this Phase 1 report.
+- Actor `{ principal, executor, responsibleHuman }` event fields are reserved
+  in the design only; principal/responsibleHuman population waits for
+  `dec_mrdrbkp7`.
+- Deletion remains the explicit Phase 2 decision point described above.
+- Phase 1 does not flip `task.document.write-stage` from
+  `doc-sync-allowed-pending-B2`; that belongs with Phase 2 submit enforcement.

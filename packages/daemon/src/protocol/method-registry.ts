@@ -148,6 +148,8 @@ const repoReadCliActionKinds = new Set<string>([
   "diagnostics-command-usage",
   "doc-list",
   "doc-map",
+  "doc-status",
+  "doc-sync-dry-run",
   "doctor",
   "entity-list",
   "fact-list",
