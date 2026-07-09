@@ -48,9 +48,13 @@ enforcement disabled and requires these status contexts:
 - boundaries
 - package-policy
 - typecheck (24)
-- typecheck (26)
 - fast-contract
-- integration
+- integration-shard (1)
+- integration-shard (2)
+- integration-shard (3)
+- integration-shard (4)
+- integration-shard (5)
+- integration-shard (6)
 - supply-chain
 - gui-build
 - node26-compatibility
@@ -96,6 +100,9 @@ When Mergify edits only the metadata body of a synthetic
 fast no-op success. That keeps queue bookkeeping edits from launching another
 full CI pass while preserving normal `edited` body validation for
 human-authored pull requests.
+
+Integration tests are required through the six `integration-shard (N)`
+contexts, not through a slower aggregate `integration` context.
 
 GUI Electron E2E is an explicit local closeout gate for GUI-related tasks and
 must be recorded as task evidence instead of running in GitHub CI.

@@ -21,9 +21,13 @@
         "boundaries",
         "package-policy",
         "typecheck (24)",
-        "typecheck (26)",
         "fast-contract",
-        "integration",
+        "integration-shard (1)",
+        "integration-shard (2)",
+        "integration-shard (3)",
+        "integration-shard (4)",
+        "integration-shard (5)",
+        "integration-shard (6)",
         "supply-chain",
         "gui-build",
         "node26-compatibility",
@@ -66,6 +70,7 @@
         "check-integrity-single-source",
         "check-private-boundary",
         "check-integration-test-shards",
+        "check-mergify-queue-contexts",
         "check-docs-release-map",
         "check-docmap-fresh",
         "check-gate-surface",
@@ -106,6 +111,7 @@
         "check-integrity-single-source",
         "check-private-boundary",
         "check-integration-test-shards",
+        "check-mergify-queue-contexts",
         "check-docs-release-map",
         "check-docmap-fresh",
         "check-gate-surface",
@@ -136,9 +142,7 @@
         "gui-build",
         "node26-compatibility"
       ],
-      "helperJobsNotRegisteredAsGates": [
-        "integration"
-      ],
+      "helperJobsNotRegisteredAsGates": [],
       "nonPullRequestGateJobs": [
         "full-check"
       ]
@@ -148,9 +152,13 @@
         "boundaries",
         "package-policy",
         "typecheck (24)",
-        "typecheck (26)",
         "fast-contract",
-        "integration",
+        "integration-shard (1)",
+        "integration-shard (2)",
+        "integration-shard (3)",
+        "integration-shard (4)",
+        "integration-shard (5)",
+        "integration-shard (6)",
         "supply-chain",
         "gui-build",
         "node26-compatibility",
@@ -422,9 +430,13 @@
         "requiredContexts": [
           "pr-body-lint",
           "typecheck (24)",
-          "typecheck (26)",
           "fast-contract",
-          "integration",
+          "integration-shard (1)",
+          "integration-shard (2)",
+          "integration-shard (3)",
+          "integration-shard (4)",
+          "integration-shard (5)",
+          "integration-shard (6)",
           "boundaries",
           "package-policy",
           "supply-chain",
@@ -488,9 +500,13 @@
           "contexts": [
             "pr-body-lint",
             "typecheck (24)",
-            "typecheck (26)",
             "fast-contract",
-            "integration",
+            "integration-shard (1)",
+            "integration-shard (2)",
+            "integration-shard (3)",
+            "integration-shard (4)",
+            "integration-shard (5)",
+            "integration-shard (6)",
             "boundaries",
             "package-policy",
             "supply-chain",
@@ -517,7 +533,6 @@
       "githubContext": {
         "requiredContexts": [
           "typecheck (24)",
-          "typecheck (26)",
           "node26-compatibility"
         ],
         "workflowJobs": [
@@ -563,7 +578,6 @@
           "required": true,
           "contexts": [
             "typecheck (24)",
-            "typecheck (26)",
             "node26-compatibility"
           ]
         }
@@ -848,7 +862,12 @@
       ],
       "githubContext": {
         "requiredContexts": [
-          "integration"
+          "integration-shard (1)",
+          "integration-shard (2)",
+          "integration-shard (3)",
+          "integration-shard (4)",
+          "integration-shard (5)",
+          "integration-shard (6)"
         ],
         "workflowJobs": [
           "integration-shard"
@@ -887,7 +906,12 @@
         "branchProtection": {
           "required": true,
           "contexts": [
-            "integration"
+            "integration-shard (1)",
+            "integration-shard (2)",
+            "integration-shard (3)",
+            "integration-shard (4)",
+            "integration-shard (5)",
+            "integration-shard (6)"
           ]
         }
       }
@@ -2106,6 +2130,69 @@
           "check": true,
           "checkPr": true,
           "script": "harness:check-integration-test-shards"
+        },
+        "rewriteCi": {
+          "pullRequestJobs": [
+            "boundaries"
+          ],
+          "nonPullRequestJobs": [
+            "full-check"
+          ]
+        },
+        "branchProtection": {
+          "required": true,
+          "contexts": [
+            "boundaries"
+          ]
+        }
+      }
+    },
+    {
+      "id": "check-mergify-queue-contexts",
+      "command": "npm run harness:check-mergify-queue-contexts",
+      "category": "meta-governance",
+      "tier": "pr-required",
+      "tierReason": null,
+      "authoritySource": [
+        ".mergify.yml",
+        "tools/gate-manifest.json"
+      ],
+      "consumerScope": [
+        "Mergify queue_conditions must require exactly the same GitHub contexts as the gate manifest branch-protection surface"
+      ],
+      "githubContext": {
+        "requiredContexts": [
+          "boundaries"
+        ],
+        "workflowJobs": [
+          "boundaries"
+        ],
+        "nodeVersions": [
+          24
+        ]
+      },
+      "allowlistPolicy": {
+        "allowed": false,
+        "location": null,
+        "adrOrDecisionRequired": false,
+        "notes": "Queue context reconciliation is fail-closed and has no allowlist."
+      },
+      "changeControl": {
+        "ordinaryImplementationMayModify": false,
+        "requiresGovernanceEvidence": true,
+        "protectedSurfaces": [
+          ".mergify.yml",
+          "tools/check-mergify-queue-contexts.mjs",
+          "package.json:scripts.harness:check-mergify-queue-contexts",
+          "tools/gate-manifest.json"
+        ]
+      },
+      "bypassFixtureRequired": false,
+      "executionSurfaces": {
+        "packageJson": {
+          "check": true,
+          "checkPr": true,
+          "script": "harness:check-mergify-queue-contexts"
         },
         "rewriteCi": {
           "pullRequestJobs": [

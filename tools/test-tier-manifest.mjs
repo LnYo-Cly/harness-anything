@@ -26,7 +26,8 @@ export const testTierManifest = {
     "tools/run-local-check.test.mjs",
     "tools/run-node-tests.test.mjs",
     "tools/run-manifest-gates.test.mjs",
-    "tools/check-integration-test-shards.test.mjs"
+    "tools/check-integration-test-shards.test.mjs",
+    "tools/check-mergify-queue-contexts.test.mjs"
   ],
   contract: [
     "packages/application/test/code-doc-reconciliation.test.ts",
