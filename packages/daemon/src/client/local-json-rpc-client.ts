@@ -56,6 +56,17 @@ export interface LocalDaemonJsonRpcOptions {
   readonly env?: NodeJS.ProcessEnv;
 }
 
+type SpawnLocalDaemon = (target: LocalDaemonTarget, options: LocalDaemonAutostartOptions) => void;
+
+interface DaemonStartupFlight {
+  deadline: number;
+  lastError: unknown;
+  promise: Promise<void>;
+}
+
+const daemonStartupFlights = new Map<string, DaemonStartupFlight>();
+let spawnLocalDaemonImplementation: SpawnLocalDaemon = spawnLocalDaemonProcess;
+
 export function daemonIdForRoot(rootDir: string): string {
   return `repo-${createHash("sha256").update(rootDir).digest("hex").slice(0, 16)}`;
 }
@@ -192,6 +203,18 @@ export async function requestLocalDaemonJsonRpcForTarget(
 }
 
 export function spawnLocalDaemon(target: LocalDaemonTarget, options: LocalDaemonAutostartOptions): void {
+  spawnLocalDaemonImplementation(target, options);
+}
+
+export function replaceSpawnLocalDaemonForTest(replacement: SpawnLocalDaemon): () => void {
+  const previous = spawnLocalDaemonImplementation;
+  spawnLocalDaemonImplementation = replacement;
+  return () => {
+    spawnLocalDaemonImplementation = previous;
+  };
+}
+
+function spawnLocalDaemonProcess(target: LocalDaemonTarget, options: LocalDaemonAutostartOptions): void {
   const child = spawn(options.execPath ?? process.execPath, [
     ...(options.execArgv ?? process.execArgv),
     options.entryPath,
@@ -269,22 +292,103 @@ async function requestLocalDaemonJsonRpcWithAutostart(
   autostart: LocalDaemonAutostartOptions
 ): Promise<JsonObject> {
   const deadline = Date.now() + (autostart.timeoutMs ?? defaultDaemonAutostartTimeoutMs);
-  let nextSpawnAt = 0;
   let lastError: unknown;
   while (Date.now() <= deadline) {
+    let socket: net.Socket;
     try {
-      const socket = await connectUnixSocket(target.socketPath, connectTimeoutMs);
+      socket = await connectUnixSocket(target.socketPath, boundedConnectTimeout(connectTimeoutMs, deadline));
+    } catch (error) {
+      lastError = error;
+      await ensureLocalDaemonStarted(target, autostart, connectTimeoutMs, deadline);
+      continue;
+    }
+    try {
       return await requestWithSocket(socket, method, params);
     } catch (error) {
       lastError = error;
-      if (Date.now() >= nextSpawnAt) {
-        spawnLocalDaemon(target, autostart);
-        nextSpawnAt = Date.now() + 500;
-      }
-      await delay(100);
+      await delay(Math.min(100, Math.max(1, deadline - Date.now())));
     }
   }
   throw lastError ?? new Error("local daemon did not become reachable");
+}
+
+async function ensureLocalDaemonStarted(
+  target: LocalDaemonTarget,
+  autostart: LocalDaemonAutostartOptions,
+  connectTimeoutMs: number,
+  deadline: number
+): Promise<void> {
+  const existing = daemonStartupFlights.get(target.socketPath);
+  if (existing) {
+    if (Date.now() >= existing.deadline) {
+      daemonStartupFlights.delete(target.socketPath);
+    } else {
+      existing.deadline = Math.max(existing.deadline, deadline);
+      return waitForDaemonStartupFlight(target.socketPath, existing, deadline);
+    }
+  }
+
+  const flight: DaemonStartupFlight = {
+    deadline,
+    lastError: undefined,
+    promise: Promise.resolve()
+  };
+  flight.promise = spawnAndWaitForLocalDaemon(target, autostart, connectTimeoutMs, flight);
+  daemonStartupFlights.set(target.socketPath, flight);
+  flight.promise.then(
+    () => clearDaemonStartupFlight(target.socketPath, flight),
+    () => clearDaemonStartupFlight(target.socketPath, flight)
+  );
+  return waitForDaemonStartupFlight(target.socketPath, flight, deadline);
+}
+
+async function spawnAndWaitForLocalDaemon(
+  target: LocalDaemonTarget,
+  autostart: LocalDaemonAutostartOptions,
+  connectTimeoutMs: number,
+  flight: DaemonStartupFlight
+): Promise<void> {
+  spawnLocalDaemon(target, autostart);
+  while (Date.now() <= flight.deadline) {
+    try {
+      await probeLocalDaemonReady(target.socketPath, boundedConnectTimeout(connectTimeoutMs, flight.deadline));
+      return;
+    } catch (error) {
+      flight.lastError = error;
+      const retryDelayMs = Math.min(100, flight.deadline - Date.now());
+      if (retryDelayMs > 0) await delay(retryDelayMs);
+    }
+  }
+  throw flight.lastError ?? new Error("local daemon did not become reachable");
+}
+
+async function waitForDaemonStartupFlight(socketPath: string, flight: DaemonStartupFlight, deadline: number): Promise<void> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) {
+    if (deadline >= flight.deadline) clearDaemonStartupFlight(socketPath, flight);
+    throw flight.lastError ?? new Error("local daemon did not become reachable");
+  }
+  return Promise.race([
+    flight.promise,
+    delay(remainingMs).then(() => {
+      if (deadline >= flight.deadline) clearDaemonStartupFlight(socketPath, flight);
+      throw flight.lastError ?? new Error("local daemon did not become reachable");
+    })
+  ]);
+}
+
+function clearDaemonStartupFlight(socketPath: string, flight: DaemonStartupFlight): void {
+  if (daemonStartupFlights.get(socketPath) === flight) daemonStartupFlights.delete(socketPath);
+}
+
+async function probeLocalDaemonReady(socketPath: string, timeoutMs: number): Promise<void> {
+  const socket = await connectUnixSocket(socketPath, timeoutMs);
+  const client = new JsonRpcLineClient(socket, socket);
+  try {
+    await client.request("protocol.hello", { protocolVersion: currentDaemonProtocolVersion });
+  } finally {
+    client.close();
+  }
 }
 
 async function requestWithSocket(socket: net.Socket, method: string, params: JsonObject): Promise<JsonObject> {
@@ -360,4 +464,8 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function boundedConnectTimeout(timeoutMs: number, deadline: number): number {
+  return Math.max(1, Math.min(timeoutMs, deadline - Date.now()));
 }
