@@ -21,9 +21,13 @@
         "boundaries",
         "package-policy",
         "typecheck (24)",
-        "typecheck (26)",
         "fast-contract",
-        "integration",
+        "integration-shard (1)",
+        "integration-shard (2)",
+        "integration-shard (3)",
+        "integration-shard (4)",
+        "integration-shard (5)",
+        "integration-shard (6)",
         "supply-chain",
         "gui-build",
         "node26-compatibility",
@@ -136,9 +140,7 @@
         "gui-build",
         "node26-compatibility"
       ],
-      "helperJobsNotRegisteredAsGates": [
-        "integration"
-      ],
+      "helperJobsNotRegisteredAsGates": [],
       "nonPullRequestGateJobs": [
         "full-check"
       ]
@@ -148,9 +150,13 @@
         "boundaries",
         "package-policy",
         "typecheck (24)",
-        "typecheck (26)",
         "fast-contract",
-        "integration",
+        "integration-shard (1)",
+        "integration-shard (2)",
+        "integration-shard (3)",
+        "integration-shard (4)",
+        "integration-shard (5)",
+        "integration-shard (6)",
         "supply-chain",
         "gui-build",
         "node26-compatibility",
@@ -422,9 +428,13 @@
         "requiredContexts": [
           "pr-body-lint",
           "typecheck (24)",
-          "typecheck (26)",
           "fast-contract",
-          "integration",
+          "integration-shard (1)",
+          "integration-shard (2)",
+          "integration-shard (3)",
+          "integration-shard (4)",
+          "integration-shard (5)",
+          "integration-shard (6)",
           "boundaries",
           "package-policy",
           "supply-chain",
@@ -488,9 +498,13 @@
           "contexts": [
             "pr-body-lint",
             "typecheck (24)",
-            "typecheck (26)",
             "fast-contract",
-            "integration",
+            "integration-shard (1)",
+            "integration-shard (2)",
+            "integration-shard (3)",
+            "integration-shard (4)",
+            "integration-shard (5)",
+            "integration-shard (6)",
             "boundaries",
             "package-policy",
             "supply-chain",
@@ -517,7 +531,6 @@
       "githubContext": {
         "requiredContexts": [
           "typecheck (24)",
-          "typecheck (26)",
           "node26-compatibility"
         ],
         "workflowJobs": [
@@ -563,7 +576,6 @@
           "required": true,
           "contexts": [
             "typecheck (24)",
-            "typecheck (26)",
             "node26-compatibility"
           ]
         }
@@ -848,7 +860,12 @@
       ],
       "githubContext": {
         "requiredContexts": [
-          "integration"
+          "integration-shard (1)",
+          "integration-shard (2)",
+          "integration-shard (3)",
+          "integration-shard (4)",
+          "integration-shard (5)",
+          "integration-shard (6)"
         ],
         "workflowJobs": [
           "integration-shard"
@@ -887,7 +904,12 @@
         "branchProtection": {
           "required": true,
           "contexts": [
-            "integration"
+            "integration-shard (1)",
+            "integration-shard (2)",
+            "integration-shard (3)",
+            "integration-shard (4)",
+            "integration-shard (5)",
+            "integration-shard (6)"
           ]
         }
       }

@@ -134,14 +134,16 @@ The registry records:
   `check-template-command-surface`, `check-service-mappability`,
   `check-api-contract-registry`, `check-schema-field-coverage`, and
   `smoke-legacy-intake`.
-- 10 GitHub branch-protection required contexts:
-  `boundaries`, `package-policy`, `typecheck (24)`, `typecheck (26)`,
-  `fast-contract`, `integration`, `supply-chain`, `gui-build`,
-  `node26-compatibility`, and `pr-body-lint`.
+- 14 GitHub branch-protection required contexts:
+  `boundaries`, `package-policy`, `typecheck (24)`, `fast-contract`,
+  `integration-shard (1)`, `integration-shard (2)`,
+  `integration-shard (3)`, `integration-shard (4)`,
+  `integration-shard (5)`, `integration-shard (6)`, `supply-chain`,
+  `gui-build`, `node26-compatibility`, and `pr-body-lint`.
 - 2 PR-body meta-governance commands under the `pr-body-lint` required
   context: bilingual body structure and protected-surface governance
   declaration shape.
 
-The workflow helper job `changes` is intentionally listed under
-`surfaces.rewriteCi.helperJobsNotRegisteredAsGates` and not registered as a
-gate because it only feeds path-filter outputs to `gui-build`.
+Workflow helper jobs listed under
+`surfaces.rewriteCi.helperJobsNotRegisteredAsGates` are intentionally not
+registered as gates because they only feed required gate jobs.
