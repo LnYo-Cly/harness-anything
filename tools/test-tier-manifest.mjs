@@ -95,6 +95,7 @@ export const testTierManifest = {
     "tools/check-service-mappability.test.mjs",
     "tools/check-schema-field-coverage.test.mjs",
     "tools/check-template-command-surface.test.mjs",
+    "tools/check-write-road-registry.test.mjs",
     "tools/check-write-coordinator-boundary.test.mjs",
     "tools/port-physical-io-eslint-boundary.test.mjs",
     "tools/skill-contracts.test.mjs",
