@@ -3,7 +3,7 @@
 ## 前置条件
 
 - **Node.js 24 或更新版本。** CLI 在 Node 24 和 26 上测试过。
-- **git。** Harness Anything 写入 git 仓库并以之为真实来源。
+- **git。** Harness Anything 把已撰写的账本文件存进 `harness/` 下的私有嵌套 git 仓。
 
 查看你的 Node 版本：
 
@@ -26,6 +26,8 @@ npm run quickstart:demo
 这条 demo 会构建 CLI、创建一个临时 git workspace、运行 `ha init`、创建 task、
 记录 fact、再把 fact 查回来，并渲染 relation graph。这就是 30 秒证明：问责
 循环是真能跑的。
+这条 demo 只为临时 workspace 使用显式 demo 归属（`system:quickstart-demo`）。
+你在自己的仓库里运行 `ha` 写命令时，要按第一个循环里的方式设置真实写入归属。
 
 如果想看 fail-closed 路径，可以运行刻意破坏的变体：
 

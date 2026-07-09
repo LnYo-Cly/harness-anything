@@ -1,6 +1,20 @@
 # 你的第一个循环
 
-在一个临时 git 仓库里端到端运行这个。几分钟内你会有一个真实任务、一个事实和一个裁决的决策——全部是仓库里的 Markdown。下面的每个输出都从一次实际运行中捕捉下来。
+在一个临时 git 仓库里端到端运行这个。几分钟内你会有一个真实任务、一个事实和一个裁决的决策——全部是私有 `harness/` 账本里的 Markdown。下面的每个输出都从一次实际运行中捕捉下来。
+
+## 0. 设置写入归属
+
+本地 `ha` 写命令要求显式归属。请在运行这个循环的 shell 里先设置一次：
+
+```bash
+export HARNESS_ACTOR=human:you
+export HARNESS_GIT_AUTHOR_NAME="Your Name"
+export HARNESS_GIT_AUTHOR_EMAIL="you@example.com"
+```
+
+`HARNESS_ACTOR` 必须是 `kind:id` 形式；`kind` 是 `human`、`agent` 或 `system`。
+这里要使用真实的人或 agent 身份。quickstart smoke demo 使用自己的 demo 级 system
+actor，因为它只写入临时 workspace。
 
 ## 1. 初始化
 
@@ -9,7 +23,19 @@ $ ha init
 ok command=init path=harness/harness.yaml summary="initialized harness at harness/harness.yaml"
 ```
 
-这创建了已撰写的 `harness/` 目录——你的任务、决策和标准住在这里并进入 git。（生成的 `.harness/` 缓存是本地只有，留出 git。）
+这会创建已撰写的 `harness/` 目录。你的任务、决策和标准住在这里，但不进入你的项目 git 仓。`ha init` 会把 `harness/` 加进外层 `.gitignore`，并把 `harness/` 初始化成独立的私有嵌套 git 仓。
+
+这种隔离是防泄漏设计：代码 PR 不应包含 `harness/` 变更。需要给私有账本做版本记录时，在 `harness/` 里面提交：
+
+```bash
+git -C harness status
+git -C harness add .
+git -C harness -c user.name="$HARNESS_GIT_AUTHOR_NAME" \
+  -c user.email="$HARNESS_GIT_AUTHOR_EMAIL" \
+  commit -m "docs: update harness ledger"
+```
+
+生成的 `.harness/` 缓存只留在本地，也不会进入外层项目 git 仓。
 
 ```text
 harness/
@@ -80,7 +106,7 @@ ok command=graph path=.harness/generated/graph-panorama/index.html
 
 `graph` 把你的任务、决策和事实渲染成自包含 HTML 全景，全部有链接。
 
-**这就是啊哈时刻**：你产生的不是聊天记录。它是仓库里的真实、版本化结构——任务、它观察到的事实和它说明的决策，全部有链接且可在 git diff 里审查。
+**这就是啊哈时刻**：你产生的不是聊天记录。它是私有 `harness/` 账本里的真实、版本化结构——任务、它观察到的事实和它说明的决策，全部有链接，并且可以用 `git -C harness diff` 审查。
 
 ![demo](../assets/demo.gif)
 

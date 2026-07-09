@@ -7,6 +7,11 @@ import path from "node:path";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const defaultCliPath = path.join(repoRoot, "packages/cli/dist/cli/src/index.js");
+const demoAttribution = {
+  actor: "system:quickstart-demo",
+  gitAuthorName: "Harness Quickstart Demo",
+  gitAuthorEmail: "quickstart-demo@example.invalid"
+};
 
 const options = parseArgs(process.argv.slice(2));
 const cliPath = path.resolve(options.cliPath ?? defaultCliPath);
@@ -92,7 +97,12 @@ try {
     taskId,
     factRef,
     graphPath,
-    initSmokeTaskId: init.report.configureVerify.smokeTaskId
+    initSmokeTaskId: init.report.configureVerify.smokeTaskId,
+    attribution: {
+      actor: demoAttribution.actor,
+      gitAuthorName: demoAttribution.gitAuthorName,
+      gitAuthorEmail: demoAttribution.gitAuthorEmail
+    }
   }, null, 2));
   if (options.cleanup) rmSync(workspace, { recursive: true, force: true });
 } catch (error) {
@@ -123,6 +133,9 @@ function runCliProcess(args) {
       encoding: "utf8",
       env: {
         ...process.env,
+        HARNESS_ACTOR: demoAttribution.actor,
+        HARNESS_GIT_AUTHOR_NAME: demoAttribution.gitAuthorName,
+        HARNESS_GIT_AUTHOR_EMAIL: demoAttribution.gitAuthorEmail,
         ANTIGRAVITY_SESSION_ID: "",
         CLAUDE_CODE_SESSION_ID: "",
         CLAUDE_SESSION_ID: "",

@@ -6,7 +6,7 @@
 
 | 命令 | 做什么 |
 |---|---|
-| `ha init` | 在当前仓库创建 `harness/` 目录布局。 |
+| `ha init` | 创建 `harness/` 账本布局及其私有嵌套 git 仓。 |
 | `ha task create --title <title>` | 创建一个新任务包。 |
 | `ha task list` | 列出任务包，带状态/模块/搜索过滤。 |
 | `ha task show <id>` | 查看单个任务的投影状态、元数据、层级、关系边和事实锚。 |
