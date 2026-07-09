@@ -20,7 +20,7 @@
 in_review
     │  ha task complete <id> --ci passed
     ▼
-[ fact 门 ] · [ completion 门 ] ─ 拒绝 ─▶ (状态不变)
+[ fact 门 ] · [ review 门 ] · [ completion 路径 ] ─ 拒绝 ─▶ (状态不变)
     │ 通过
 done  (终态——写入经由唯一的写协调器)
 ```
@@ -54,15 +54,36 @@ fact 记录是 append-only 的,带一个 `F-` id、一条 `statement`、一个 `
 
 ## completion 门
 
-完成一个 task 是最严格的迁移,因为 `done` 是终态。completion 门从 task 的投影行里读出若干条轴,要求它们全部对齐:
+完成一个 task 是最严格的迁移，因为 `done` 是终态。`ha task complete` 路径做的不只是调用那个三轴
+completion 函数；它会重新运行 review，检查 task 文档，调和 code-doc 锚点，清扫 task tree，最后才
+写入 `done`。
 
-| 轴 | 通过要求 |
+| 检查 | 通过要求 | 报告的失败码或 issue |
 |---|---|
-| review 门 | 必须为 `passed` |
-| CI 门 | 必须为 `passed` |
-| closeout 就绪度 | 必须为 `ready` 或 `passed` |
+| fact 记录 | `facts.md` 必须包含至少一条解析出的 `F-` fact 记录 | `task_fact_required` |
+| review 文档 | `review.md` 必须存在，发现表必须能解析，且不能有 open 的 release-blocking 发现 | completion 报告 `review_not_passed`；底层 review 失败可能是 `review_document_missing`、`review_schema_invalid` 或 `release_blocking_findings` |
+| review 占位符 | 初始 `review.md` 占位符必须被替换 | `review_placeholder` |
+| closeout 占位符 | 配置了占位符策略时，`closeout.md` 不能匹配已知模板指纹 | `closeout_placeholder` |
+| code-doc reconciliation | task 包必须包含一份手写的 `code-doc-anchors.json`，其中有合法的承重记录，且每条记录至少有一个硬 commit 或 path 锚点 | `code_doc_reconciliation_failed`，issues 里可能包含 `code_doc_anchors_missing` |
+| review 门轴 | 上面的 review 门通过后，completion 函数收到的 review 必须是 `passed` | `review_not_passed` |
+| CI 门轴 | CLI 传入的 CI 门必须是 `passed` | `ci_not_passed` |
+| closeout 就绪度轴 | 投影出的 closeout readiness 必须是 `ready` 或 `passed` | `closeout_not_ready` |
+| task tree dirty 检查 | 迁移清扫之后，`tasks/<id>/` 必须足够干净，让 lifecycle writer 可以提交 | `task_tree_dirty` |
 
-如果 review 门未 passed、CI 未 passed,或 closeout 就绪度弱于 ready,completion 门就返回问题(`review_not_passed`、`ci_not_passed`、`closeout_not_ready`),task 原地不动。只有当门返回一个空的问题列表后,task 才被写入 `done`——而且因为 `done` 是一次承重写入,这次写入本身要走[写路径](02-write-path.md)里描述的那个唯一写协调器,所以被接受的迁移会留下一条持久、可追溯的痕迹。
+这份 code-doc reconciliation 文件不会由 `ha task create` 生成；它必须被手写进 task 包，路径是
+`harness/tasks/<id>/code-doc-anchors.json`。文档 schema 是 `code-doc-reconciliation/v1`，每条
+记录命名一个 task package `ledgerPath`、一个承重 `kind`（`closeout`、`evidence`、
+`decision-claim` 或 `review`）以及一组 anchors。commit 与 path anchor 会对着本地 git 校验；PR
+anchor 只有在同时携带 SHA 时才校验，否则只是 warning。没有任何硬 commit 或 path anchor 的记录，
+即便写了 PR，也会失败。
+
+只要任一检查失败，task 就原地不动。只有当完成路径返回一个空的问题列表后，task 才被写入 `done`——
+而且因为 `done` 是一次承重写入，这次写入本身要走[写路径](02-write-path.md)里描述的那个唯一写
+协调器，所以被接受的迁移会留下一条持久、可追溯的痕迹。
+
+开发本地 gate 时还有一个操作层陷阱：`ha` 二进制跑的是已构建的 CLI 输出，不是 TypeScript 源码。
+一扇门合入源码，并不等于当前本地二进制已经执行这扇门；在调用 `ha task complete` 测新门或改过的门
+之前，必须先重建 `packages/cli/dist`。
 
 ## 三扇具名的门,作为机制
 

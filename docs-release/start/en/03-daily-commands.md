@@ -6,7 +6,7 @@ A cheat sheet for the commands you'll reach for most. Add `--json` to any comman
 
 | Command | What it does |
 |---|---|
-| `ha init` | Create the `harness/` directory layout in the current repo. |
+| `ha init` | Create the `harness/` ledger layout and its private nested git repository. |
 | `ha task create --title <title>` | Create a new task package. |
 | `ha task list` | List task packages, with state / module / search filters. |
 | `ha task show <id>` | Show one task with projected status, metadata, hierarchy, relation edges, and fact anchors. |

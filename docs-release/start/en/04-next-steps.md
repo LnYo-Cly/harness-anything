@@ -1,6 +1,7 @@
 # Next steps
 
-You've run a loop and seen the structure land in git. Where to go from here:
+You've run a loop and seen the structure land in the private `harness/` ledger.
+Where to go from here:
 
 **Understand why it's built this way** — start at the overview and read the `learn/` path in order. It covers the primitive kernel, decisions and adjudication, and the fail-closed gates.
 

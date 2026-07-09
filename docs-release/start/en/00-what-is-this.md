@@ -3,9 +3,9 @@
 > **Your agent says it's done. Make it prove it.**
 
 Harness Anything is the accountability layer for AI agents. It turns the
-**decisions, tasks, and facts** your agents produce into first-class records on
-git — queryable, reversible, and reusable — instead of losing them inside a chat
-transcript.
+**decisions, tasks, and facts** your agents produce into first-class records in
+an isolated private ledger git repository — queryable, reversible, and reusable
+— instead of losing them inside a chat transcript.
 
 The point is not nicer note-taking. Agents are good at doing work and bad at
 being accountable for it: they forget context, drift from settled decisions, and
@@ -37,9 +37,9 @@ After the 0.1 package publication to npm, the first-contact command becomes
 `npx harness-anything init`. Until then, keep using the source checkout path
 above.
 
-## What lands in your repo
+## What lands on disk
 
-You run the CLI, and structure starts accumulating in your repo:
+You run the CLI, and structure starts accumulating under `harness/`:
 
 ```text
 $ ha task create --title "Fix login redirect bug"
@@ -50,7 +50,9 @@ $ ha status
 ok command=status path=.harness/cache/projections.sqlite rows=1
 ```
 
-Every task, every decision, every recorded fact lands as plain Markdown you can review in a normal git diff.
+Every task, every decision, every recorded fact lands as plain Markdown inside
+`harness/`. That directory is its own private nested git repository, so review
+ledger diffs with `git -C harness diff`, not the outer project git diff.
 
 ![demo](../assets/demo.gif)
 

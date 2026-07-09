@@ -19,6 +19,9 @@ so the fields below are contracts, not conventions.
   │   ├── <a decision doc>.md
   │   └── <another decision doc>.md
   │
+  ├── objects/
+  │   └── sha256/<2 hex>/<62 hex>        content-addressed blobs
+  │
   └── <tasks root>/
       └── task_<ULID>-<slug>/           one directory per task
           ├── INDEX.md                  frontmatter: task-package/v2
@@ -36,6 +39,16 @@ own directory named `task_<ULID>-<slug>/`, holding a small set of files. **Facts
 have no directory of their own at all — they are recorded inside the `facts.md`
 ledger of the task that produced them. A fact never migrates out; if it matters
 elsewhere, a decision references it in place.
+
+The `objects/sha256/` tree is different from those authored Markdown surfaces. It
+is the content-addressed blob store. A blob is addressed by its SHA-256 digest and
+stored as `objects/sha256/<first-two-hex>/<remaining-hex>`, with a descriptor
+carrying `ref`, `sha256`, `size`, and `mediaType`. Session exports use this as a
+claim-check: the session body is written to the blob store first, then the journal
+payload carries a `bodyRef` and the flush materializes the authored session
+document from that verified blob. In v0 this store has no garbage collection and
+no chunking; large or obsolete blobs remain whole files until a later storage
+version defines a collection policy.
 
 ## The decision file
 
@@ -122,6 +135,13 @@ changes, you record a new fact and, if the old one is now wrong, invalidate it;
 you never rewrite the original. This is why a fact can be trusted as evidence: the
 statement you read is the statement that was recorded, unaltered, next to the
 provenance that says under what conditions it was observed.
+
+Append-only does not mean every duplicate append is an error. When a fact append
+replays a record whose `fact_id` already exists, the store compares the formatted
+record bytes. If the existing record and the incoming record are byte-for-byte the
+same, the append is an idempotent no-op and the file body is left unchanged. If
+the id matches but the bytes differ, the write is still rejected as a duplicate
+fact id.
 
 ## The common thread: provenance
 

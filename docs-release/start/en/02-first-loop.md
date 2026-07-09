@@ -1,6 +1,24 @@
 # Your first loop
 
-Run this end to end in a scratch git repo. In a few minutes you'll have a real task, a fact, and an adjudicated decision — all as Markdown in your repo. Every output below is captured from an actual run.
+Run this end to end in a scratch git repo. In a few minutes you'll have a real
+task, a fact, and an adjudicated decision — all as Markdown inside the private
+`harness/` ledger. Every output below is captured from an actual run.
+
+## 0. Set write attribution
+
+Local `ha` write commands require explicit attribution. Set these once in the
+shell where you run the loop:
+
+```bash
+export HARNESS_ACTOR=human:you
+export HARNESS_GIT_AUTHOR_NAME="Your Name"
+export HARNESS_GIT_AUTHOR_EMAIL="you@example.com"
+```
+
+`HARNESS_ACTOR` must use `kind:id` form; `kind` is one of `human`, `agent`, or
+`system`. Use a real person or agent identity here. The quickstart smoke demo
+uses its own demo-scoped system actor because it writes only to a throwaway
+workspace.
 
 ## 1. Initialize
 
@@ -9,7 +27,25 @@ $ ha init
 ok command=init path=harness/harness.yaml summary="initialized harness at harness/harness.yaml"
 ```
 
-This creates the authored `harness/` directory — your tasks, decisions, and standards live here and go into git. (The generated `.harness/` cache is local-only and stays out of git.)
+This creates the authored `harness/` directory. Your tasks, decisions, and
+standards live here, but not in your project git repository. `ha init` adds
+`harness/` to the outer `.gitignore` and initializes `harness/` as its own
+private nested git repository.
+
+That isolation is the leak-prevention design: code PRs must not include
+`harness/` changes. Commit ledger changes inside `harness/` when you want to
+version the private ledger:
+
+```bash
+git -C harness status
+git -C harness add .
+git -C harness -c user.name="$HARNESS_GIT_AUTHOR_NAME" \
+  -c user.email="$HARNESS_GIT_AUTHOR_EMAIL" \
+  commit -m "docs: update harness ledger"
+```
+
+The generated `.harness/` cache is local-only and also stays out of the outer
+project git repository.
 
 ```text
 harness/
@@ -80,7 +116,9 @@ ok command=graph path=.harness/generated/graph-panorama/index.html
 
 `graph` renders a self-contained HTML panorama linking your tasks, decisions, and facts.
 
-**This is the aha:** what you produced isn't a chat log. It's real, versioned structure in your repo — the task, the fact it observed, and the decision it justified, all linked and all reviewable in a git diff.
+**This is the aha:** what you produced isn't a chat log. It's real, versioned
+structure in the private `harness/` ledger — the task, the fact it observed, and
+the decision it justified, all linked and reviewable with `git -C harness diff`.
 
 ![demo](../assets/demo.gif)
 

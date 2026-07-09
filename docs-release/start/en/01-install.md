@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - **Node.js 24 or newer.** The CLI is tested on Node 24 and 26.
-- **git.** Harness Anything writes into a git repository and uses it as the source of truth.
+- **git.** Harness Anything stores authored ledger files in a private nested git repository under `harness/`.
 
 Check your Node version:
 
@@ -26,6 +26,9 @@ npm run quickstart:demo
 The demo builds the CLI, creates a temporary git workspace, runs `ha init`,
 creates a task, records a fact, lists the fact back, and renders a relation
 graph. It is the 30-second proof that the accountability loop is real.
+The demo uses explicit demo attribution (`system:quickstart-demo`) for that
+throwaway workspace only. When you run `ha` write commands in your own repo, set
+your real write attribution as shown in the first loop.
 
 If you want to see the fail-closed path, run the intentionally broken variant:
 

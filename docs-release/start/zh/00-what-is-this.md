@@ -3,8 +3,8 @@
 > **你的 agent 说做完了。让它拿出证据。**
 
 Harness Anything 是 AI agent 的问责层（accountability layer）。它把你的
-agent 产生的**决策(decision)、任务(task)和事实(fact)**变成 git 上的一等公民
-记录——可查询、可回滚、可重用——而不是丢失在聊天记录里。
+agent 产生的**决策（decision）、任务（task）和事实（fact）**变成隔离的私有
+账本 git 仓里的一级记录——可查询、可回滚、可重用——而不是丢失在聊天记录里。
 
 重点不是把笔记记得更漂亮。Agent 很擅长做事，却很不擅长为自己的工作负责：
 它们会忘记上下文，会偏离已经定下的决策，也会因为你无法手工检查每件事而
@@ -33,9 +33,9 @@ fact，并渲染 relation graph。承重步骤如果拿不出证据，会 fail c
 等 0.1 package 发布到 npm 之后，初见命令会变成 `npx harness-anything init`。在那之前，
 请继续使用上面的源码 checkout 路径。
 
-## 什么会落进你的仓库
+## 什么会落到磁盘上
 
-运行 CLI，结构就开始在你的仓库里积累：
+运行 CLI，结构就开始在 `harness/` 下积累：
 
 ```text
 $ ha task create --title "Fix login redirect bug"
@@ -46,7 +46,9 @@ $ ha status
 ok command=status path=.harness/cache/projections.sqlite rows=1
 ```
 
-每个任务、每个决策、每条记录的事实都落地为纯 Markdown，你可以在普通 git diff 里审查。
+每个任务、每个决策、每条记录的事实都以纯 Markdown 落在 `harness/` 里。
+这个目录是独立的私有嵌套 git 仓，所以审查账本 diff 要用 `git -C harness diff`，
+不是外层项目仓的 git diff。
 
 ![demo](../assets/demo.gif)
 

@@ -16,6 +16,9 @@ frontmatter 不是装饰——在文件被接受之前,它会对着 `packages/ke
   │   ├── <某个 decision 文档>.md
   │   └── <另一个 decision 文档>.md
   │
+  ├── objects/
+  │   └── sha256/<2 hex>/<62 hex>        内容寻址 blob
+  │
   └── <tasks 根>/
       └── task_<ULID>-<slug>/           每个 task 一个目录
           ├── INDEX.md                  frontmatter: task-package/v2
@@ -31,6 +34,13 @@ frontmatter 不是装饰——在文件被接受之前,它会对着 `packages/ke
 `task_<ULID>-<slug>/`,里面放着一小组文件。**Fact** 完全没有属于自己的目录——它们被记录在
 产生它们的那个 task 的 `facts.md` 账本里。fact 从不迁出;如果它在别处也重要,由某个 decision
 就地引用它。
+
+`objects/sha256/` 树不同于这些手写 Markdown 面。它是内容寻址 blob store。一个 blob 由它的
+SHA-256 摘要寻址，存成 `objects/sha256/<前两个十六进制字符>/<剩余十六进制字符>`，描述符携带
+`ref`、`sha256`、`size` 和 `mediaType`。session 导出把它当作 claim-check：先把 session 正文
+写入 blob store，然后 journal payload 携带 `bodyRef`，flush 时再从这个已校验的 blob 物化出手写树
+里的 session 文档。v0 没有 GC，也没有分块；大的或过期的 blob 会一直作为完整文件存在，直到后续存储
+版本定义回收策略。
 
 ## decision 文件
 
@@ -107,6 +117,10 @@ fact 记录在 task 的 `facts.md` 里,每条对着 `fact-record/v1` 校验
 *invalidate*(失效)。没有编辑。一旦写下,fact 就冻结了——如果现实变了,你记录一个新的 fact,
 如果旧的现在错了,就让它失效;你永远不去重写原来那条。这正是 fact 能被当作证据信任的原因:
 你读到的陈述就是当初被记录下来的陈述,原封未动,旁边还有说明它在什么条件下被观察到的出处。
+
+append-only 并不意味着每一次重复追加都会报错。当 fact append 重放一条已有 `fact_id` 的记录时，
+存储层会比较格式化后的记录字节。如果现有记录与传入记录逐字节相同，这次追加就是幂等 no-op，文件
+正文保持不变。如果 id 相同但字节不同，写入仍会作为重复 fact id 被拒绝。
 
 ## 共同的那根线:出处
 
