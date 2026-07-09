@@ -641,8 +641,8 @@
           <span lang="zh">Harness Anything 是 AI agent 的问责层（accountability layer）：agent 产出的每一个决定、任务、事实，都变成 git 里可审计的结构——而"做完了"必须带着证据过门禁。</span>
         </p>
         <p class="sub">
-          <span lang="en">There is no public npm package yet. Clone the repo, run <code>npm run quickstart:demo</code>, and watch the accountability loop create evidence instead of trusting a claim.</span>
-          <span lang="zh">目前还没有公开 npm package。先 clone 仓库，运行 <code>npm run quickstart:demo</code>，亲眼看问责循环产出证据，而不是相信一句 claim。</span>
+          <span lang="en">There is no public npm package and no published release artifact — today you run from a source checkout. See <a href="../start/en/01-install.md">install and quickstart</a> for the current first-contact path; the accountability loop turns each session into evidence you can diff, not a claim you have to trust.</span>
+          <span lang="zh">目前没有公开的 npm package，也没有已发布的产物——今天从源码 checkout 跑起。当前初见路径见 <a href="../start/zh/01-install.md">安装与 quickstart</a>；问责循环会把每一次会话变成可 diff 的证据，而不是一句你只能相信的 claim。</span>
         </p>
       </div>
 
@@ -652,22 +652,9 @@
           <span class="sec-no">01</span>
           <h2><span lang="en">The proof, in one screen</span><span lang="zh">一屏看到证明</span></h2>
           <p class="lead">
-            <span lang="en">The current public path is source checkout first. This smoke builds the CLI, initializes a throwaway git workspace, creates a task, records a queryable fact, and renders the relation graph.</span>
-            <span lang="zh">当前公开路径仍然是源码 checkout。这条 smoke 会构建 CLI、初始化一个临时 git workspace、创建 task、记录可查询的 fact，并渲染 relation graph。</span>
+            <span lang="en">The current public path is a source checkout: clone the repository, install dependencies, and the <code>ha</code> CLI builds and runs against a throwaway git workspace. One loop creates a task, records a queryable fact, proposes and adjudicates a decision, and renders the relation graph — every step landing as Markdown committed to git.</span>
+            <span lang="zh">当前公开路径是源码 checkout：clone 仓库、装好依赖，<code>ha</code> CLI 就构建并在一个临时 git workspace 里跑起来。一个循环会创建任务、记录可查询的 fact、提议并裁决一个决策、并渲染 relation graph——每一步都作为 Markdown 提交进 git。</span>
           </p>
-          <figure class="code">
-            <figcaption><span lang="en">run the source smoke today</span><span lang="zh">今天可跑的源码 smoke</span></figcaption>
-<pre><span class="c">$</span> git clone https://github.com/FairladyZ625/harness-anything
-<span class="c">$</span> cd harness-anything
-<span class="c">$</span> npm ci
-<span class="c">$</span> npm run quickstart:demo
-<span class="ok">{</span>
-  "ok": true,
-  "schema": "quickstart-demo/v1",
-  "taskId": "task_...",
-  "factRef": "fact/task_.../F-ABCDEF12"
-<span class="ok">}</span></pre>
-          </figure>
           <p>
             <span lang="en">Three things to take away:</span>
             <span lang="zh">三件要点：</span>
@@ -675,11 +662,11 @@
           <ul>
             <li><span lang="en">It solves the <em>"where did the reasoning go?"</em> problem by putting agent work into records you can diff.</span><span lang="zh">它把 agent 工作放进可 diff 的记录里，解决<em>"推理去哪了？"</em>的问题。</span></li>
             <li><span lang="en">Unlike note-taking, these are structured records <em>with gates</em>: decisions can be overturned, tasks have lifecycle exits, and facts are anchored to the task that observed them.</span><span lang="zh">和记笔记不同，这些是<em>带 gate</em>的结构化记录：决策可以被推翻，task 有生命周期出口，fact 锚定到观察到它们的任务。</span></li>
-            <li><span lang="en">After the 0.1 package publication to npm, first contact becomes <code>npx harness-anything init</code>. Today, use the source smoke or install <code>ha</code> locally from the checkout.</span><span lang="zh">等 0.1 package 发布到 npm 后，初见入口会变成 <code>npx harness-anything init</code>。今天请用源码 smoke，或从 checkout 本地安装 <code>ha</code>。</span></li>
+            <li><span lang="en">A published npm package and signed installers are deliberately <em>not</em> claimed — the codebase self-declares its release boundary and a test guards that declaration. The authoritative status lives in <a href="../release-posture.md">the release posture</a>.</span><span lang="zh">已发布的 npm package 与签名安装包被刻意<em>排除</em>在声明之外——代码库自我声明了它的发布边界，并有测试守护该声明。权威状态见 <a href="../release-posture.md">发布姿态</a>。</span></li>
           </ul>
           <p>
-            <span lang="en">Full path: <a href="start/en/01-install.md">install and quickstart</a>.</span>
-            <span lang="zh">完整路径：<a href="start/zh/01-install.md">安装与 quickstart</a>。</span>
+            <span lang="en">Full path: <a href="../start/en/01-install.md">install and quickstart</a>.</span>
+            <span lang="zh">完整路径：<a href="../start/zh/01-install.md">安装与 quickstart</a>。</span>
           </p>
         </section>
 
@@ -939,6 +926,10 @@
             <span lang="en">They even store asymmetrically. Decisions are <strong>centralized</strong> — the spine, the one projection a human is meant to watch. Tasks are <strong>containers</strong>, each its own directory. Facts are <strong>embedded</strong> in the task that produced them — because a fact without its task is untrustworthy. Take "redis p99 = 50ms at 10k QPS" out of context and you've stripped its provenance. The rule: don't move it, reference it.</span>
             <span lang="zh">它们的存储方式甚至是不对称的。决策是<strong>集中存放</strong>的——主干，人类该盯着看的那个唯一投影。任务是<strong>容器</strong>，各自一个目录。事实是<strong>嵌入</strong>在产生它的任务里的——因为脱离了任务的事实是不可信的。把"redis 在 10k QPS 下 p99 = 50ms"抽离语境，你就剥掉了它的出处。口号是：不要搬它，引用它。</span>
           </p>
+          <p>
+            <span lang="en">And tasks aren't flat. A task can be created with a <code>--parent</code>, so work composes into a tree you can render with <code>ha task tree</code>. Tasks declare <code>depends-on</code> relations to each other, and the adapter rejects a dependency that would close a cycle — so "blocked behind itself" can't happen by accident. (One piece of fine print: <code>parent</code> is set at creation and can't be repointed afterwards; if you meant a different shape, supersede, don't edit.)</span>
+            <span lang="zh">而且任务不是扁平的。一个任务可以在创建时带 <code>--parent</code>，于是工作组合成一棵树，可以用 <code>ha task tree</code> 渲染。任务之间可以声明 <code>depends-on</code> 关系，而适配器会拒绝任何会闭合环的依赖——于是"被自己挡住"不会因失误而发生。（一条细则：<code>parent</code> 在创建时设定、之后不能改挂；如果你想要的是另一种结构，去 supersede，而不是去改它。）</span>
+          </p>
           <button class="chip" type="button" data-target-tab="how" data-target-id="storage">
             <span lang="en">See how it's built</span><span lang="zh">看它是怎么存的</span>
             <span class="arrow" aria-hidden="true">→</span>
@@ -1023,12 +1014,36 @@
           </p>
           <ul>
             <li><span lang="en"><strong>Self-hosting the loop</strong> — turn the tool fully on its own development. It's the only honest proof of usefulness: a tool that can't carry its own work has no business carrying anyone else's.</span><span lang="zh"><strong>让循环自我托管</strong>——把工具彻底用在它自己的开发上。这是有用性唯一诚实的证明：连自己的工作都扛不起来的工具，没资格去扛别人的。</span></li>
-            <li><span lang="en"><strong>A visual surface</strong> — let people who don't live on the command line still <em>see</em> the structure, since the command line is the real adoption bottleneck and most people meet a tool through its surface.</span><span lang="zh"><strong>一个可视界面</strong>——让不常泡命令行的人也能<em>看到</em>结构，因为命令行才是真正的采用瓶颈，而大多数人是通过表层认识一个工具的。</span></li>
+            <li><span lang="en"><strong>A visual surface, already partial</strong> — a desktop panel exists today and reads your <em>real</em> ledger: tasks, decisions, facts, and the relation graph, grouped and filterable. It is strictly read-only (you can't drag a card to change a status, and decisions aren't adjudicated inside it), it runs from source rather than as a signed installer, and it stays on your own machine. Most people meet a tool through its surface, so the honest version matters more than the flattering one.</span><span lang="zh"><strong>一个可视界面，且已是部分现实</strong>——今天已经存在一个桌面面板，读的是你<em>真实</em>的账本：任务、决策、事实和关系图，可分组、可筛选。它严格只读（你不能拖动卡片来改状态，决策也不会在面板里被裁决），它从源码运行、而不是一个签名安装包，并且只待在你自己的机器上。大多数人通过表层认识一个工具，所以诚实的版本比好听的版本更重要。</span></li>
             <li><span lang="en"><strong>New scenarios</strong> — bring domains beyond coding (research, operations) onto the same vertical model. It's the test of the central bet: a kernel that knows nothing about any domain should absorb a new one purely through a declaration.</span><span lang="zh"><strong>新场景</strong>——把编码之外的领域（研究、运维）纳入同一套场景模型。这是对核心赌注的检验：一个对任何领域一无所知的内核，应该仅凭一份声明就能吸收一个新领域。</span></li>
           </ul>
           <p>
             <span lang="en">One thing is deliberately <em>not</em> on the list: widening the kernel. New surfaces and new domains arrive in the layers around it; the moment a direction seems to need a new primitive, that's a signal to reexamine the direction, not the kernel.</span>
             <span lang="zh">有一件事刻意<em>不</em>在清单上：拓宽内核。新的界面和领域都出现在它周围的层里；一旦某个方向看起来需要一个新原语，那是重新审视方向的信号，而不是审视内核。</span>
+          </p>
+        </section>
+
+        <section class="block" id="what-we-wont-claim">
+          <span class="sec-no">08</span>
+          <h3><span lang="en">The same gate, applied to itself</span><span lang="zh">同一扇门，也用在我们自己身上</span></h3>
+          <p class="lead">
+            <span lang="en">The adoption law above is uncomfortable applied inward, so we made the machine say it for us. The GUI distribution module self-declares its status as <code>source-checkout-and-package-smoke-only</code>, and a test fails if that string — or the "not shipped" booleans behind it — ever drift. An accountability layer that can't hold itself accountable is just a ledger with better marketing.</span>
+            <span lang="zh">把上面的采用律用在自己身上，会让人不舒服，所以我们让机器替我们说出口。GUI 分发模块把自己的状态自声明为 <code>source-checkout-and-package-smoke-only</code>，而一旦这个字符串——或它背后那一组"未发布"布尔值——发生漂移，测试就会失败。一个连自己都问责不了的问责层，只不过是一本营销更好的账本。</span>
+          </p>
+          <p>
+            <span lang="en">So in place of a feature checklist, here is the honest negation. The first line is held by that very test; the rest are held by the code itself — no network listener to expose, write hooks plumbed but called by no view, no verified run on another operating system. To claim any of them, we'd have to ship it first:</span>
+            <span lang="zh">所以这里不放功能清单，而是诚实的否定式。第一行由刚才那个测试守住；其余各项则由代码本身守住——没有可以暴露的网络监听器、接好线却没有任何视图调用的写钩子、没有在另一个操作系统上被验证跑过的运行。要声称其中任何一项，我们都得先把它造出来：</span>
+          </p>
+          <ul>
+            <li><span lang="en">No published npm release, no signed or notarized installers, no auto-update feed, no release artifacts. Today's path is a source checkout, on purpose.</span><span lang="zh">没有已发布的 npm release，没有签名或公证的安装包，没有自动更新源，没有发布产物。今天的路径就是源码 checkout，这是刻意的。</span></li>
+            <li><span lang="en">The desktop panel is read-only: you can't drag a card to change a status, decisions aren't adjudicated inside it, and tasks aren't managed there. It exists to <em>see</em> the ledger, not to rewrite it.</span><span lang="zh">桌面面板是只读的：你不能拖动卡片来改状态，决策不会在面板里被裁决，任务也不在那里被管理。它的存在是为了<em>看见</em>账本，而不是改写账本。</span></li>
+            <li><span lang="en">No remote network exposure. The daemon speaks a local Unix socket only — no TCP port, no HTTP API, no WebSocket, no attach tokens, no team-concurrency over SSH. The network story is, deliberately, that there is no network story.</span><span lang="zh">没有远程网络暴露。daemon 只通过本地 Unix socket 通信——没有 TCP 端口、没有 HTTP API、没有 WebSocket、没有 attach token、没有通过 SSH 的团队并发。网络这件事，我们刻意让它没有故事。</span></li>
+            <li><span lang="en">No shipped cross-platform desktop app. macOS is the only path anyone has exercised; Windows and Linux build artifacts exist in CI but have never been run-verified.</span><span lang="zh">没有已发布的跨平台桌面 app。macOS 是唯一被真正跑过的路径；Windows 和 Linux 的构建产物在 CI 里存在，但从未被运行验证过。</span></li>
+            <li><span lang="en">No enforced role-based access. Without a hand-written <code>harness/people.yaml</code>, every connection is fully trusted — RBAC is opt-in, not the default.</span><span lang="zh">没有强制的角色访问控制。没有手写的 <code>harness/people.yaml</code> 时，每一条连接都被完全信任——RBAC 是可选开启的，不是默认。</span></li>
+          </ul>
+          <p>
+            <span lang="en">If any of that disappoints you, good — it means the gate is doing its job. The authoritative version lives in <a href="../release-posture.md">the release posture</a>, and it is a single file on purpose: this page links there instead of restating its labels, so the truth has exactly one place to live.</span>
+            <span lang="zh">如果这些让你失望，那是好事——说明门在起作用。权威版本在 <a href="../release-posture.md">发布姿态</a>里，它刻意是单一文件：本页链接过去，而不是复述它的标签，好让真相只有一个栖身之所。</span>
           </p>
         </section>
 
@@ -1186,10 +1201,39 @@
             <span lang="en">Read that as one design move: <strong>stamp, then commit — one door.</strong> Because every load-bearing write ends by stamping a watermark and then committing to git, there is exactly one place where structure becomes durable, and exactly one artifact to audit afterward. A record without its watermark, or one that never became a git commit, simply isn't a real write — and the checks that run after a merge are built to notice precisely that.</span>
             <span lang="zh">把这理解成一个设计动作：<strong>先盖章，再提交——一扇门。</strong>因为每一次承重写入都以盖一个水印、再提交到 git 收尾，所以结构变得持久的地方只有一个，事后可审计的工件也只有一个。一条没有水印、或从未变成 git 提交的记录，根本不算一次真实的写入——而合并之后跑的检查，正是为发现这一点而造的。</span>
           </p>
+          <p>
+            <span lang="en">Three hardening layers sit on top of that single door. First, <strong>real actor attribution</strong>: every write must carry a <code>HARNESS_ACTOR</code> identity, and the CLI has no fallback — a write without a real author is refused at the door, never anonymized through. Second, <strong>optimistic concurrency on decision documents</strong>: concurrent edits produce a retryable <code>cas_watermark_mismatch</code> instead of a silent overwrite, so two sessions can't quietly stomp each other's reasoning. Third, a <strong>content-addressed blob store</strong> stashes large session bodies under <code>harness/objects/sha256/…</code>, keyed by hash — so bulk evidence is deduplicated and tamper-evident without bloating the Markdown that humans actually read.</span>
+            <span lang="zh">在这唯一的门之上，还有三层硬化。第一，<strong>真实的 actor 归属</strong>：每次写入都必须带一个 <code>HARNESS_ACTOR</code> 身份，CLI 没有任何回退——一条没有真实作者的写入会在门口被拒，而不会被匿名放行。第二，<strong>决策文档上的乐观并发</strong>：并发的编辑会产生一个可重试的 <code>cas_watermark_mismatch</code>，而不是一次静默覆写，于是两个会话没法悄悄踩掉彼此的推理。第三，一个<strong>内容寻址的 blob 存储</strong>把大体量的会话正文以哈希为键放在 <code>harness/objects/sha256/…</code> 下——于是批量证据既去重又防篡改，又不会撑爆人类真正要读的那份 Markdown。</span>
+          </p>
+        </section>
+
+        <section class="block" id="daemon">
+          <span class="sec-no">04</span>
+          <button class="chip backchip" type="button" data-target-tab="why" data-target-id="the-bet">
+            <span class="arrow" aria-hidden="true">←</span>
+            <span lang="en">Why this matters</span><span lang="zh">为什么这很重要</span>
+          </button>
+          <h3><span lang="en">The daemon: many repos, one write path</span><span lang="zh">daemon：多个仓库，同一条写路径</span></h3>
+          <p>
+            <span lang="en">That write coordinator doesn't have to live inside the CLI process. An optional <em>local</em> daemon serves many repositories through the same serialized, journaled write path — so the CLI and the desktop panel share one spine instead of two parallel writers that could race each other on the same ledger.</span>
+            <span lang="zh">那个写协调器不必活在 CLI 进程里。一个可选的<em>本地</em> daemon 通过同一条串行化、日志化的写路径服务多个仓库——于是 CLI 与桌面面板共享同一条主干，而不是两个可能在同一账本上互赛的并行写者。</span>
+          </p>
+          <figure class="code">
+            <figcaption><span lang="en">one daemon, many repos, opt-in</span><span lang="zh">一个 daemon，多个仓库，opt-in</span></figcaption>
+<pre><span class="c"># register as many repos as you want, then start one daemon</span>
+<span class="c">$</span> ha daemon repo register <span class="k">--repo-id</span> A <span class="k">--root</span> /path/to/A
+<span class="c">$</span> ha daemon start
+<span class="c"># route a command at a specific repo by id</span>
+<span class="c">$</span> HARNESS_DAEMON_MODE=local ha <span class="k">--repo</span> A task list</pre>
+          </figure>
+          <p>
+            <span lang="en">Two honest boundaries on this. The CLI defaults to <em>direct, in-process</em> mode — the daemon is opt-in, not imposed on you. And the daemon is strictly local: it listens on a Unix socket (a Windows named pipe on Windows) and nothing else. New repositories can be registered while the daemon is already running and are picked up within about a second — but if you wanted to reach a daemon on another machine, that is, deliberately, a non-feature today.</span>
+            <span lang="zh">这里有两个诚实的边界。CLI 默认是<em>直接、进程内</em>模式——daemon 是 opt-in 的，不强加给你。而 daemon 严格只本地：它监听一个 Unix socket（Windows 上是命名管道），仅此而已。新仓库可以在 daemon 已经运行时注册，大约一秒内被接进来——但如果你想连另一台机器上的 daemon，今天这刻意不是一项功能。</span>
+          </p>
         </section>
 
         <section class="block" id="projection">
-          <span class="sec-no">04</span>
+          <span class="sec-no">05</span>
           <button class="chip backchip" type="button" data-target-tab="why" data-target-id="the-bet">
             <span class="arrow" aria-hidden="true">←</span>
             <span lang="en">Why this matters</span><span lang="zh">为什么这很重要</span>
@@ -1210,7 +1254,7 @@
         </section>
 
         <section class="block" id="how-gates">
-          <span class="sec-no">05</span>
+          <span class="sec-no">06</span>
           <button class="chip backchip" type="button" data-target-tab="why" data-target-id="gates">
             <span class="arrow" aria-hidden="true">←</span>
             <span lang="en">Why this matters</span><span lang="zh">为什么这很重要</span>
@@ -1255,7 +1299,7 @@
         </section>
 
         <section class="block" id="vertical-engine">
-          <span class="sec-no">06</span>
+          <span class="sec-no">07</span>
           <button class="chip backchip" type="button" data-target-tab="why" data-target-id="adoption-law">
             <span class="arrow" aria-hidden="true">←</span>
             <span lang="en">Why this matters</span><span lang="zh">为什么这很重要</span>
@@ -1276,7 +1320,7 @@
         </section>
 
         <section class="block" id="provenance">
-          <span class="sec-no">07</span>
+          <span class="sec-no">08</span>
           <button class="chip backchip" type="button" data-target-tab="why" data-target-id="decision-vs-verdict">
             <span class="arrow" aria-hidden="true">←</span>
             <span lang="en">Why this matters</span><span lang="zh">为什么这很重要</span>
