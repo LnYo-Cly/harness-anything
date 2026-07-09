@@ -3,6 +3,7 @@
 import { spawn } from "node:child_process";
 import { availableParallelism } from "node:os";
 import { resolve } from "node:path";
+import { selectIntegrationShardFiles } from "./integration-test-shards.mjs";
 import { collectSlowTests, collectTestFiles, formatSlowTestSummary, parseRunnerArgs, resolveTestConcurrency, selectTestFiles } from "./node-test-runner-lib.mjs";
 import { testTierManifest, testTierNames } from "./test-tier-manifest.mjs";
 
@@ -35,6 +36,10 @@ if (selection.errors.length > 0) {
     console.error(error);
   }
   process.exit(1);
+}
+
+if (options.shard !== undefined) {
+  selection.files = selectIntegrationShardFiles(options.shard);
 }
 
 if (selection.files.length === 0) {

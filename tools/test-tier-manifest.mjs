@@ -24,7 +24,9 @@ export const testTierManifest = {
     "tools/run-gui-e2e-tests.test.mjs",
     "tools/run-local-gates-check.test.mjs",
     "tools/run-local-check.test.mjs",
-    "tools/run-node-tests.test.mjs"
+    "tools/run-node-tests.test.mjs",
+    "tools/run-manifest-gates.test.mjs",
+    "tools/check-integration-test-shards.test.mjs"
   ],
   contract: [
     "packages/application/test/code-doc-reconciliation.test.ts",

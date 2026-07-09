@@ -511,6 +511,10 @@ function parseManifestRunnerCommand(command) {
       index += 1;
       continue;
     }
+    if (arg === "--shard") {
+      index += 1;
+      continue;
+    }
   }
 
   return invocation;
