@@ -515,3 +515,128 @@ fact file reports an RPC-only forbidden touch.
 - Deletion remains the explicit Phase 2 decision point described above.
 - Phase 1 does not flip `task.document.write-stage` from
   `doc-sync-allowed-pending-B2`; that belongs with Phase 2 submit enforcement.
+
+## 16. Phase 2 Implementation
+
+Implemented scope:
+
+- Added the shared doc-sync zone extractor in `packages/application/src/doc-sync.ts`.
+  CLI preview/status and daemon submit validation now consume this same module;
+  there is no daemon-side copied classifier.
+- Moved physical fs/git submit work into the CLI daemon adapter
+  `packages/cli/src/daemon/doc-sync-service.ts`, keeping application doc-sync
+  classification pure and under the existing physical-I/O boundary.
+- Added `repo.doc.sync.submit` to the daemon JSON-RPC method registry as an
+  active repo-write method with schema ids
+  `daemon.doc-sync-submit-request/v1` and
+  `daemon.doc-sync-submit-result/v1`.
+- Implemented submit-time validation with explicit fail-closed unresolved zone
+  handling. A doc-sync candidate now requires `unresolvedTouches.length === 0`;
+  unresolved path/zone cases reject instead of being treated as outside the
+  forbidden set.
+- Implemented `baseLedgerSha` / per-file `baseBlobSha256` CAS. Stale center
+  blob rejects with `_tag: "WriteRejected"`, `code:
+  "cas_watermark_mismatch"`, current/expected watermarks, `retryable: true`,
+  and a conflict report. Content hash assertion mismatches reject as
+  `doc_sync_conflict`.
+- Implemented post-apply rpc-only zone checking and rollback before the doc-sync
+  commit. The checker snapshots rpc-only zone signatures before apply and
+  restores changed files on violation.
+- Added runtime event `actorAxes` support with
+  `{ principal, executor, responsibleHuman }`. Submit events fill executor from
+  session runtime where available. If there is no authenticated person,
+  `principal` and `responsibleHuman` remain `null`; no agent id is mapped into a
+  fake person id pending `dec_mrdrbkp7`.
+- Flipped `tools/write-road-registry.json` row
+  `task.document.write-stage` from `doc-sync-allowed-pending-B2` to
+  `doc-sync-allowed`, and registered the new doc-sync submit direct fs/git write
+  surface under that row.
+- Reduced forbidden-touch report noise by selecting a single best registry row
+  for duplicate `bearing + zoneClass` rpc-only matches using registry-declared
+  route richness. The task frontmatter case now reports
+  `task.lifecycle.transition` instead of three task-lifecycle rows.
+
+Files changed:
+
+- `packages/application/src/doc-sync.ts`
+- `packages/cli/src/daemon/doc-sync-service.ts`
+- `packages/cli/src/commands/core/doc-sync.ts`
+- `packages/cli/src/index.ts`
+- `packages/daemon/src/protocol/method-registry.ts`
+- `packages/daemon/src/protocol/json-rpc-server.ts`
+- `packages/kernel/src/domain/runtime-event.ts`
+- `packages/kernel/src/schemas/runtime-event.ts`
+- `packages/application/src/runtime-event-ledger-service.ts`
+- `packages/application/src/index.ts`
+- `packages/cli/test/doc-sync-service.test.ts`
+- `packages/daemon/test/doc-sync-protocol.test.ts`
+- `packages/daemon/test/json-rpc-protocol.test.ts`
+- `packages/cli/test/docmap-cli.test.ts`
+- `tools/test-tier-manifest.mjs`
+- `tools/write-road-registry.json`
+
+Deletion policy remains explicit: deletion through doc sync is still rejected as
+undefined. This report continues to mark the replacement path as pending
+governance; no silent delete path was added.
+
+## 17. Phase 2 Verification Evidence
+
+TDD red controls were run before implementation:
+
+- `node --test packages/application/test/doc-sync-service.test.ts
+  packages/daemon/test/json-rpc-protocol.test.ts` initially failed because the
+  shared module and daemon method did not exist.
+
+Commands run after implementation:
+
+- `node --test packages/cli/test/doc-sync-service.test.ts
+  packages/daemon/test/doc-sync-protocol.test.ts
+  packages/daemon/test/json-rpc-protocol.test.ts
+  packages/cli/test/docmap-cli.test.ts` -> passed, 37 tests after the protocol
+  split.
+- `npm run typecheck` -> passed.
+- `npm run lint` -> passed.
+- `npm run harness:check-write-road-registry` -> passed, 31 registry rows and
+  305 discovered write surfaces.
+- `npm run check:local` -> passed fast tier in 25.2s.
+- `npm run build -w @harness-anything/cli` -> passed before running reckon.
+
+Doc-sync dedicated coverage added in `packages/cli/test/doc-sync-service.test.ts`
+and `packages/daemon/test/doc-sync-protocol.test.ts`:
+
+1. Pure task prose submit passes and commits with hermetic git author.
+2. Same `.md` extension counterexample is fixed in tests: `task_plan.md` prose is
+   accepted while `INDEX.md` frontmatter rejects.
+3. Decision typed record mutation rejects.
+4. Disguised task fact record mutation rejects.
+5. Stale `baseLedgerSha` / `baseBlobSha256` rejects with A2 CAS shape.
+6. Post-apply rpc-only mutation fails and rolls back changed files.
+7. Non-`.md` task prose is allowed when daemon-derived bearing/zone resolves to
+   the doc-sync registry row.
+8. Daemon protocol exposes `repo.doc.sync.submit` and appends dual-axis actor
+   fields without inventing a responsible human.
+
+## 18. Reckon Stop Point
+
+The required reckon command did not turn green in this worker environment.
+
+Evidence:
+
+- `ha decision reckon dec_mrcda9kw --task
+  task_01KX3W4V1EDPHPTGWYYBQQ2J75 --json` from this worktree failed with
+  `decision_read_failed` because this worktree does not contain the private
+  authored decision ledger.
+- After rebuilding the CLI, `node packages/cli/dist/cli/src/index.js --root
+  /Users/lizeyu/Projects/coding-agent-harness/harness-anything --json decision
+  reckon dec_mrcda9kw --task task_01KX3W4V1EDPHPTGWYYBQQ2J75` read the decision
+  but returned `uncoveredClaimRefs:
+  ["decision/dec_mrcda9kw/C1","decision/dec_mrcda9kw/C2"]` and failed while
+  trying to record the reckon fact with `JournalUnavailable`.
+- The same rebuilt CLI with `--dry-run` avoided fact writing and still returned
+  `decision_reckon_uncovered` for C1 and C2, so the blocker is uncovered
+  ledger-side claim evidence rather than only the fact-write failure.
+
+Per the Phase 2 redline, I did not modify reckon, add claim/checker exemptions,
+or write ledger facts from this worker. The remaining action is for CEO to run
+or record the ledger-side coverage/fact path from the canonical checkout once
+this code diff is reviewed.

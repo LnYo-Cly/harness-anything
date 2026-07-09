@@ -128,7 +128,7 @@ test("CLI doc status reports prose candidates and forbidden structured touches",
     const dryRun = runJson(rootDir, ["doc", "sync", "--dry-run"]);
     assert.equal(dryRun.ok, true);
     assert.equal(dryRun.command, "doc-sync-dry-run");
-    assert.equal(dryRun.report.writeIntentPreview.submitImplemented, false);
+    assert.equal(dryRun.report.writeIntentPreview.submitImplemented, true);
     assert.equal(dryRun.report.writeIntentPreview.changes.length, 1);
   });
 });

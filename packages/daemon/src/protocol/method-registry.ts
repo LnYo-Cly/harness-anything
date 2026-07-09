@@ -63,6 +63,20 @@ const daemonStatusContracts = [
   }
 ] as const satisfies ReadonlyArray<JsonRpcMethodContract>;
 
+const docSyncContracts = [
+  {
+    method: "repo.doc.sync.submit",
+    mode: "active",
+    namespace: "repo",
+    inputSchemaId: "daemon.doc-sync-submit-request/v1",
+    outputSchemaId: "daemon.doc-sync-submit-result/v1",
+    errorSchemaId: "daemon.protocol-error/v1",
+    auth: "local-session-token",
+    requiresRepo: true,
+    commandClass: "repo-write"
+  }
+] as const satisfies ReadonlyArray<JsonRpcMethodContract>;
+
 const notificationStubContracts = [
   {
     method: "repo.notifications.subscribe",
@@ -284,6 +298,7 @@ export const jsonRpcMethodContracts = [
   ...protocolMethodContracts,
   ...cliCommandContracts,
   ...daemonStatusContracts,
+  ...docSyncContracts,
   ...jsonRpcServiceMethodContracts,
   ...notificationStubContracts,
   ...adminReservedContracts
