@@ -63,6 +63,7 @@
         "check-import-boundaries",
         "check-write-coordinator-boundary",
         "check-bypass-write-boundary",
+        "check-write-road-registry",
         "check-kernel-dead-exports",
         "check-relation-cycle-substrate",
         "scan-forbidden-symbols",
@@ -104,6 +105,7 @@
         "check-import-boundaries",
         "check-write-coordinator-boundary",
         "check-bypass-write-boundary",
+        "check-write-road-registry",
         "check-kernel-dead-exports",
         "check-relation-cycle-substrate",
         "scan-forbidden-symbols",
@@ -1635,6 +1637,77 @@
           "check": true,
           "checkPr": true,
           "script": "harness:check-bypass-write-boundary"
+        },
+        "rewriteCi": {
+          "pullRequestJobs": [
+            "boundaries"
+          ],
+          "nonPullRequestJobs": [
+            "full-check"
+          ]
+        },
+        "branchProtection": {
+          "required": true,
+          "contexts": [
+            "boundaries"
+          ]
+        }
+      }
+    },
+    {
+      "id": "check-write-road-registry",
+      "command": "npm run harness:check-write-road-registry",
+      "category": "boundary",
+      "tier": "pr-required",
+      "tierReason": null,
+      "authoritySource": [
+        "task_01KX19G7VXRHSEH6YE7GHYMJYP",
+        "dec_mrcda9kw",
+        "dec_mrcu2kud",
+        "harness/adr/ADR-0022-gate-defense-graph-invariants-and-authority-derivation.md",
+        "tools/write-road-registry.json"
+      ],
+      "consumerScope": [
+        "AST-derived WriteOpKind and machine artifact boundary coverage",
+        "AST-derived coordinator callsites and direct fs/git write sinks",
+        "daemon repo.command.run write-classified actions",
+        "mutating GUI/API routes",
+        "preset/script declared writes and produces"
+      ],
+      "githubContext": {
+        "requiredContexts": [
+          "boundaries"
+        ],
+        "workflowJobs": [
+          "boundaries"
+        ],
+        "nodeVersions": [
+          24
+        ]
+      },
+      "allowlistPolicy": {
+        "allowed": true,
+        "location": "tools/write-road-registry.json",
+        "adrOrDecisionRequired": true,
+        "notes": "Registry rows are the external authority for write road and write-channel classification; checker code only derives discoveries and validates coverage."
+      },
+      "changeControl": {
+        "ordinaryImplementationMayModify": false,
+        "requiresGovernanceEvidence": true,
+        "protectedSurfaces": [
+          "tools/check-write-road-registry.mjs",
+          "tools/check-write-road-registry.test.mjs",
+          "tools/write-road-registry.json",
+          "package.json:scripts.harness:check-write-road-registry",
+          "tools/gate-manifest.json"
+        ]
+      },
+      "bypassFixtureRequired": true,
+      "executionSurfaces": {
+        "packageJson": {
+          "check": true,
+          "checkPr": true,
+          "script": "harness:check-write-road-registry"
         },
         "rewriteCi": {
           "pullRequestJobs": [
