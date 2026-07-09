@@ -14,8 +14,8 @@ fix that with a better prompt. What works is what has always worked for people:
 **a camera, and consequences.**
 
 Put every claim on a permanent record, gate the exits, and make a false `done`
-impossible to sustain. In our own dogfood, every ungated path was bypassed; no
-gate means 100% bypass.
+impossible to sustain. In our own self-involving use, every ungated path was
+bypassed; no gate means 100% bypass.
 
 ## See the 30-second proof first
 

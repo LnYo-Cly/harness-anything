@@ -8,8 +8,8 @@ Harness Anything 是 AI agent 的问责层（accountability layer）：agent 产
 
 你没法靠一句更好的 prompt 阻止 agent 在当下抄近路。真正有用的是人类一直
 在用的老办法：**摄像头和后果。**把每个 claim 放进永久记录，给出口加门禁，
-让虚假的“完成”无法维持。我们在 dogfood 里看到的是：没有门禁的路径会被
-100% 旁路。没有 gate，就等于一定被绕过。
+让虚假的“完成”无法维持。我们在自用（self-involving）中看到的是：没有门禁
+的路径会被 100% 旁路。没有 gate，就等于一定被绕过。
 
 ## 先跑 30 秒证明
 
