@@ -13,9 +13,16 @@ export function checkMergifyQueueContexts({
 } = {}) {
   const queueContexts = parseMergifyQueueCheckSuccessContexts(mergifyText);
   const requiredContexts = parseManifestBranchProtectionContexts(gateManifestText);
+  const errors = [];
   const missing = requiredContexts.filter((context) => !queueContexts.includes(context));
   const extra = queueContexts.filter((context) => !requiredContexts.includes(context));
-  const errors = [];
+
+  if (requiredContexts.length === 0) {
+    errors.push("gate manifest declares no branch-protection contexts");
+  }
+  if (queueContexts.length === 0) {
+    errors.push(".mergify.yml queue_conditions declares no check-success contexts");
+  }
 
   if (missing.length > 0) {
     errors.push(`missing required contexts in .mergify.yml queue_conditions: ${missing.join(", ")}`);
