@@ -16,12 +16,12 @@ test("daemon client routes writes for two registered repos through one user-leve
       const alphaCreated = runRawJson(alphaRoot, ["new-task", "--title", "Alpha Routed Write"], {
         HARNESS_DAEMON_MODE: "local",
         HARNESS_DAEMON_USER_ROOT: userRoot,
-        HARNESS_DAEMON_IDLE_MS: "5000"
+        HARNESS_DAEMON_IDLE_MS: "60000"
       });
       const betaCreated = runRawJson(betaRoot, ["new-task", "--title", "Beta Routed Write"], {
         HARNESS_DAEMON_MODE: "local",
         HARNESS_DAEMON_USER_ROOT: userRoot,
-        HARNESS_DAEMON_IDLE_MS: "5000"
+        HARNESS_DAEMON_IDLE_MS: "60000"
       });
 
       assert.equal(alphaCreated.ok, true);

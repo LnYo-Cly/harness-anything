@@ -1,13 +1,22 @@
 import assert from "node:assert/strict";
-import { execFile, execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { hostname, tmpdir } from "node:os";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { promisify } from "node:util";
+import {
+  defaultDaemonUserRoot,
+  delay,
+  runDaemonCommand,
+  runRawJson,
+  runRawJsonAsync,
+  runRawJsonMaybeFail,
+  sleep,
+  stopDaemonQuietly,
+  withTempRoot,
+  withTempRootAsync
+} from "./helpers/daemon-cli.ts";
 
-const cliEntry = path.resolve("packages/cli/src/index.ts");
-const execFileAsync = promisify(execFile);
 const expectedCliVersion = readCliPackageVersion();
 
 test("daemon client mode preserves command receipt output shape against direct mode", () => {
@@ -247,22 +256,26 @@ test("daemon bootstrap-server is idempotent and installs roster hooks and read-o
 test("daemon client auto-registers initialized single repo on first local command", () => {
   withTempRoot((rootDir) => {
     const userRoot = path.join(rootDir, "user-daemon");
-    runRawJson(rootDir, ["init"], { HARNESS_DAEMON_MODE: "direct", HARNESS_DAEMON_USER_ROOT: userRoot });
+    try {
+      runRawJson(rootDir, ["init"], { HARNESS_DAEMON_MODE: "direct", HARNESS_DAEMON_USER_ROOT: userRoot });
 
-    const listed = runRawJson(rootDir, ["task", "list"], {
-      HARNESS_DAEMON_MODE: "local",
-      HARNESS_DAEMON_USER_ROOT: userRoot,
-      HARNESS_DAEMON_IDLE_MS: "1500"
-    });
+      const listed = runRawJson(rootDir, ["task", "list"], {
+        HARNESS_DAEMON_MODE: "local",
+        HARNESS_DAEMON_USER_ROOT: userRoot,
+        HARNESS_DAEMON_IDLE_MS: "60000"
+      });
 
-    assert.equal(listed.ok, true);
-    const registry = JSON.parse(readFileSync(path.join(userRoot, "registry.json"), "utf8")) as { repos: Array<{ repoId: string; canonicalRoot: string; state: string }> };
-    assert.deepEqual(registry.repos.map((repo) => [repo.repoId, repo.canonicalRoot, repo.state]), [["canonical", realpathSync.native(rootDir), "enabled"]]);
+      assert.equal(listed.ok, true);
+      const registry = JSON.parse(readFileSync(path.join(userRoot, "registry.json"), "utf8")) as { repos: Array<{ repoId: string; canonicalRoot: string; state: string }> };
+      assert.deepEqual(registry.repos.map((repo) => [repo.repoId, repo.canonicalRoot, repo.state]), [["canonical", realpathSync.native(rootDir), "enabled"]]);
 
-    const status = runDaemonCommand(rootDir, ["daemon", "status", "--user-root", userRoot, "--json"], { HARNESS_DAEMON_USER_ROOT: userRoot });
-    assert.equal(status.started, true);
-    assert.equal(status.repoId, "canonical");
-    assert.equal(status.rootDir, realpathSync.native(rootDir));
+      const status = runDaemonCommand(rootDir, ["daemon", "status", "--user-root", userRoot, "--json"], { HARNESS_DAEMON_USER_ROOT: userRoot });
+      assert.equal(status.started, true);
+      assert.equal(status.repoId, "canonical");
+      assert.equal(status.rootDir, realpathSync.native(rootDir));
+    } finally {
+      stopDaemonQuietly(rootDir, userRoot);
+    }
   });
 });
 
@@ -325,32 +338,34 @@ test("daemon client --repo override targets a registered repo from a different c
     const userRoot = path.join(workspaceRoot, "user-daemon");
     const alphaRoot = path.join(workspaceRoot, "alpha");
     const betaRoot = path.join(workspaceRoot, "beta");
-    for (const rootDir of [alphaRoot, betaRoot]) {
-      mkdirSync(rootDir, { recursive: true });
-      runRawJson(rootDir, ["init"], { HARNESS_DAEMON_MODE: "direct", HARNESS_DAEMON_USER_ROOT: userRoot });
+    try {
+      for (const rootDir of [alphaRoot, betaRoot]) {
+        mkdirSync(rootDir, { recursive: true });
+        runRawJson(rootDir, ["init"], { HARNESS_DAEMON_MODE: "direct", HARNESS_DAEMON_USER_ROOT: userRoot });
+      }
+      runDaemonCommand(alphaRoot, ["daemon", "repo", "register", "--repo-id", "alpha", "--root", alphaRoot, "--user-root", userRoot, "--no-link", "--json"], {
+        HARNESS_DAEMON_USER_ROOT: userRoot
+      });
+      runDaemonCommand(betaRoot, ["daemon", "repo", "register", "--repo-id", "beta", "--root", betaRoot, "--user-root", userRoot, "--no-link", "--json"], {
+        HARNESS_DAEMON_USER_ROOT: userRoot
+      });
+
+      const listed = runRawJson(betaRoot, ["--repo", "alpha", "task", "list"], {
+        HARNESS_DAEMON_MODE: "local",
+        HARNESS_DAEMON_USER_ROOT: userRoot,
+        HARNESS_DAEMON_IDLE_MS: "60000"
+      });
+      assert.equal(listed.ok, true);
+
+      const status = runDaemonCommand(betaRoot, ["--repo", "alpha", "daemon", "status", "--user-root", userRoot, "--json"], {
+        HARNESS_DAEMON_USER_ROOT: userRoot
+      });
+      assert.equal(status.repoId, "alpha");
+      assert.equal(status.rootDir, realpathSync.native(alphaRoot));
+      assert.deepEqual((status.repos as Array<{ repoId: string }>).map((repo) => repo.repoId), ["alpha", "beta"]);
+    } finally {
+      stopDaemonQuietly(betaRoot, userRoot);
     }
-    runDaemonCommand(alphaRoot, ["daemon", "repo", "register", "--repo-id", "alpha", "--root", alphaRoot, "--user-root", userRoot, "--no-link", "--json"], {
-      HARNESS_DAEMON_USER_ROOT: userRoot
-    });
-    runDaemonCommand(betaRoot, ["daemon", "repo", "register", "--repo-id", "beta", "--root", betaRoot, "--user-root", userRoot, "--no-link", "--json"], {
-      HARNESS_DAEMON_USER_ROOT: userRoot
-    });
-
-    const listed = runRawJson(betaRoot, ["--repo", "alpha", "task", "list"], {
-      HARNESS_DAEMON_MODE: "local",
-      HARNESS_DAEMON_USER_ROOT: userRoot,
-      // Long idle keeps the daemon alive for the status probe below; a short
-      // idle races daemon exit now that reconcile no longer delays it.
-      HARNESS_DAEMON_IDLE_MS: "5000"
-    });
-    assert.equal(listed.ok, true);
-
-    const status = runDaemonCommand(betaRoot, ["--repo", "alpha", "daemon", "status", "--user-root", userRoot, "--json"], {
-      HARNESS_DAEMON_USER_ROOT: userRoot
-    });
-    assert.equal(status.repoId, "alpha");
-    assert.equal(status.rootDir, realpathSync.native(alphaRoot));
-    assert.deepEqual((status.repos as Array<{ repoId: string }>).map((repo) => repo.repoId), ["alpha", "beta"]);
   });
 });
 
@@ -421,167 +436,6 @@ test("daemon repo commands register list and unregister the user-level registry"
   });
 });
 
-function withTempRoot<T>(fn: (rootDir: string) => T): T {
-  const rootDir = mkdtempSync(path.join(tmpdir(), "ha-cli-daemon-"));
-  try {
-    return fn(rootDir);
-  } finally {
-    removeTempRootSync(rootDir);
-  }
-}
-
-async function withTempRootAsync<T>(fn: (rootDir: string) => Promise<T>): Promise<T> {
-  const rootDir = mkdtempSync(path.join(tmpdir(), "ha-cli-daemon-"));
-  try {
-    return await fn(rootDir);
-  } finally {
-    await stopDaemonForRoot(rootDir);
-    await removeTempRoot(rootDir);
-  }
-}
-
-async function stopDaemonForRoot(rootDir: string): Promise<void> {
-  const pid = daemonPidFromStatus(rootDir);
-  if (!pid) return;
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch (error) {
-    if (isNoSuchProcess(error)) return;
-    throw error;
-  }
-  await waitForProcessExit(pid, 3_000);
-}
-
-function daemonPidFromStatus(rootDir: string): number | undefined {
-  let status: Record<string, unknown>;
-  try {
-    status = runDaemonCommand(rootDir, ["daemon", "status", "--json"]);
-  } catch {
-    return undefined;
-  }
-  if (typeof status.pid === "number" && Number.isSafeInteger(status.pid) && status.pid > 0) return status.pid;
-  const daemonId = status.daemonId;
-  if (typeof daemonId !== "string") return undefined;
-  const match = /^ha-(\d+)$/u.exec(daemonId);
-  if (!match) return undefined;
-  const pid = Number.parseInt(match[1]!, 10);
-  return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
-}
-
-function waitForProcessExit(pid: number, timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  return new Promise((resolve, reject) => {
-    const check = () => {
-      try {
-        process.kill(pid, 0);
-      } catch (error) {
-        if (isNoSuchProcess(error)) {
-          resolve();
-          return;
-        }
-        reject(error);
-        return;
-      }
-      if (Date.now() >= deadline) {
-        reject(new Error(`daemon process ${pid} did not exit within ${timeoutMs}ms`));
-        return;
-      }
-      setTimeout(check, 25);
-    };
-    check();
-  });
-}
-
-async function removeTempRoot(rootDir: string): Promise<void> {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    try {
-      rmSync(rootDir, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      if (!isRetriableRemoveError(error) || attempt === 7) throw error;
-      await delay(25 * (attempt + 1));
-    }
-  }
-}
-
-function removeTempRootSync(rootDir: string): void {
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    try {
-      rmSync(rootDir, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      if (!isRetriableRemoveError(error) || attempt === 7) throw error;
-      sleep(25 * (attempt + 1));
-    }
-  }
-}
-
-function isRetriableRemoveError(error: unknown): boolean {
-  return typeof error === "object"
-    && error !== null
-    && "code" in error
-    && ["ENOTEMPTY", "EBUSY", "EPERM"].includes(String((error as { readonly code?: unknown }).code));
-}
-
-function isNoSuchProcess(error: unknown): boolean {
-  return typeof error === "object"
-    && error !== null
-    && "code" in error
-    && (error as { readonly code?: unknown }).code === "ESRCH";
-}
-
-function runRawJson(rootDir: string, args: ReadonlyArray<string>, env: Readonly<Record<string, string>> = {}): Record<string, unknown> {
-  const stdout = execFileSync(process.execPath, [cliEntry, "--root", rootDir, "--json", ...args], {
-    encoding: "utf8",
-    env: daemonTestEnv(rootDir, env)
-  });
-  return JSON.parse(stdout) as Record<string, unknown>;
-}
-
-function runRawJsonMaybeFail(
-  rootDir: string,
-  args: ReadonlyArray<string>,
-  env: Readonly<Record<string, string>> = {}
-): { readonly status: number | null; readonly receipt: Record<string, unknown> } {
-  const result = spawnSync(process.execPath, [cliEntry, "--root", rootDir, "--json", ...args], {
-    encoding: "utf8",
-    env: daemonTestEnv(rootDir, env)
-  });
-  assert.equal(result.stderr, "");
-  return {
-    status: result.status,
-    receipt: JSON.parse(result.stdout) as Record<string, unknown>
-  };
-}
-
-async function runRawJsonAsync(rootDir: string, args: ReadonlyArray<string>, env: Readonly<Record<string, string>> = {}): Promise<Record<string, unknown>> {
-  const { stdout } = await execFileAsync(process.execPath, [cliEntry, "--root", rootDir, "--json", ...args], {
-    encoding: "utf8",
-    env: daemonTestEnv(rootDir, env)
-  });
-  return JSON.parse(stdout) as Record<string, unknown>;
-}
-
-function runDaemonCommand(rootDir: string, args: ReadonlyArray<string>, env: Readonly<Record<string, string>> = {}): Record<string, unknown> {
-  const stdout = execFileSync(process.execPath, [cliEntry, "--root", rootDir, ...args], {
-    encoding: "utf8",
-    env: daemonTestEnv(rootDir, { HARNESS_DAEMON_MODE: "direct", ...env })
-  });
-  return JSON.parse(stdout) as Record<string, unknown>;
-}
-
-function daemonTestEnv(rootDir: string, env: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    HARNESS_DAEMON_USER_ROOT: defaultDaemonUserRoot(rootDir),
-    ...env
-  };
-}
-
-function defaultDaemonUserRoot(rootDir: string): string {
-  return path.join(rootDir, ".daemon-user");
-}
-
 function readCliPackageVersion(): string {
   const pkg = JSON.parse(readFileSync(path.resolve("packages/cli/package.json"), "utf8")) as { readonly version?: unknown };
   assert.equal(typeof pkg.version, "string");
@@ -595,14 +449,6 @@ function normalizeVolatileReceipt(receipt: Record<string, unknown>): Record<stri
     ...receipt,
     ...(meta ? { meta } : {})
   };
-}
-
-function sleep(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function waitForCondition(check: () => boolean, timeoutMs = 4_000): Promise<void> {
