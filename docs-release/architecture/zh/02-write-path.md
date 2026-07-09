@@ -17,6 +17,12 @@ WriteCoordinator
 
 调用方甚至不用手工构造 op。`packages/kernel/src/write-coordination/write-helpers.ts` 里的辅助函数(`writeCoordinatedTaskDocuments`、`writeCoordinatedPayload`)负责组装 op、推导它的 `opId`、入队并 flush——于是所有通往持久化存储的路径,都收束成同一个两步动作:**先 enqueue,再 flush**。
 
+本地 CLI 写入还必须带着显式的 actor 归因进门。CLI 会在创建协调器之前解析这份归因：设置
+`HARNESS_ACTOR=kind:id`，其中 `kind` 只能是 `agent`、`human` 或 `system`，并设置
+`HARNESS_GIT_AUTHOR_NAME` 与 `HARNESS_GIT_AUTHOR_EMAIL` 作为 git commit author。`HARNESS_ACTOR`
+没有 fallback，也不会从 git config 推断；它缺失或格式错误时，本地写入不能继续。daemon 写入走
+daemon 的已认证 actor 路径，并要求该身份能解析出用于 git author 的邮箱。
+
 ## Journal:先意图,后效果
 
 具体的协调器是**带 journal** 的实现,位于 `packages/kernel/src/store/write-journal-coordinator.ts`(`makeJournaledWriteCoordinator`)。它把每一次写入拆成两个阶段,好让任何一处崩溃留下的都是可恢复的状态,而不是损坏的状态。
@@ -51,6 +57,11 @@ enqueue                          flush
 - **写水印**(`write-watermark/v1`)紧挨着 journal,记录 `lastCommittedOpIds`、`lastCommitSha` 和一个 `projectionHash`。协调器靠它在下一次运行时判断:哪些 op 已经做完、哪些还需要重放。
 - **decision 水印**(`_coordinatorWatermark`)被盖进协调器写出的每一个 decision 文档的 frontmatter 里。因为它是*由*唯一写入路径写下的,它的存在与唯一性,就成了"这个 decision 文件确实走过了协调器,而不是被手写或复制粘贴出来"的证据。`packages/kernel/src/projection/post-merge-checks.ts` 里的合并后检查(`findDecisionWatermarkIssues`)会在一个 decision 缺失 `_coordinatorWatermark`、或两个 decision 共用同一个水印时,硬失败(hard-fail)。
 
+decision snapshot 也可以把这个水印当成 compare-and-swap 守卫。一次 snapshot 写入可以携带
+`expectedWatermark`；写路径会在替换文件之前读取当前 decision 水印。如果当前值与期望值不一致，
+写入会以 `cas_watermark_mismatch` 被拒绝，并标记为可重试，不会改动任何文档。在 CLI 面，它通过
+普通的 `write_rejected` 外壳呈现，而 CAS 原因是需要刷新后重试的 cause。
+
 一扇门,意味着只有一处盖章;每一次被接受的写入盖一枚章,意味着每一条记录都能被追溯回产生它的那次操作。
 
 ## 提交是写入的一部分
@@ -60,12 +71,16 @@ enqueue                          flush
 ## 拒绝才是默认
 
 写入路径自上而下继承了 fail-closed 的行为。校验(`validateOp`)会拒绝:`opId` 或 `entityId` 为空的 op、payload 不是对象的 op、没有理由的硬删除。预检(`preflightWriteOp`)会拒绝那些文档路径会互相冲突的写入。payload 校验会拒绝任何字节已不再哈希成所记录 `payloadHash` 的记录。对一个已归档、已终态、或仍有入边引用的 task,硬删除会被直接回绝(`assertHardDeleteAllowed`,它查的是 [Disposition Guard](../../learn/zh/03-gates-and-fail-closed.md) 所执行的同一套处置规则)。上面每一种情况,抛出的都是一次拒绝,而不是写下任何东西——安全的默认值是"否"。
+decision CAS 不匹配也属于同一家族：一个过期的 expected watermark 会得到可重试的
+`cas_watermark_mismatch`，而不是最后写入者获胜的覆盖。
 
 ## 崩溃恢复
 
 因为意图和效果被拆开,而且两者都是持久的,一次被中断的写入不是"丢失或损坏的写入",而是一次*可重放*的写入。启动时 `recover` 会在同一把锁下,对水印尚未覆盖的 journal 记录重新跑一遍 `flush`。有两处细节让重放保持诚实:
 
 - **非幂等的追加**(一次 `progress_append` 增量)在其文件变更落地的那一刻,就写下一行 `apply-marker/v1`。若崩溃发生在变更之后、提交之前,重放看到这个标记就跳过重写文本——但仍然会提交并给这个 op 盖水印,于是这条记录恰好完成一次。
+- **Fact append delta** 有更窄的幂等规则。用同一个 `fact_id` 重放同一条格式化后的 `fact-record/v1`
+  是 no-op；用同一个 id 重放不同字节，则作为重复记录被拒绝。
 - **水印是权威。** 重放信任 `lastCommittedOpIds`,而绝不信任那份可能过期的 journal,来判断还剩什么要做。
 
 回报,就是整个系统赖以立足的不变式:只有一扇门,这扇门为每一次放行的写入盖章并提交,而任何经过它的东西,都不会被留在残缺或无从追溯的状态里。

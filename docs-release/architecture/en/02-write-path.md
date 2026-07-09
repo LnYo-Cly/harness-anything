@@ -37,6 +37,15 @@ Callers don't even build ops by hand. The helpers in
 derive its `opId`, enqueue it, and flush — so every path into durable storage
 funnels through the same two-step *enqueue then flush*.
 
+Local CLI writes also have to enter with explicit actor attribution. The CLI
+resolves that before it creates the coordinator: set `HARNESS_ACTOR=kind:id`
+where `kind` is `agent`, `human`, or `system`, plus
+`HARNESS_GIT_AUTHOR_NAME` and `HARNESS_GIT_AUTHOR_EMAIL` for the git commit
+author. `HARNESS_ACTOR` has no fallback and is not inferred from git config; if it
+is absent or malformed, the local write cannot proceed. Daemon writes use the
+daemon's authenticated actor path instead, and require that identity to resolve to
+a git author email.
+
 ## The journal: intent, then effect
 
 The concrete coordinator is the **journaled** implementation in
@@ -106,6 +115,14 @@ that trace. Two watermarks matter:
   (`findDecisionWatermarkIssues`) hard-fail if a decision is missing its
   `_coordinatorWatermark`, or if two decisions share the same one.
 
+Decision snapshots can also use that watermark as a compare-and-swap guard. A
+snapshot write may carry an `expectedWatermark`; the write path reads the current
+decision watermark just before replacing the file. If the current value does not
+match the expected value, the write is rejected with `cas_watermark_mismatch`,
+marked retryable, and no document is changed. At the CLI surface this is reported
+through the normal `write_rejected` envelope, with the CAS reason as the cause to
+refresh from.
+
 One door means one place to stamp, and one stamp per accepted write means every
 record can be traced back to the operation that produced it.
 
@@ -131,6 +148,8 @@ terminal, or still has inbound references (`assertHardDeleteAllowed`, which
 consults the same disposition rules the [Disposition
 Guard](../../learn/en/03-gates-and-fail-closed.md) enforces). Each of these
 raises a rejection rather than writing anything — the safe default is "no."
+Decision CAS mismatches are part of the same family: a stale expected watermark is
+a retryable `cas_watermark_mismatch`, not a last-writer-wins overwrite.
 
 ## Crash recovery
 
@@ -144,6 +163,9 @@ cover, under the same lock. Two subtleties keep replay honest:
   crash happens after the mutation but before the commit, replay sees the marker
   and skips re-writing the text — but still commits and watermarks the op, so
   the record completes exactly once.
+- **Fact append deltas** have a narrower idempotence rule. Replaying the same
+  formatted `fact-record/v1` with the same `fact_id` is a no-op; replaying the
+  same id with different bytes is rejected as a duplicate.
 - **The watermark is authoritative.** Replay trusts `lastCommittedOpIds`, never
   the possibly-stale journal, to decide what still needs doing.
 
