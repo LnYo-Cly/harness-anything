@@ -9,7 +9,8 @@ task, and fact your agent produces becomes auditable structure on git — and
 You cannot stop an agent from cutting a corner in the moment. What works is the
 old human pattern: **a camera, and consequences.** Put the claim on a permanent
 record, gate the exits, and make a false "done" impossible to sustain. In our
-own dogfood, every ungated path was bypassed; no gate means 100% bypass.
+own self-involving use, every ungated path was bypassed; no gate means 100%
+bypass.
 
 ## Run the 30-second proof
 
