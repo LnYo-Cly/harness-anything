@@ -32,6 +32,7 @@ test("buildSteps appends integration and gui lanes only in the full tier", () =>
 
   // Fast tier mirrors the CI boundaries + package-policy surface.
   assert.ok(fastScripts.includes("harness:check-import-boundaries"));
+  assert.ok(fastScripts.includes("harness:check-integration-test-shards"));
   assert.ok(fastScripts.includes("harness:check-gate-surface"));
   assert.ok(fastScripts.includes("harness:check-package-policy"));
 });

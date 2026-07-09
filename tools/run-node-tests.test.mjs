@@ -9,7 +9,8 @@ test("parseRunnerArgs accepts tier and slow summary options", () => {
     list: false,
     slowThresholdMs: 250,
     slowLimit: 3,
-    concurrency: undefined
+    concurrency: undefined,
+    shard: undefined
   });
 });
 
@@ -17,6 +18,12 @@ test("parseRunnerArgs accepts a concurrency cap", () => {
   assert.equal(parseRunnerArgs(["--concurrency", "4"], testTierNames).concurrency, 4);
   assert.equal(parseRunnerArgs(["--concurrency=2"], testTierNames).concurrency, 2);
   assert.throws(() => parseRunnerArgs(["--concurrency", "x"], testTierNames), /--concurrency/u);
+});
+
+test("parseRunnerArgs accepts integration shards only for the integration tier", () => {
+  assert.equal(parseRunnerArgs(["--tier", "integration", "--shard", "3"], testTierNames).shard, "3");
+  assert.equal(parseRunnerArgs(["--tier=integration", "--shard=2"], testTierNames).shard, "2");
+  assert.throws(() => parseRunnerArgs(["--tier", "fast", "--shard", "1"], testTierNames), /--shard is only supported/u);
 });
 
 test("parseRunnerArgs rejects unknown tiers and options", () => {

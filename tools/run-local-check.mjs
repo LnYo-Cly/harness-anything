@@ -47,6 +47,7 @@ const FAST_STEPS = [
   ["boundaries: file-complexity", "harness:check-file-complexity"],
   ["boundaries: forbidden-symbols", "harness:scan-forbidden-symbols"],
   ["boundaries: private-boundary", "harness:check-private-boundary"],
+  ["boundaries: integration-test-shards", "harness:check-integration-test-shards"],
   ["boundaries: gate-surface", "harness:check-gate-surface"],
   ["boundaries: locale-content", "harness:check-locale-content"],
   ["boundaries: runtime-release-readiness", "harness:check-runtime-release-readiness"],

@@ -65,6 +65,7 @@
         "check-duplicate-definitions",
         "check-integrity-single-source",
         "check-private-boundary",
+        "check-integration-test-shards",
         "check-docs-release-map",
         "check-docmap-fresh",
         "check-gate-surface",
@@ -104,6 +105,7 @@
         "check-duplicate-definitions",
         "check-integrity-single-source",
         "check-private-boundary",
+        "check-integration-test-shards",
         "check-docs-release-map",
         "check-docmap-fresh",
         "check-gate-surface",
@@ -120,14 +122,14 @@
         "check-legacy-intake-readiness",
         "check-supply-chain"
       ],
-      "harnessLeafGateCount": 30
+      "harnessLeafGateCount": 31
     },
     "rewriteCi": {
       "pullRequestGateJobs": [
         "pr-body-lint",
         "typecheck",
         "fast-contract",
-        "integration",
+        "integration-shard",
         "boundaries",
         "package-policy",
         "supply-chain",
@@ -135,7 +137,8 @@
         "node26-compatibility"
       ],
       "helperJobsNotRegisteredAsGates": [
-        "changes"
+        "changes",
+        "integration"
       ],
       "nonPullRequestGateJobs": [
         "full-check"
@@ -433,7 +436,7 @@
           "pr-body-lint",
           "typecheck",
           "fast-contract",
-          "integration",
+          "integration-shard",
           "boundaries",
           "package-policy",
           "supply-chain",
@@ -472,7 +475,7 @@
             "pr-body-lint",
             "typecheck",
             "fast-contract",
-            "integration",
+            "integration-shard",
             "boundaries",
             "package-policy",
             "supply-chain",
@@ -848,7 +851,7 @@
           "integration"
         ],
         "workflowJobs": [
-          "integration"
+          "integration-shard"
         ],
         "nodeVersions": [
           24
@@ -877,7 +880,7 @@
         },
         "rewriteCi": {
           "pullRequestJobs": [
-            "integration"
+            "integration-shard"
           ],
           "nonPullRequestJobs": []
         },
@@ -2038,6 +2041,71 @@
           "check": true,
           "checkPr": true,
           "script": "harness:check-private-boundary"
+        },
+        "rewriteCi": {
+          "pullRequestJobs": [
+            "boundaries"
+          ],
+          "nonPullRequestJobs": [
+            "full-check"
+          ]
+        },
+        "branchProtection": {
+          "required": true,
+          "contexts": [
+            "boundaries"
+          ]
+        }
+      }
+    },
+    {
+      "id": "check-integration-test-shards",
+      "command": "npm run harness:check-integration-test-shards",
+      "category": "local-consistency",
+      "tier": "pr-required",
+      "tierReason": null,
+      "authoritySource": [
+        "tools/test-tier-manifest.mjs",
+        "tools/integration-test-shards.mjs",
+        "tools/check-integration-test-shards.mjs"
+      ],
+      "consumerScope": [
+        "integration shard declaration must cover every integration test file exactly once"
+      ],
+      "githubContext": {
+        "requiredContexts": [
+          "boundaries"
+        ],
+        "workflowJobs": [
+          "boundaries"
+        ],
+        "nodeVersions": [
+          24
+        ]
+      },
+      "allowlistPolicy": {
+        "allowed": false,
+        "location": null,
+        "adrOrDecisionRequired": false,
+        "notes": "The shard checker is fail-closed and has no allowlist."
+      },
+      "changeControl": {
+        "ordinaryImplementationMayModify": false,
+        "requiresGovernanceEvidence": true,
+        "protectedSurfaces": [
+          "tools/test-tier-manifest.mjs",
+          "tools/integration-test-shards.mjs",
+          "tools/check-integration-test-shards.mjs",
+          "package.json:scripts.harness:check-integration-test-shards",
+          "tools/gate-manifest.json"
+        ]
+      },
+      "bypassFixtureRequired": false,
+      "executionSurfaces": {
+        "packageJson": {
+          "check": true,
+          "checkPr": true,
+          "script": "harness:check-integration-test-shards"
         },
         "rewriteCi": {
           "pullRequestJobs": [

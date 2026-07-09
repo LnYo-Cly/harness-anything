@@ -10,7 +10,8 @@ export function parseRunnerArgs(args, tierNames) {
     list: false,
     slowThresholdMs: 1000,
     slowLimit: 10,
-    concurrency: undefined
+    concurrency: undefined,
+    shard: undefined
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -63,12 +64,26 @@ export function parseRunnerArgs(args, tierNames) {
       options.concurrency = parsePositiveInteger(arg.slice("--concurrency=".length), "--concurrency");
       continue;
     }
+    if (arg === "--shard") {
+      const value = args[index + 1];
+      if (value === undefined) throw new Error("--shard requires a value");
+      options.shard = value;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--shard=")) {
+      options.shard = arg.slice("--shard=".length);
+      continue;
+    }
 
     throw new Error(`unknown run-node-tests option: ${arg}`);
   }
 
   if (options.tier !== "all" && !tierNames.includes(options.tier)) {
     throw new Error(`unknown test tier: ${options.tier}; expected all, ${tierNames.join(", ")}`);
+  }
+  if (options.shard !== undefined && options.tier !== "integration") {
+    throw new Error("--shard is only supported with --tier integration");
   }
 
   return options;
