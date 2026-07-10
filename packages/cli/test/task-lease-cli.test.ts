@@ -117,12 +117,12 @@ test("configured identity supplies principal while HARNESS_ACTOR supplies only a
   });
 });
 
-test("configured identity supports direct human claim without HARNESS_ACTOR", () => {
+test("configured identity supports direct human claim through --actor", () => {
   withTempRoot((rootDir) => {
     writeHarnessIdentity(rootDir, "person_zeyu", "Zeyu Li");
     const created = runJson(rootDir, ["new-task", "--title", "Configured Human Claim"]);
 
-    const claimed = runJson(rootDir, ["task", "claim", created.taskId], true, {
+    const claimed = runJson(rootDir, ["--actor", "human:person_zeyu", "task", "claim", created.taskId], true, {
       HARNESS_ACTOR: ""
     });
     const holder = claimed.report.effectiveHolder;
@@ -231,7 +231,7 @@ function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = t
   try {
     const childEnv = {
       ...process.env,
-      HARNESS_ACTOR: "human:tester",
+      HARNESS_ACTOR: "agent:harness-test",
       HARNESS_GIT_AUTHOR_NAME: "Harness Tester",
       HARNESS_GIT_AUTHOR_EMAIL: "tester@example.test",
       ...env

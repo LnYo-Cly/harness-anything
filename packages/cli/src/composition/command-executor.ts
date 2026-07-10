@@ -9,7 +9,6 @@ import {
   makeRuntimeEventLedgerService,
   makeTaskHolderService,
   type ProvenanceSessionExportResult,
-  type TaskHolderPersonPrincipal,
   type TaskHolderPrincipal
 } from "../../../application/src/index.ts";
 import type { WriteCoordinator, WriteError } from "../../../kernel/src/index.ts";
@@ -19,8 +18,8 @@ import { actionTaskId } from "../cli/parse-args.ts";
 import { requiresConflictMarkerPreflight, runRegisteredCommand } from "../cli/runner-registry.ts";
 import type { CliResult, ParsedCommand } from "../cli/types.ts";
 import { leaseEnforcementEnabled } from "../commands/settings.ts";
-import { CliActorAttributionError, resolveLocalCliActorAttribution, type CliActorAttribution } from "./actor-attribution.ts";
-import { CliPrincipalResolutionError, readConfiguredLocalPrincipal, resolveCliTaskHolderPrincipal } from "./local-principal.ts";
+import { CliActorAttributionError, journalActorWithSource, resolveLocalCliActorAttribution, type CliActorAttribution } from "./actor-attribution.ts";
+import { CliPrincipalResolutionError, resolveCliTaskHolderPrincipal } from "./local-principal.ts";
 import {
   defaultCliAdapterProvider,
   type CliCompositionAdapterProvider
@@ -71,11 +70,6 @@ export async function runRegisteredCommandWithCliComposition(
   let actorAttributionResolved = false;
   let actorAttribution: CliActorAttribution | undefined;
   let actorAttributionError: CliActorAttributionError | undefined;
-  let configuredPrincipal: TaskHolderPersonPrincipal | undefined;
-  const getConfiguredPrincipal = () => {
-    configuredPrincipal ??= readConfiguredLocalPrincipal(layoutInput);
-    return configuredPrincipal;
-  };
   const getActorAttribution = () => {
     if (!actorAttributionResolved) {
       actorAttributionResolved = true;
@@ -85,10 +79,7 @@ export async function runRegisteredCommandWithCliComposition(
         } else if (options.requireProvidedActorAttribution) {
           throw new CliActorAttributionError(options.missingActorAttributionMessage ?? "Actor attribution is required.");
         } else {
-          actorAttribution = resolveLocalCliActorAttribution(process.env, () => ({
-            kind: "human",
-            id: getConfiguredPrincipal().personId
-          }));
+          actorAttribution = resolveLocalCliActorAttribution(process.env, command.actor);
         }
       } catch (error) {
         actorAttributionError = error instanceof CliActorAttributionError
@@ -109,7 +100,7 @@ export async function runRegisteredCommandWithCliComposition(
     makeAttributedWriteCoordinator(() => provider.createWriteCoordinator({
       rootDir: command.rootDir,
       layoutOverrides: command.layoutOverrides,
-      actor: getActorAttribution().actor,
+      actor: journalActorWithSource(getActorAttribution()),
       commitAuthor: getActorAttribution().commitAuthor,
       sessionId: getSessionBranchId()
     }), getActorAttribution, options.missingActorAttributionMessage, actor));
@@ -120,7 +111,7 @@ export async function runRegisteredCommandWithCliComposition(
     makeAttributedWriteCoordinator(() => provider.createWriteCoordinator({
       rootDir: command.rootDir,
       layoutOverrides: command.layoutOverrides,
-      actor: getActorAttribution().actor,
+      actor: journalActorWithSource(getActorAttribution()),
       commitAuthor: getActorAttribution().commitAuthor
     }), getActorAttribution, options.missingActorAttributionMessage, actor));
   const makeSessionWriteCoordinator = requiresConflictMarkerPreflight(command.action)

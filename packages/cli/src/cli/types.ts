@@ -180,6 +180,7 @@ export interface ParsedCommand {
   readonly rootDir: string;
   readonly layoutOverrides?: HarnessLayoutOverrides;
   readonly daemonRepoId?: string;
+  readonly actor?: string;
   readonly json: boolean;
   readonly action:
     | { readonly kind: "init"; readonly addNpmScripts: boolean; readonly projectName?: string }

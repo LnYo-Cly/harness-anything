@@ -7,21 +7,29 @@ import type { HarnessLayoutOverrides } from "../../../kernel/src/index.ts";
 import type { CliResult, ParsedCommand } from "./types.ts";
 
 export function parseArgs(argv: ReadonlyArray<string>): { readonly ok: true; readonly value: ParsedCommand } | { readonly ok: false; readonly error: CliResult["error"] } {
-  const { rootDir, authoredRoot, daemonRepoId, json, args: rawArgs } = stripGlobalOptions(argv);
+  const { rootDir, authoredRoot, daemonRepoId, actor, json, args: rawArgs } = stripGlobalOptions(argv);
   const jsonInput = applyJsonInputLayer(rawArgs, process.cwd());
   if (!jsonInput.ok) return { ok: false, error: jsonInput.error };
   const args = jsonInput.args;
   const layoutOverrides = authoredRoot ? { authoredRoot } : undefined;
 
   const help = parseHelpRequest(args, rootDir, json, layoutOverrides);
-  if (help) return attachDaemonRepoId(help, daemonRepoId);
+  if (help) return attachActor(attachDaemonRepoId(help, daemonRepoId), actor);
 
   const parsed = parseRegisteredCommand(args, rootDir, json);
-  if (parsed) return attachDaemonRepoId(attachLayoutOverrides(parsed, layoutOverrides), daemonRepoId);
+  if (parsed) return attachActor(attachDaemonRepoId(attachLayoutOverrides(parsed, layoutOverrides), daemonRepoId), actor);
   return {
     ok: false,
     error: cliError(CliErrorCode.UnknownCommand, `Supported commands: ${commandRegistry.map((entry) => entry.primary).join("; ")}, template list, template render, preset validate, vertical validate.`)
   };
+}
+
+function attachActor(
+  parsed: { readonly ok: true; readonly value: ParsedCommand } | { readonly ok: false; readonly error: CliResult["error"] },
+  actor: string | undefined
+): { readonly ok: true; readonly value: ParsedCommand } | { readonly ok: false; readonly error: CliResult["error"] } {
+  if (!parsed.ok || !actor) return parsed;
+  return { ok: true, value: { ...parsed.value, actor } };
 }
 
 function parseHelpRequest(
