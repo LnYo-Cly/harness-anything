@@ -74,6 +74,7 @@ test("CLI reference-task preset materializes localized references on demand", ()
 
 test("CLI task readers keep existing references directories compatible", () => {
   withTempRoot((rootDir) => {
+    runJson(rootDir, ["init"]);
     const created = runJson(rootDir, [
       "task",
       "create",
@@ -89,9 +90,12 @@ test("CLI task readers keep existing references directories compatible", () => {
     writeFileSync(legacyReferencePath, "# Legacy input\n", "utf8");
 
     const shown = runJson(rootDir, ["task", "show", created.taskId]);
+    const checked = runJson(rootDir, ["check", "--profile", "target-project", "--strict"]);
 
     assert.equal(shown.report.task.taskId, created.taskId);
     assert.equal(shown.report.task.status, "planned");
+    assert.equal(checked.ok, true);
+    assert.equal(checked.report.summary.hardFailCount, 0);
     assert.equal(readFileSync(legacyReferencePath, "utf8"), "# Legacy input\n");
   });
 });
