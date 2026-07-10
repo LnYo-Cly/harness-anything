@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { ensureTestHarnessIdentity } from "./helpers/git-fixtures.ts";
 
 const cliEntry = path.resolve("packages/cli/src/index.ts");
 const taskIdPattern = /^task_[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$/u;
@@ -556,6 +557,7 @@ function runJson(
 function withTempRoot<T>(fn: (rootDir: string) => T): T {
   const rootDir = mkdtempSync(path.join(tmpdir(), "ha-p4-cli-"));
   try {
+    ensureTestHarnessIdentity(rootDir);
     return fn(rootDir);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });

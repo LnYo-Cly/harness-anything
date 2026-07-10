@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { ensureTestHarnessIdentity } from "./helpers/git-fixtures.ts";
 import { runtimeEventPolicyForAction } from "../src/cli/command-event-policy.ts";
 import { commandDescriptors } from "../src/cli/command-registry.ts";
 import { requiresConflictMarkerPreflight } from "../src/cli/runner-registry.ts";
@@ -93,12 +94,14 @@ const expectedAutoRuntimeEventKinds = [
   "progress-append",
   "record-fact",
   "status-set",
+  "task-claim",
   "task-amend",
   "task-archive",
   "task-complete",
   "task-delete",
   "task-relate",
   "task-reopen",
+  "task-release",
   "task-review",
   "task-supersede",
   "worktree-create"
@@ -177,7 +180,7 @@ test("CLI conflict preflight blocks representative write commands before output"
       assert.equal(result.error?.code, "conflict_marker_present", entry.args.join(" "));
       assert.equal(existsSync(path.join(rootDir, entry.missingPath)), false, entry.args.join(" "));
     }
-  });
+  }, { identity: false });
 });
 
 test("CLI conflict preflight treats list-then-vanished files as transient", () => {
@@ -213,9 +216,10 @@ test("CLI write coordinator flush rechecks conflict markers after early prefligh
   });
 });
 
-function withTempRoot<T>(fn: (rootDir: string) => T): T {
+function withTempRoot<T>(fn: (rootDir: string) => T, options: { readonly identity?: boolean } = {}): T {
   const rootDir = mkdtempSync(path.join(tmpdir(), "ha-conflict-preflight-"));
   try {
+    if (options.identity !== false) ensureTestHarnessIdentity(rootDir);
     return fn(rootDir);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });

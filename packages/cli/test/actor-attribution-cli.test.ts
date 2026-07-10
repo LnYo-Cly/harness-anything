@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { ensureTestHarnessIdentity } from "./helpers/git-fixtures.ts";
 import { unwrapCommandReceipt } from "./helpers/receipt.ts";
 
 const cliEntry = path.resolve("packages/cli/src/index.ts");
@@ -45,6 +46,7 @@ function assertGeneratedTaskId(value: unknown): string {
 function withTempRoot<T>(fn: (rootDir: string) => T): T {
   const rootDir = mkdtempSync(path.join(tmpdir(), "ha-cli-"));
   try {
+    ensureTestHarnessIdentity(rootDir);
     return fn(rootDir);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });

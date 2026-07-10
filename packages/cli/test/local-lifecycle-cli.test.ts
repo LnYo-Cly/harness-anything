@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { initializeNestedHarnessRepo } from "./helpers/git-fixtures.ts";
+import { initializeNestedHarnessRepo, withTestHarnessRoot as withTempRoot } from "./helpers/git-fixtures.ts";
 import { unwrapCommandReceipt } from "./helpers/receipt.ts";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { commandDescriptors } from "../src/cli/command-registry.ts";
@@ -28,7 +27,7 @@ test("CLI init creates authored harness and skips outer gitignore outside git re
     assert.equal(existsSync(path.join(rootDir, ".gitignore")), false);
     assert.equal(result.report.isolation.outerGitignore.action, "skipped-not-git");
     assert.equal(existsSync(path.join(rootDir, "harness/legacy")), false);
-  });
+  }, { identity: false });
 });
 
 test("CLI refuses untitled new tasks before creating task files", () => {
@@ -652,15 +651,6 @@ function assertGeneratedTaskId(value: unknown): string {
   assert.equal(typeof value, "string");
   assert.match(value, taskIdPattern);
   return value;
-}
-
-function withTempRoot<T>(fn: (rootDir: string) => T): T {
-  const rootDir = mkdtempSync(path.join(tmpdir(), "ha-cli-"));
-  try {
-    return fn(rootDir);
-  } finally {
-    rmSync(rootDir, { recursive: true, force: true });
-  }
 }
 
 function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = true, env: Readonly<Record<string, string>> = {}): Record<string, any> {

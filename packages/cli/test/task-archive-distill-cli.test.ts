@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { deriveRelationId, formatRelationFlowRecord, type EntityRelationRecord } from "../../kernel/src/index.ts";
+import { ensureTestHarnessIdentity } from "./helpers/git-fixtures.ts";
 import { unwrapCommandReceipt } from "./helpers/receipt.ts";
 
 const cliEntry = path.resolve("packages/cli/src/index.ts");
@@ -160,6 +161,7 @@ function assertGeneratedTaskId(value: unknown): string {
 function withTempRoot<T>(fn: (rootDir: string) => T): T {
   const rootDir = mkdtempSync(path.join(tmpdir(), "ha-archive-distill-cli-"));
   try {
+    ensureTestHarnessIdentity(rootDir);
     return fn(rootDir);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
@@ -169,7 +171,6 @@ function withTempRoot<T>(fn: (rootDir: string) => T): T {
 function initNestedHarnessRepo(rootDir: string): void {
   const harnessRoot = path.join(rootDir, "harness");
   mkdirSync(harnessRoot, { recursive: true });
-  writeFileSync(path.join(harnessRoot, "harness.yaml"), "layout:\n  authoredRoot: harness\n", "utf8");
   initGitRepo(rootDir);
   initGitRepo(harnessRoot);
 }

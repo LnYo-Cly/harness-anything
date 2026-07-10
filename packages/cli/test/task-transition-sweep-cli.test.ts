@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { ensureTestHarnessIdentity } from "./helpers/git-fixtures.ts";
 import { unwrapCommandReceipt } from "./helpers/receipt.ts";
 
 const cliEntry = path.resolve("packages/cli/src/index.ts");
@@ -137,7 +138,8 @@ function withGitTempRoot<T>(fn: (rootDir: string) => T): T {
     execFileSync("git", ["-C", harnessRoot, "config", "user.email", "test@example.com"]);
     execFileSync("git", ["-C", harnessRoot, "config", "user.name", "Test User"]);
     writeFileSync(path.join(harnessRoot, ".gitignore"), "*.log\n", "utf8");
-    execFileSync("git", ["-C", harnessRoot, "add", ".gitignore"]);
+    ensureTestHarnessIdentity(rootDir);
+    execFileSync("git", ["-C", harnessRoot, "add", ".gitignore", "harness.yaml"]);
     execFileSync("git", ["-C", harnessRoot, "commit", "-m", "seed harness gitignore"]);
     return fn(rootDir);
   } finally {
