@@ -11,6 +11,7 @@ import { relativePath } from "../cli/path.ts";
 import type { CheckProfile, CliResult, CommandRegistryEntry } from "../cli/types.ts";
 import { buildResolvableEntityIndex } from "./check-entity-refs.ts";
 import { profileIssue, type ProfileValidationIssue } from "./check-profile-types.ts";
+import { validateJournalActorAttribution } from "./actor-attribution-checker.ts";
 import { isInvalidPreset, materializePresetTaskDocuments, resolvePresetEntry } from "./extensions/state.ts";
 import { validateGateArchitectureRetrospectiveGate } from "./gate-retro-checker.ts";
 import { readProjectHarnessSettings, settingsIssue, type ProjectHarnessSettings } from "./settings.ts";
@@ -31,6 +32,7 @@ export function runCheckProfile(
   const projection = checkTaskProjection({ rootDir, layoutOverrides: layoutOverridesFromInput(rootInput), postMerge: profilePostMerge });
   const scriptChecks = runCheckScripts(rootInput);
   const validatorIssues = [
+    ...validateJournalActorAttribution(rootInput),
     ...validateCheckProfile(rootInput, action.profile, action.strict),
     ...(action.postMerge ? validateDoneTaskDocumentPlaceholders(rootInput) : []),
     ...scriptChecks.issues

@@ -21,7 +21,7 @@ import { CliErrorCode, cliError } from "../cli/error-codes.ts";
 import type { CommandFailureReceipt, CommandReceipt } from "../cli/receipt.ts";
 import { toCommandReceipt } from "../cli/receipt.ts";
 import type { ParsedCommand } from "../cli/types.ts";
-import { CliActorAttributionError, readCliJournalActorFromEnv } from "../composition/actor-attribution.ts";
+import { CliActorAttributionError, readCliJournalActorFromEnv, readCliJournalActorFromFlag } from "../composition/actor-attribution.ts";
 import { parsePositiveIntegerOr } from "../cli/value-utils.ts";
 
 export {
@@ -242,7 +242,7 @@ function taskHolderMethod(command: TaskHolderParsedCommand): "repo.task.claim" |
 }
 
 function taskHolderPayload(command: TaskHolderParsedCommand): JsonObject {
-  const executor = taskHolderExecutorPayload();
+  const executor = taskHolderExecutorPayload(command);
   return {
     taskId: command.action.taskId,
     ...(executor !== undefined ? { executor } : {}),
@@ -251,15 +251,18 @@ function taskHolderPayload(command: TaskHolderParsedCommand): JsonObject {
 }
 
 function commandRunPayload(command: ParsedCommand): JsonObject {
-  const executor = taskHolderExecutorPayload();
+  const executor = taskHolderExecutorPayload(command);
+  const { actor: _localActorFlag, ...transportCommand } = command;
   return {
-    command: command as unknown as JsonObject,
+    command: transportCommand as unknown as JsonObject,
     ...(executor !== undefined ? { executor } : {})
   };
 }
 
-function taskHolderExecutorPayload(): JsonObject | null | undefined {
-  const actor = readCliJournalActorFromEnv(process.env);
+function taskHolderExecutorPayload(command: ParsedCommand): JsonObject | null | undefined {
+  const actor = command.actor
+    ? readCliJournalActorFromFlag(command.actor)
+    : readCliJournalActorFromEnv(process.env);
   if (!actor) return undefined;
   return taskHolderExecutorJson(taskHolderExecutorFromJournalActor(actor));
 }

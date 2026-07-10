@@ -350,7 +350,7 @@ function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = t
       encoding: "utf8",
       env: {
         ...process.env,
-        HARNESS_ACTOR: "human:settings-tester",
+        HARNESS_ACTOR: "agent:settings-test",
         HARNESS_GIT_AUTHOR_NAME: "Settings Tester",
         HARNESS_GIT_AUTHOR_EMAIL: "settings@example.test"
       }

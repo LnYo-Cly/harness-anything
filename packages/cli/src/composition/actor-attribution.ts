@@ -14,7 +14,7 @@ export interface CliGitCommitAuthor {
 export interface CliActorAttribution {
   readonly actor: CliJournalActor;
   readonly commitAuthor: CliGitCommitAuthor;
-  readonly source: "env" | "daemon";
+  readonly source: "env" | "flag" | "daemon";
   readonly authenticatedPrincipal?: TaskHolderPersonPrincipal;
 }
 
@@ -27,13 +27,14 @@ export class CliActorAttributionError extends Error {
 
 export function resolveLocalCliActorAttribution(
   env: NodeJS.ProcessEnv = process.env,
-  fallbackActor?: () => CliJournalActor
+  actorFlag?: string
 ): CliActorAttribution {
-  const actor = readCliJournalActorFromEnv(env) ?? fallbackActor?.();
+  const flagActor = actorFlag ? readCliJournalActorFromFlag(actorFlag) : undefined;
+  const actor = flagActor ?? readCliJournalActorFromEnv(env);
   const name = readEnv(env, "HARNESS_GIT_AUTHOR_NAME") ?? readEnv(env, "GIT_AUTHOR_NAME");
   const email = readEnv(env, "HARNESS_GIT_AUTHOR_EMAIL") ?? readEnv(env, "GIT_AUTHOR_EMAIL");
   const missing = [
-    actor ? undefined : "HARNESS_ACTOR=kind:id or settings.identity.personId",
+    actor ? undefined : "HARNESS_ACTOR=agent:<id> or system:<id>, or --actor human:<id>",
     name ? undefined : "HARNESS_GIT_AUTHOR_NAME",
     email ? undefined : "HARNESS_GIT_AUTHOR_EMAIL"
   ].filter((value): value is string => Boolean(value));
@@ -49,7 +50,7 @@ export function resolveLocalCliActorAttribution(
   return {
     actor,
     commitAuthor: { name, email },
-    source: "env"
+    source: flagActor ? "flag" : "env"
   };
 }
 
@@ -75,17 +76,37 @@ export function daemonActorAttribution(actor: AuthenticatedActor): CliActorAttri
 export function readCliJournalActorFromEnv(env: NodeJS.ProcessEnv): CliJournalActor | undefined {
   const raw = readEnv(env, "HARNESS_ACTOR");
   if (!raw) return undefined;
+  const actor = parseActor(raw, "HARNESS_ACTOR");
+  if (actor.kind === "human") {
+    throw new CliActorAttributionError(
+      "HARNESS_ACTOR cannot assert a human actor because environment variables are inherited by child processes. " +
+      `Run this command with --actor human:${actor.id}. Migrate the shell wrapper with: ` +
+      `ha() { command ha --actor human:${actor.id} "$@"; }`
+    );
+  }
+  return actor;
+}
+
+export function readCliJournalActorFromFlag(raw: string): CliJournalActor {
+  return parseActor(raw, "--actor");
+}
+
+export function journalActorWithSource(attribution: CliActorAttribution): CliJournalActor & { readonly source: CliActorAttribution["source"] } {
+  return { ...attribution.actor, source: attribution.source };
+}
+
+function parseActor(raw: string, channel: "HARNESS_ACTOR" | "--actor"): CliJournalActor {
   const separator = raw.indexOf(":");
   if (separator <= 0 || separator === raw.length - 1) {
-    throw new CliActorAttributionError("HARNESS_ACTOR must use kind:id form, for example human:lizeyu.");
+    throw new CliActorAttributionError(`${channel} must use kind:id form, for example ${channel === "HARNESS_ACTOR" ? "agent:codex" : "human:lizeyu"}.`);
   }
   const kind = raw.slice(0, separator);
   const id = raw.slice(separator + 1);
   if (kind !== "agent" && kind !== "human" && kind !== "system") {
-    throw new CliActorAttributionError("HARNESS_ACTOR kind must be one of: agent, human, system.");
+    throw new CliActorAttributionError(`${channel} kind must be one of: agent, human, system.`);
   }
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id)) {
-    throw new CliActorAttributionError("HARNESS_ACTOR id must start with an alphanumeric character and contain only A-Z, a-z, 0-9, dot, underscore, colon, or dash.");
+    throw new CliActorAttributionError(`${channel} id must start with an alphanumeric character and contain only A-Z, a-z, 0-9, dot, underscore, colon, or dash.`);
   }
   return { kind, id };
 }

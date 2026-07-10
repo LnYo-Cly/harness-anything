@@ -222,6 +222,14 @@ test("parseArgs strips explicit authored root global override", () => {
   assert.equal(resolveHarnessLayout(rootDir).authoredRoot, path.join(rootDir, "harness"));
 });
 
+test("parseArgs carries the explicit actor global flag without exposing it to command parsers", () => {
+  const parsed = parseArgs(["task", "claim", "task_1", "--actor", "human:person_zeyu"]);
+
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.ok && parsed.value.action.kind, "task-claim");
+  assert.equal(parsed.ok && parsed.value.actor, "human:person_zeyu");
+});
+
 test("parseArgs reads authored root env into command context only", () => {
   const previous = process.env.HARNESS_AUTHORED_ROOT;
   process.env.HARNESS_AUTHORED_ROOT = ".env-harness";

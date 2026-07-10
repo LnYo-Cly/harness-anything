@@ -247,7 +247,7 @@ function runJson(
       env: {
         ...process.env,
         ...cleanRuntimeEnv,
-        HARNESS_ACTOR: "human:tester",
+        HARNESS_ACTOR: "agent:harness-test",
         HARNESS_GIT_AUTHOR_NAME: "Harness Tester",
         HARNESS_GIT_AUTHOR_EMAIL: "tester@example.test",
         ...env

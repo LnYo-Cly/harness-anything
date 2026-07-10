@@ -5,6 +5,7 @@ export interface GlobalParseOptions {
   readonly rootDir: string;
   readonly authoredRoot?: string;
   readonly daemonRepoId?: string;
+  readonly actor?: string;
   readonly json: boolean;
   readonly args: ReadonlyArray<string>;
 }
@@ -13,6 +14,7 @@ export function stripGlobalOptions(argv: ReadonlyArray<string>, cwd = process.cw
   const rootDir = readOption(argv, "--root") ?? cwd;
   const authoredRoot = readOption(argv, "--authored-root") ?? readNonEmptyProcessEnv("HARNESS_AUTHORED_ROOT");
   const daemonRepoId = readOption(argv, "--repo") ?? readNonEmptyProcessEnv("HARNESS_DAEMON_REPO_ID");
+  const actor = readOption(argv, "--actor");
   const json = argv.includes("--json");
   const args = argv.filter((arg, index) => {
     const previous = argv[index - 1];
@@ -22,9 +24,11 @@ export function stripGlobalOptions(argv: ReadonlyArray<string>, cwd = process.cw
       && arg !== "--authored-root"
       && previous !== "--authored-root"
       && arg !== "--repo"
-      && previous !== "--repo";
+      && previous !== "--repo"
+      && arg !== "--actor"
+      && previous !== "--actor";
   });
-  return { rootDir, authoredRoot, daemonRepoId, json, args };
+  return { rootDir, authoredRoot, daemonRepoId, actor, json, args };
 }
 
 function readNonEmptyProcessEnv(name: string): string | undefined {
