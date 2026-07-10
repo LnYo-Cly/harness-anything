@@ -52,7 +52,7 @@
         "{{paths.milestonesRoot}}/**"
       ],
       "inputs": {
-        "source": "dossier-data.md"
+        "source": "milestones-summary.md"
       }
     },
     "check": {
@@ -69,8 +69,7 @@
       ],
       "inputs": {
         "line": "",
-        "slug": "",
-        "requireDecisionAnchor": "false"
+        "slug": ""
       }
     }
   },

@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 
-export function renderMilestoneDossierHtml({ paths, artifactsDir }) {
-  const dossierPath = path.join(paths.milestonesRoot, "dossier-data.md");
-  const htmlPath = path.join(paths.milestonesRoot, "milestones-dossier.html");
+export function renderMilestoneDossierHtml({ paths, artifactsDir, sourcePath, outputPath }) {
+  const dossierPath = sourcePath ?? path.join(paths.milestonesRoot, "milestones-summary.md");
+  const htmlPath = outputPath ?? path.join(paths.milestonesRoot, "milestones.html");
   const milestones = parseDossierMilestones(readOptional(dossierPath));
   const html = buildDossierHtml({ milestones, sourcePath: relative(paths, dossierPath) });
   writeFileSync(htmlPath, html, "utf8");
