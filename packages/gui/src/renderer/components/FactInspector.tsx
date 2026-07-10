@@ -1,6 +1,9 @@
-import { ArrowSquareOut, GitBranch, WarningCircle, X } from "@phosphor-icons/react";
+import { ArrowSquareOut, Graph, GitBranch, WarningCircle, X } from "@phosphor-icons/react";
 import type { DecisionRow, FactRef, RelationEdge, TaskRow } from "../model/types";
 import { normalizeDecisionId } from "../model/triadic";
+import { CopyContextButton } from "./CopyContextButton";
+import { buildEntityJumpContext } from "../model/copy-context";
+import type { RelationCoverageRow } from "../../api/renderer-dto";
 
 function shortEndpoint(raw: string): string {
   if (raw.startsWith("decision/")) return normalizeDecisionId(raw);
@@ -17,6 +20,8 @@ export function FactInspector({
   onClose,
   onNavigateDecision,
   onNavigateTask,
+  onFocusGraph,
+  coverageRows = [],
 }: {
   factRef: string;
   facts: FactRef[];
@@ -28,6 +33,8 @@ export function FactInspector({
   onNavigateDecision?: (decisionId: string) => void;
   /** W2B 活链接:点击 task ref 跳转 */
   onNavigateTask?: (taskId: string) => void;
+  onFocusGraph?: (ref: string) => void;
+  coverageRows?: ReadonlyArray<RelationCoverageRow>;
 }) {
   const anchor = factRef.replace(/^fact\//, "");
   const fullRef = `fact/${anchor}`;
@@ -35,15 +42,31 @@ export function FactInspector({
   const task = fact ? tasks.find((candidate) => candidate.taskId === fact.taskId) : undefined;
   const inbound = relations.filter((relation) => relation.to === fullRef);
   const outbound = relations.filter((relation) => relation.from === fullRef);
-  const invalidators = inbound.filter(
-    (relation) => relation.kind === "invalidated-by" || relation.kind === "supersedes-fact",
+  const contradictions = outbound.filter(
+    (relation) => relation.kind === "invalidated-by",
   );
-  const supportedDecisions = [...inbound, ...outbound]
-    .filter((relation) => relation.from.startsWith("decision/") || relation.to.startsWith("decision/"))
-    .map((relation) => {
-      const id = normalizeDecisionId(relation.from.startsWith("decision/") ? relation.from : relation.to);
-      return { relation, decision: decisions.find((decision) => decision.decisionId === id) };
-    });
+  const supersedingRelations = inbound.filter(
+    (relation) => relation.kind === "supersedes-fact",
+  );
+  const directlySupportedDecisionIds = [...inbound, ...outbound]
+    .filter(
+      (relation) =>
+        (relation.kind === "supports" || relation.kind === "evidenced-by") &&
+        (relation.from.startsWith("decision/") || relation.to.startsWith("decision/")),
+    )
+    .map((relation) =>
+      normalizeDecisionId(
+        relation.from.startsWith("decision/") ? relation.from : relation.to,
+      ),
+    );
+  const coveredDecisionIds = coverageRows
+    .filter(
+      (row) => row.status === "covered" && row.coveringFactRef === fullRef,
+    )
+    .map((row) => normalizeDecisionId(row.decisionRef));
+  const supportedDecisionIds = [
+    ...new Set([...directlySupportedDecisionIds, ...coveredDecisionIds]),
+  ].sort();
 
   return (
     <aside className="flex w-[26rem] shrink-0 flex-col overflow-y-auto border-l border-border bg-surface">
@@ -53,6 +76,30 @@ export function FactInspector({
         <span className="rounded bg-surface-raised px-1.5 py-0.5 text-[10px] text-text-faint">
           Fact Inspector
         </span>
+        {fact && (
+          <CopyContextButton
+            compact
+            buildText={() =>
+              buildEntityJumpContext(
+                fullRef,
+                relations,
+                decisions,
+                facts,
+                tasks,
+                "正在检查此 fact 的来源、支撑关系、矛盾与 supersede 状态",
+              )
+            }
+          />
+        )}
+        {onFocusGraph && (
+          <button
+            onClick={() => onFocusGraph(fullRef)}
+            title="在关系图中聚焦此 fact"
+            className="grid size-6 place-items-center rounded text-text-faint hover:bg-surface-raised hover:text-accent"
+          >
+            <Graph weight="bold" />
+          </button>
+        )}
         <button
           onClick={onClose}
           title="关闭 Fact Inspector"
@@ -82,6 +129,7 @@ export function FactInspector({
                   {fact.category}
                 </span>
                 <span className="font-mono text-[11px] text-text-faint">{fact.at}</span>
+                <span className="font-mono text-[10px] text-text-faint">confidence {fact.confidence}</span>
                 {fact.invalidated && (
                   <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-stale">
                     <WarningCircle weight="bold" />
@@ -172,28 +220,28 @@ export function FactInspector({
           )}
         </div>
 
-        {supportedDecisions.length > 0 && (
+        {supportedDecisionIds.length > 0 && (
           <div className="rounded-md border border-border bg-surface-raised px-2.5 py-2">
             <div className="font-mono text-[10px] uppercase tracking-wide text-text-faint">
               支撑的 decision
             </div>
             <div className="mt-1 space-y-1">
-              {supportedDecisions.map(({ relation, decision }) => {
-                const decId = normalizeDecisionId(
-                  relation.from.startsWith("decision/") ? relation.from : relation.to,
+              {supportedDecisionIds.map((decId) => {
+                const decision = decisions.find(
+                  (candidate) => candidate.decisionId === decId,
                 );
                 return (
-                <div key={relation.from} className="text-[12px]">
+                <div key={decId} className="text-[12px]">
                   {onNavigateDecision ? (
                     <button
                       onClick={() => onNavigateDecision(decId)}
                       className="font-mono text-accent hover:underline"
                       title="跳转到该 decision"
                     >
-                      {shortEndpoint(relation.from)}
+                      {decId}
                     </button>
                   ) : (
-                    <span className="font-mono text-accent">{shortEndpoint(relation.from)}</span>
+                    <span className="font-mono text-accent">{decId}</span>
                   )}
                   <span className="ml-1 text-text-muted">{decision?.title ?? "未知 decision"}</span>
                 </div>
@@ -203,15 +251,22 @@ export function FactInspector({
           </div>
         )}
 
-        {invalidators.length > 0 && (
+        {(contradictions.length > 0 || supersedingRelations.length > 0) && (
           <div className="rounded-md border border-stale/40 bg-stale/10 px-2.5 py-2 text-stale">
             <div className="flex items-center gap-1 text-[12px] font-semibold">
               <WarningCircle weight="bold" />
-              该 fact 被失效边指向
+              危险关系
             </div>
-            <div className="mt-1 font-mono text-[11px]">
-              {invalidators.map((relation) => shortEndpoint(relation.from)).join(", ")}
-            </div>
+            {contradictions.length > 0 && (
+              <div className="mt-1 font-mono text-[11px]">
+                矛盾于 {contradictions.map((relation) => shortEndpoint(relation.to)).join(", ")}
+              </div>
+            )}
+            {supersedingRelations.length > 0 && (
+              <div className="mt-1 font-mono text-[11px]">
+                已被 {supersedingRelations.map((relation) => shortEndpoint(relation.from)).join(", ")} 取代
+              </div>
+            )}
           </div>
         )}
       </div>

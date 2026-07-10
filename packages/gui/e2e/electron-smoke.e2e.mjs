@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,36 +9,31 @@ import { _electron as electron } from "playwright-core";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
 const guiRoot = resolve(repoRoot, "packages/gui");
-const processOutput = new WeakMap();
-const rendererUrl = "http://127.0.0.1:5173";
-
-test("Electron shell opens its first BrowserWindow", { timeout: 45_000 }, async (t) => {
+test("Electron shell opens its first BrowserWindow", { timeout: 90_000 }, async (t) => {
   const ledgerRoot = mkdtempSync(path.join(tmpdir(), "ha-gui-e2e-"));
   writeTriadicLedger(ledgerRoot);
-  t.after(() => rmSync(ledgerRoot, { recursive: true, force: true }));
-  const vite = startRendererServer();
+  let electronApp;
   t.after(async () => {
-    await stopProcess(vite);
+    if (electronApp) await closeElectronApp(electronApp);
+    // The daemon is intentionally non-zero-idle; give the hermetic instance
+    // enough time to release its socket before deleting its user root.
+    await sleep(5_500);
+    rmSync(ledgerRoot, { recursive: true, force: true });
   });
-  await waitForHttpOk(rendererUrl, { signalProcess: vite });
 
-  const electronApp = await electron.launch({
+  electronApp = await electron.launch({
     executablePath: electronPath,
     args: [resolve(guiRoot, "src/main/electron-main.ts")],
     cwd: repoRoot,
     env: {
       ...process.env,
-      ELECTRON_RENDERER_URL: rendererUrl,
       HARNESS_GUI_ROOT: ledgerRoot,
       HARNESS_DAEMON_USER_ROOT: path.join(ledgerRoot, "daemon-user"),
       HARNESS_DAEMON_IDLE_MS: "5000"
     }
   });
-  t.after(async () => {
-    await electronApp.close().catch(() => undefined);
-  });
-
   const page = await electronApp.firstWindow();
+  page.setDefaultTimeout(15_000);
   const consoleFailures = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleFailures.push(message.text());
@@ -56,6 +50,17 @@ test("Electron shell opens its first BrowserWindow", { timeout: 45_000 }, async 
   // and exposed the IPC bridge, otherwise the shell is a hollow window.
   const bridgeType = await page.evaluate(() => typeof globalThis.harness);
   assert.equal(bridgeType, "object", "preload bridge (window.harness) failed to load");
+  await page.evaluate(() => {
+    globalThis.__harnessCopiedText = "";
+    Object.defineProperty(globalThis.navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text) => {
+          globalThis.__harnessCopiedText = text;
+        }
+      }
+    });
+  });
 
   const taskSurface = page.getByTestId("real-task-summary").or(page.getByTestId("task-empty-state"));
   await taskSurface.waitFor({ timeout: 20_000 });
@@ -77,6 +82,58 @@ test("Electron shell opens its first BrowserWindow", { timeout: 45_000 }, async 
   assert.equal(await page.locator(".react-flow__node-fact").count(), 1);
   assert.equal(await page.locator(".react-flow__edge").count(), 3);
   assert.equal(await page.getByText("MOCK", { exact: true }).count(), 0, "triadic views must not be mock-backed");
+
+  // Fact triage consumes confidence + coverageRows/factAnchors. The covered
+  // low-confidence fact is a candidate (not an orphan) and its context package
+  // contains enough identifiers and relation detail to hand to an agent.
+  await page.getByRole("button", { name: /事实分诊/u }).click();
+  const triageCard = page.locator('[data-fact-ref="fact/task-gui-smoke/F-ABCDEFGH"]');
+  await triageCard.waitFor({ timeout: 10_000 }).catch(async (error) => {
+    throw new Error(`${error.message}\nCurrent renderer text:\n${await page.locator("body").innerText()}`);
+  });
+  await triageCard.getByText("低 confidence", { exact: true }).waitFor();
+  assert.equal(await triageCard.getByText("孤儿 fact", { exact: true }).count(), 0);
+  await triageCard.getByRole("button", { name: /复制上下文/u }).click();
+  const triageClipboard = await page.evaluate(() => globalThis.__harnessCopiedText);
+  assert.match(triageClipboard, /task-gui-smoke\/F-ABCDEFGH/u);
+  assert.match(triageClipboard, /dec_gui_smoke/u);
+  assert.match(triageClipboard, /evidenced-by/u);
+  assert.match(triageClipboard, /当前问题/u);
+
+  // FactInspector has its own copy affordance and its supporting-decision link
+  // lands on the exact decision card rather than merely changing tabs.
+  await triageCard.locator('button[title="点击打开 Fact Inspector"]').click();
+  await page.getByText("Fact Inspector", { exact: true }).waitFor();
+  await page.getByRole("button", { name: /复制上下文/u }).last().click();
+  const inspectorClipboard = await page.evaluate(() => globalThis.__harnessCopiedText);
+  assert.match(inspectorClipboard, /正在检查此 fact/u);
+  await page.getByRole("button", { name: "dec_gui_smoke", exact: true }).click();
+  const focusedDecision = page.locator('#decision-card-dec_gui_smoke[data-focused="true"]');
+  await focusedDecision.waitFor({ timeout: 10_000 });
+
+  // Entity surfaces can focus the same node in GraphView. The graph drawer can
+  // then open a task detail, where both the DecisionSourceBadge and RelationRow
+  // are live links backed by the real derives edge.
+  await focusedDecision.locator('button[title="在关系图中聚焦此 decision"]').click();
+  await page.locator(".react-flow").waitFor({ timeout: 10_000 });
+  await page.locator("aside").getByText("decision/dec_gui_smoke", { exact: true }).waitFor();
+  await page.locator(".react-flow__node-task").click();
+  await page.locator("aside").getByText("task-gui-smoke", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "打开", exact: true }).click();
+  await page.getByRole("button", { name: /派生自 dec_gui_smoke/u }).waitFor({ timeout: 10_000 });
+  const relationLink = page.getByRole("button", { name: "decision/dec_gui_smoke", exact: true });
+  await relationLink.waitFor();
+  await relationLink.click();
+  await page.locator('#decision-card-dec_gui_smoke[data-focused="true"]').waitFor();
+
+  // The decision inbox card exposes the same paste-ready context shape.
+  await page.getByRole("button", { name: /决策批准/u }).click();
+  await page.getByText("Should the GUI consume the public relation graph?", { exact: false }).waitFor();
+  await page.getByRole("button", { name: /复制上下文/u }).click();
+  const decisionClipboard = await page.evaluate(() => globalThis.__harnessCopiedText);
+  assert.match(decisionClipboard, /Expose the triadic projection to the GUI/u);
+  assert.match(decisionClipboard, /Render the real triadic projection/u);
+  assert.match(decisionClipboard, /当前问题/u);
   assert.deepEqual(consoleFailures, [], "renderer emitted console errors");
 });
 
@@ -116,7 +173,7 @@ function writeTriadicLedger(rootDir) {
     ""
   ].join("\n"));
   writeFileSync(path.join(taskDir, "facts.md"), [
-    "- {fact_id: F-ABCDEFGH, statement: \"The GUI renderer received real triadic rows through the public bridge.\", source: \"GUI E2E\", observedAt: \"2026-07-10T00:30:00.000Z\", confidence: high, memoryClass: semantic, memoryTags: [pattern], provenance: [{runtime: \"codex\", sessionId: \"fg-p1-07-e2e\", boundAt: \"2026-07-10T00:30:00.000Z\"}]}",
+    "- {fact_id: F-ABCDEFGH, statement: \"The GUI renderer received real triadic rows through the public bridge.\", source: \"GUI E2E\", observedAt: \"2026-07-10T00:30:00.000Z\", confidence: low, memoryClass: semantic, memoryTags: [pattern], provenance: [{runtime: \"codex\", sessionId: \"fg-p1-07-e2e\", boundAt: \"2026-07-10T00:30:00.000Z\"}]}",
     ""
   ].join("\n"));
   writeFileSync(path.join(decisionDir, "decision.md"), [
@@ -143,7 +200,7 @@ function writeTriadicLedger(rootDir) {
     "  - {id: \"CH1\", text: \"Use the existing daemon/service bridge\"}",
     "rejected: []",
     "claims:",
-    "  - {id: \"C1\", text: \"The public path preserves kernel relation names\", load_bearing: false}",
+    "  - {id: \"CH1\", text: \"The public path preserves kernel relation names\", load_bearing: true}",
     "relations:",
     "  - {relation_id: rel_5287143733cccbd9, source: decision/dec_gui_smoke, target: task/task-gui-smoke, type: derives, strength: strong, direction: directed, origin: declared, rationale: \"Decision derived the GUI task\", state: active}",
     "  - {relation_id: rel_f0e4909f80e86478, source: decision/dec_gui_smoke/CH1, target: fact/task-gui-smoke/F-ABCDEFGH, type: evidenced-by, strength: strong, direction: directed, origin: declared, rationale: \"Fact evidences the public projection\", state: active}",
@@ -152,55 +209,12 @@ function writeTriadicLedger(rootDir) {
   ].join("\n"));
 }
 
-function startRendererServer() {
-  const child = spawn("npm", ["run", "dev", "-w", "@harness-anything/gui", "--", "--port", "5173", "--strictPort"], {
-    cwd: repoRoot,
-    env: {
-      ...process.env,
-      BROWSER: "none"
-    },
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  const chunks = [];
-  child.stdout.on("data", (chunk) => chunks.push(String(chunk)));
-  child.stderr.on("data", (chunk) => chunks.push(String(chunk)));
-  processOutput.set(child, chunks);
-  return child;
-}
-
-async function waitForHttpOk(url, { signalProcess }) {
-  const deadline = Date.now() + 20_000;
-  let lastError;
-  while (Date.now() < deadline) {
-    if (signalProcess.exitCode !== null) {
-      throw new Error(`Renderer server exited before becoming ready with code ${signalProcess.exitCode}.\n${recentProcessOutput(signalProcess)}`);
-    }
-    try {
-      const response = await fetch(url);
-      if (response.ok) return;
-      lastError = new Error(`Renderer server returned HTTP ${response.status}.`);
-    } catch (error) {
-      lastError = error;
-    }
-    await sleep(250);
-  }
-
-  throw new Error(`Renderer server did not become ready at ${url}: ${lastError?.message ?? "timeout"}`);
-}
-
-function recentProcessOutput(child) {
-  return (processOutput.get(child) ?? []).join("").split("\n").slice(-20).join("\n");
-}
-
-async function stopProcess(child) {
+async function closeElectronApp(electronApp) {
+  const child = electronApp.process();
   if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill("SIGTERM");
-  const close = once(child, "close");
-  const timeout = sleep(5_000).then(() => "timeout");
-  if (await Promise.race([close, timeout]) === "timeout") {
-    child.kill("SIGKILL");
-    await once(child, "close").catch(() => undefined);
-  }
+  const exited = once(child, "exit");
+  child.kill("SIGKILL");
+  await Promise.race([exited, sleep(5_000)]);
 }
 
 function sleep(ms) {

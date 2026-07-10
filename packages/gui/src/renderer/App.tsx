@@ -116,8 +116,11 @@ function AppShell() {
   const decisions = triadicQuery.decisions;
   const facts = triadicQuery.facts;
   const relations = triadicQuery.relations;
+  const coverageRows = triadicQuery.coverageRows;
+  const factAnchors = triadicQuery.factAnchors;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [focusedEntityRef, setFocusedEntityRef] = useState<string | null>(null);
   const [taskFilters, setTaskFilters] =
     useState<TaskFilters>(DEFAULT_TASK_FILTERS);
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
@@ -169,6 +172,7 @@ function AppShell() {
 
   const goto = (v: ViewId) => {
     setView(v);
+    setFocusedEntityRef(null);
     setSelectedId(null);
     setPreviewId(null);
     if (v !== "board") setDrill(null);
@@ -199,6 +203,7 @@ function AppShell() {
   };
 
   const openTaskDetail = (id: string) => {
+    setFocusedEntityRef(`task/${id}`);
     setPreviewId(null);
     setSelectedId(id);
   };
@@ -209,13 +214,27 @@ function AppShell() {
       const id = ref.slice(5).split("/")[0];
       openTaskDetail(id);
     } else if (ref.startsWith("decision/")) {
-      goto("decisionPool");
+      const decisionId = ref.split("/")[1];
+      setFocusedEntityRef(`decision/${decisionId}`);
+      setView("decisionPool");
+      setSelectedId(null);
+      setPreviewId(null);
     } else if (ref.startsWith("fact/")) {
-      goto("factTriage");
+      setFocusedEntityRef(ref);
+      setView("factTriage");
+      setSelectedId(null);
+      setPreviewId(null);
     }
   };
-  const navigateToDecision = (_decisionId: string) => goto("decisionPool");
+  const navigateToDecision = (decisionId: string) =>
+    navigateToEntity(`decision/${decisionId}`);
   const navigateToTask = (taskId: string) => openTaskDetail(taskId);
+  const focusEntityInGraph = (ref: string) => {
+    setFocusedEntityRef(ref);
+    setView("graph");
+    setSelectedId(null);
+    setPreviewId(null);
+  };
 
   const showMockBanner = !selected && MOCK_BACKED_VIEWS.has(view);
 
@@ -389,7 +408,7 @@ function AppShell() {
               <TaskDetailView
                 task={selected}
                 tasks={tasks}
-                relations={MOCK_TASK_RELATIONS}
+                relations={relations}
                 decisions={decisions}
                 onBack={() => setSelectedId(null)}
                 onUpdate={updateTask}
@@ -439,6 +458,7 @@ function AppShell() {
                 decisions={decisions}
                 facts={facts}
                 onNavigateEntity={navigateToEntity}
+                focusRef={focusedEntityRef}
               />
             ) : view === "factTriage" ? (
               <FactTriageView
@@ -446,8 +466,14 @@ function AppShell() {
                 relations={relations}
                 decisions={decisions}
                 tasks={tasks}
+                coverageRows={coverageRows}
+                factAnchors={factAnchors}
                 onNavigateDecision={navigateToDecision}
                 onNavigateTask={navigateToTask}
+                focusedFactRef={
+                  focusedEntityRef?.startsWith("fact/") ? focusedEntityRef : null
+                }
+                onFocusGraph={focusEntityInGraph}
               />
             ) : view === "decisions" ? (
               <DecisionsView
@@ -461,12 +487,22 @@ function AppShell() {
                 }}
                 onDecide={() => undefined}
                 readOnly
+                onNavigateDecision={navigateToDecision}
+                onNavigateTask={navigateToTask}
+                onFocusGraph={focusEntityInGraph}
+                coverageRows={coverageRows}
               />
             ) : view === "decisionPool" ? (
               <DecisionPoolView
                 decisions={decisions}
                 facts={facts}
                 relations={relations}
+                focusedDecisionId={
+                  focusedEntityRef?.startsWith("decision/")
+                    ? focusedEntityRef.split("/")[1]
+                    : null
+                }
+                onFocusGraph={focusEntityInGraph}
               />
             ) : view === "presets" ? (
               <PresetsView presets={MOCK_PRESETS} project={project} />

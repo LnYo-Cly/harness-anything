@@ -61,6 +61,8 @@ export interface TriadicRendererData {
   readonly decisions: DecisionRow[];
   readonly facts: FactRef[];
   readonly relations: RelationEdge[];
+  readonly coverageRows: ReadonlyArray<RelationCoverageRow>;
+  readonly factAnchors: RelationGraphSuccess["factAnchors"];
   readonly warnings: unknown[];
 }
 
@@ -80,6 +82,8 @@ export function buildTriadicRendererData(input: {
     decisions: adaptDecisionRows(input.decisions.decisions, relationRows, input.graph.coverageRows),
     facts: adaptFactRows(factRows, relationRows),
     relations: adaptRelationRows(relationRows),
+    coverageRows: input.graph.coverageRows,
+    factAnchors: input.graph.factAnchors,
     warnings: [...input.graph.warnings, ...input.decisions.warnings]
   };
 }
@@ -122,9 +126,15 @@ function adaptFactRows(
   relationRows: ReadonlyArray<RelationGraphEdgeRow>
 ): FactRef[] {
   const invalidated = new Set(
-    relationRows
-      .filter((row) => row.targetRef.startsWith("fact/") && (row.relationType === "invalidated-by" || row.relationType === "supersedes-fact"))
-      .map((row) => row.targetRef)
+    relationRows.flatMap((row) => {
+      if (row.relationType === "invalidated-by" && row.sourceRef.startsWith("fact/")) {
+        return [row.sourceRef];
+      }
+      if (row.relationType === "supersedes-fact" && row.targetRef.startsWith("fact/")) {
+        return [row.targetRef];
+      }
+      return [];
+    })
   );
   return rows.map((row) => ({
     anchor: `${row.taskId}/${row.factId}`,
@@ -132,6 +142,7 @@ function adaptFactRows(
     category: factCategory(row),
     text: row.statement,
     at: row.observedAt,
+    confidence: row.confidence,
     invalidated: invalidated.has(row.ref)
   }));
 }

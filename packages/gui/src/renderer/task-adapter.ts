@@ -37,7 +37,6 @@ function adaptProjectionRow(row: TaskProjectionRow): TaskRow {
     docs: [],
     riskTier: row.riskTier,
     urgency: row.urgency,
-    spawningDecision: row.parentTaskId,
     parentTaskId: row.parentTaskId
   };
 }

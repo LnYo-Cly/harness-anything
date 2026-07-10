@@ -31,6 +31,7 @@ function GraphViewInner({
   decisions,
   facts,
   onNavigateEntity,
+  focusRef,
 }: {
   tasks: TaskRow[];
   relations: RelationEdge[];
@@ -38,9 +39,14 @@ function GraphViewInner({
   facts?: FactRef[];
   /** W2B 活链接:图→列表/详情侧互通 */
   onNavigateEntity?: (ref: string) => void;
+  focusRef?: string | null;
 }) {
   const { fitView } = useReactFlow();
   const [focusId, setFocusId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (focusRef) setFocusId(endpointToNodeId(focusRef));
+  }, [focusRef]);
   
   const [nodes, setNodes] = useState<any[]>([]);
   const [edges, setEdges] = useState<any[]>([]);

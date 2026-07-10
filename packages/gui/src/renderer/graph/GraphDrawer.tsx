@@ -110,7 +110,13 @@ export function GraphDrawer({
         </span>
         {onNavigateEntity && (
           <button
-            onClick={() => onNavigateEntity(focusNode.id)}
+            onClick={() =>
+              onNavigateEntity(
+                focusNode.entity === "task"
+                  ? `task/${focusNode.id}`
+                  : focusNode.id,
+              )
+            }
             title="在侧栏打开(task→详情, decision→决策池, fact→分诊)"
             className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-text-muted hover:border-border-strong hover:text-text"
           >
