@@ -265,22 +265,30 @@ function rpcOnlySignature(filePath: string, body: string, zones: ReadonlyArray<E
 
 function snapshotFiles(authoredRoot: string): Map<string, string> {
   const files = new Map<string, string>();
-  visit(authoredRoot);
-  return files;
-
-  function visit(current: string): void {
-    if (!existsSync(current)) return;
-    for (const entry of readdirSync(current)) {
-      const absolute = path.join(current, entry);
-      const stat = statSync(absolute);
-      if (stat.isDirectory()) {
-        if (entry === ".git") continue;
-        visit(absolute);
-        continue;
-      }
-      if (stat.isFile()) files.set(path.relative(authoredRoot, absolute).split(path.sep).join("/"), readFileSync(absolute, "utf8"));
+  if (!existsSync(authoredRoot)) return files;
+  const frames: Array<{ readonly current: string; readonly entries: ReadonlyArray<string>; index: number }> = [{
+    current: authoredRoot,
+    entries: readdirSync(authoredRoot),
+    index: 0
+  }];
+  while (frames.length > 0) {
+    const frame = frames.at(-1)!;
+    const entry = frame.entries[frame.index];
+    if (entry === undefined) {
+      frames.pop();
+      continue;
     }
+    frame.index += 1;
+    const absolute = path.join(frame.current, entry);
+    const stat = statSync(absolute);
+    if (stat.isDirectory()) {
+      if (entry === ".git") continue;
+      frames.push({ current: absolute, entries: readdirSync(absolute), index: 0 });
+      continue;
+    }
+    if (stat.isFile()) files.set(path.relative(authoredRoot, absolute).split(path.sep).join("/"), readFileSync(absolute, "utf8"));
   }
+  return files;
 }
 
 function restoreFiles(authoredRoot: string, before: ReadonlyMap<string, string>): void {

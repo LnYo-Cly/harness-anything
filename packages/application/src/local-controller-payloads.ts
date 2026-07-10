@@ -1,6 +1,7 @@
 import type { DomainStatus } from "../../kernel/src/index.ts";
 import { isDomainStatus, normalizeRelativeDocumentPath, validateTaskIdSyntax } from "../../kernel/src/index.ts";
 import type { LocalControllerFailure } from "./index.ts";
+import { isRecord } from "./record.ts";
 
 export function readTaskIdPayload(payload: unknown): { readonly ok: true; readonly taskId: string } | LocalControllerFailure {
   if (!isRecord(payload) || typeof payload.taskId !== "string") {
@@ -57,8 +58,4 @@ export function validateLocalControllerDecisionId(decisionId: string): void {
 
 function invalidPayload(hint: string): LocalControllerFailure {
   return { ok: false, error: { code: "invalid_payload", hint } };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

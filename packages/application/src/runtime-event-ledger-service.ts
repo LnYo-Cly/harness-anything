@@ -13,6 +13,7 @@ import {
 } from "../../kernel/src/index.ts";
 import { moduleEntityId, resolveHarnessLayout, stablePayloadHash, type EntityId, type HarnessLayoutInput, type WriteCoordinator, type WriteError, type WriteOpKind } from "../../kernel/src/index.ts";
 import { isNodeErrorCode } from "./node-errors.ts";
+import { isRecord } from "./record.ts";
 
 export interface RuntimeEventLedgerServiceOptions {
   readonly rootInput: HarnessLayoutInput;
@@ -238,10 +239,6 @@ function normalizeRuntimeEventActor(actor: unknown): RuntimeEventRecord["actor"]
     executor: null,
     responsibleHuman: `person:${actor.personId}`
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function resolveRuntimeEventLedgerPath(rootInput: HarnessLayoutInput, sessionId: string): { readonly absolutePath: string; readonly relativePath: string } {
