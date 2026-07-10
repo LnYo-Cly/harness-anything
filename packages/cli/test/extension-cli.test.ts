@@ -106,7 +106,9 @@ test("CLI bundled additive task templates render both supported locales", () => 
 test("CLI bundled additive presets discover, check, and create their extra task documents", () => {
   const cases = [
     { preset: "worker-dispatch", locale: "zh-CN", document: "worker-flow.md", content: /调度目标/u },
-    { preset: "code-impact-analysis", locale: "en-US", document: "code-impact-analysis.md", content: /## Affected Surfaces/u }
+    { preset: "worker-dispatch", locale: "en-US", document: "worker-flow.md", content: /State the outcome this worker owns/u },
+    { preset: "code-impact-analysis", locale: "zh-CN", document: "code-impact-analysis.md", content: /描述计划改变的行为/u },
+    { preset: "code-impact-analysis", locale: "en-US", document: "code-impact-analysis.md", content: /Describe the proposed behavior change/u }
   ];
 
   for (const testCase of cases) {
@@ -116,6 +118,7 @@ test("CLI bundled additive presets discover, check, and create their extra task 
       const checked = runRootJson(rootDir, ["preset", "check", testCase.preset]);
       assert.equal(listed.presets.some((preset: Record<string, unknown>) => preset.id === testCase.preset), true);
       assert.equal(inspected.preset.manifest.schema, "preset-manifest/v2");
+      assert.equal(inspected.preset.manifest.profiles[0].templateSelections[0].localePolicy.fallback, "en-US");
       assert.equal(checked.ok, true);
 
       writeFileSync(path.join(rootDir, "harness/harness.yaml"), [
@@ -126,10 +129,11 @@ test("CLI bundled additive presets discover, check, and create their extra task 
         ""
       ].join("\n"));
       const created = runRootJson(rootDir, [
-        "new-task", "--title", "Additive Task", "--vertical", "software/coding",
+        "task", "create", "--title", "Additive Task", "--vertical", "software/coding",
         "--preset", testCase.preset, "--locale", testCase.locale
       ]);
 
+      assert.equal(created.ok, true);
       assert.equal(created.generated.includes("task_plan.md"), true);
       assert.equal(created.generated.includes(testCase.document), true);
       assert.match(readFileSync(path.join(rootDir, created.packagePath, "task_plan.md"), "utf8"), /## Implementation Plan/u);
