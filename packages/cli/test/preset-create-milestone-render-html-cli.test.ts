@@ -8,12 +8,12 @@ import { unwrapCommandReceipt } from "./helpers/receipt.ts";
 
 const cliEntry = path.resolve("packages/cli/src/index.ts");
 
-test("CLI create-milestone render-html derives a deterministic self-contained dossier from dossier-data", () => {
+test("CLI create-milestone render-html derives a deterministic self-contained dossier from the public machine summary", () => {
   withTempRoot((rootDir) => {
     runJson(rootDir, ["init"]);
     const task = runJson(rootDir, ["task", "create", "--title", "Renderer Coordination"]);
     mkdirSync(path.join(rootDir, "harness/milestones"), { recursive: true });
-    writeFileSync(path.join(rootDir, "harness/milestones/dossier-data.md"), [
+    writeFileSync(path.join(rootDir, "harness/milestones/milestones-summary.md"), [
       "# Milestone Dossier Data",
       "",
       "| Line | Milestone | Status | One-line goal | Root task id | Child count | Dependencies / entry | Batch |",
@@ -24,7 +24,7 @@ test("CLI create-milestone render-html derives a deterministic self-contained do
     ].join("\n"), "utf8");
 
     const first = runJson(rootDir, ["script", "run", "preset:create-milestone:render-html", "--task", String(task.taskId)]);
-    const htmlPath = path.join(rootDir, "harness/milestones/milestones-dossier.html");
+    const htmlPath = path.join(rootDir, "harness/milestones/milestones.html");
     const firstHtml = readFileSync(htmlPath, "utf8");
     const second = runJson(rootDir, ["script", "run", "preset:create-milestone:render-html", "--task", String(task.taskId)]);
     const secondHtml = readFileSync(htmlPath, "utf8");

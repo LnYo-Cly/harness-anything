@@ -13,10 +13,18 @@ const AdditionalReferenceSchema = Schema.Struct({
   label: Schema.String
 });
 
+const CreateMilestoneArtifactSchema = Schema.Struct({
+  id: Schema.String,
+  role: Schema.Literal("overview", "index", "machine-summary", "html", "supporting"),
+  root: Schema.Literal("milestones", "task"),
+  path: Schema.String
+});
+
 const CreateMilestonePolicySchema = Schema.Struct({
   schema: Schema.Literal("preset-policy/create-milestone/v1"),
   presetId: Schema.Literal("create-milestone"),
   rules: Schema.Struct({
+    requiredArtifacts: Schema.optional(Schema.Array(CreateMilestoneArtifactSchema)),
     charterAnchor: Schema.optional(Schema.Struct({
       required: Schema.Boolean,
       entityType: Schema.Literal("decision"),
@@ -101,6 +109,9 @@ export function resolvePresetPolicy(rootInput: HarnessLayoutInput, preset: Resol
     if (policy.presetId === "create-milestone" && policy.rules.charterAnchor) {
       new RegExp(policy.rules.charterAnchor.idPattern, "u");
     }
+    if (policy.presetId === "create-milestone" && policy.rules.requiredArtifacts) {
+      validateCreateMilestoneArtifacts(policy.rules.requiredArtifacts);
+    }
     if (policy.presetId === "decision-conformance" && policy.rules.adoptionCutoff) {
       const cutoff = Date.parse(policy.rules.adoptionCutoff);
       if (!Number.isFinite(cutoff)) throw new Error("Decision conformance adoptionCutoff must be a valid ISO timestamp.");
@@ -125,6 +136,7 @@ function validateExactPolicyShape(input: unknown, presetId: string): void {
   const rules = exactObject(envelope.rules, "$.rules", policyRuleKeys(presetId));
 
   if (presetId === "create-milestone") {
+    exactObjectArray(rules.requiredArtifacts, "$.rules.requiredArtifacts", ["id", "role", "root", "path"]);
     if (rules.charterAnchor !== undefined) {
       exactObject(rules.charterAnchor, "$.rules.charterAnchor", ["required", "entityType", "idPattern"]);
     }
@@ -145,10 +157,44 @@ function validateExactPolicyShape(input: unknown, presetId: string): void {
 }
 
 function policyRuleKeys(presetId: string): ReadonlyArray<string> {
-  if (presetId === "create-milestone") return ["charterAnchor", "requiredSections", "additionalReferences"];
+  if (presetId === "create-milestone") return ["requiredArtifacts", "charterAnchor", "requiredSections", "additionalReferences"];
   if (presetId === "milestone-closeout") return ["requireLoadBearingClaimCoverage", "boundary", "evidenceMode"];
   if (presetId === "decision-conformance") return ["adoptionCutoff", "legacyExemptions", "proposedMaxAgeDays", "enforcement"];
   return [];
+}
+
+function validateCreateMilestoneArtifacts(artifacts: ReadonlyArray<{
+  readonly id: string;
+  readonly role: "overview" | "index" | "machine-summary" | "html" | "supporting";
+  readonly root: "milestones" | "task";
+  readonly path: string;
+}>): void {
+  const ids = new Set<string>();
+  const singletonRoles = new Set<string>();
+  for (const artifact of artifacts) {
+    if (!artifact.id.trim()) throw new Error("$.rules.requiredArtifacts[].id must not be empty.");
+    if (ids.has(artifact.id)) throw new Error(`Duplicate create-milestone artifact id: ${artifact.id}.`);
+    ids.add(artifact.id);
+    if (artifact.role !== "supporting") {
+      if (singletonRoles.has(artifact.role)) throw new Error(`Duplicate create-milestone artifact role: ${artifact.role}.`);
+      singletonRoles.add(artifact.role);
+    }
+    validateArtifactPath(artifact.path);
+  }
+  for (const role of ["overview", "index", "machine-summary"]) {
+    if (!singletonRoles.has(role)) throw new Error(`Create-milestone policy requiredArtifacts must include role ${role}.`);
+  }
+}
+
+function validateArtifactPath(value: string): void {
+  const normalized = normalizeSlashes(value.trim());
+  if (!normalized || path.posix.isAbsolute(normalized) || normalized.split("/").includes("..")) {
+    throw new Error(`Create-milestone artifact path must be a safe relative path: ${value}.`);
+  }
+  const placeholders = [...normalized.matchAll(/\{\{([^}]+)\}\}/gu)].map((match) => match[1]);
+  if (placeholders.some((placeholder) => placeholder !== "line" && placeholder !== "slug")) {
+    throw new Error(`Create-milestone artifact path contains an unsupported placeholder: ${value}.`);
+  }
 }
 
 function exactObject(input: unknown, at: string, allowedKeys: ReadonlyArray<string>): Record<string, unknown> {

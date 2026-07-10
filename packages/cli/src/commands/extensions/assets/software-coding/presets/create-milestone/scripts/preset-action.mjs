@@ -12,6 +12,13 @@ const paths = context.paths ?? {};
 const inputs = context.inputs ?? {};
 const outputRoot = String(context.outputRoot ?? "");
 const artifactsDir = path.join(outputRoot, "artifacts");
+const policy = context.policy?.presetId === "create-milestone" ? context.policy : null;
+const publicRequiredArtifacts = [
+  { id: "overview", role: "overview", root: "milestones", path: "{{line}}/{{slug}}/overview.md" },
+  { id: "index", role: "index", root: "milestones", path: "milestones-index.md" },
+  { id: "machine-summary", role: "machine-summary", root: "milestones", path: "milestones-summary.md" }
+];
+const publicOptionalHtml = { id: "html", role: "html", root: "milestones", path: "milestones.html" };
 mkdirSync(artifactsDir, { recursive: true });
 
 if (entrypoint === "scaffold") {
@@ -27,13 +34,11 @@ if (entrypoint === "scaffold") {
 function runScaffold() {
   const line = requiredSlugInput("line");
   const slug = requiredSlugInput("slug");
-  const charterDecision = requiredDecisionInput("charterDecision");
+  const charterDecision = resolveCharterDecision();
   const rootTaskId = String(context.taskId ?? "").trim();
   if (!rootTaskId) fail("missing_root_task", "Task context is required.");
   const rootTask = findTask(rootTaskId);
   if (!rootTask) fail("missing_root_task", `Root task ${rootTaskId} was not found in the task index context.`);
-  const decision = findDecision(charterDecision);
-  if (!decision) fail("missing_charter_decision", `Charter decision ${charterDecision} was not found under decisions root.`);
 
   const milestoneName = optionalInput("milestoneName") || rootTask.title || slug;
   const mission = optionalInput("mission") || rootTask.taskPlanSummary || `Deliver ${milestoneName}.`;
@@ -44,8 +49,9 @@ function runScaffold() {
   const dependencies = optionalInput("dependencies") || "TBD";
   const waves = parseListInput("waves");
 
-  const milestoneDir = path.join(paths.milestonesRoot, line, slug);
-  const overviewPath = path.join(milestoneDir, "00-overview.md");
+  const contract = requiredArtifacts();
+  const overviewPath = resolveArtifactPath(artifactForRole(contract, "overview"), { line, slug });
+  const milestoneDir = path.dirname(overviewPath);
   if (existsSync(overviewPath)) {
     fail("milestone_map_exists", `${relative(overviewPath)} already exists; scaffold will not overwrite milestone content.`);
   }
@@ -63,13 +69,23 @@ function runScaffold() {
     waves
   }), "utf8");
 
-  const roadmapPath = path.join(paths.milestonesRoot, "00-roadmap.md");
-  const dossierPath = path.join(paths.milestonesRoot, "dossier-data.md");
+  const roadmapPath = resolveArtifactPath(artifactForRole(contract, "index"), { line, slug });
+  const dossierPath = resolveArtifactPath(artifactForRole(contract, "machine-summary"), { line, slug });
+  mkdirSync(path.dirname(roadmapPath), { recursive: true });
+  mkdirSync(path.dirname(dossierPath), { recursive: true });
   upsertRoadmapRow(roadmapPath, { line, slug, milestoneName, mission, status, dependencies, rootTaskId });
   upsertDossierRow(dossierPath, { line, milestoneName, mission, status, dependencies, rootTaskId });
-  const htmlResult = renderMilestoneDossierHtml({ paths, artifactsDir });
+  const htmlArtifact = contract.find((artifact) => artifact.role === "html");
+  const htmlResult = htmlArtifact
+    ? renderMilestoneDossierHtml({
+      paths,
+      artifactsDir,
+      sourcePath: dossierPath,
+      outputPath: resolveArtifactPath(htmlArtifact, { line, slug })
+    })
+    : undefined;
 
-  const report = buildCheckReport({ line, slug, requireDecisionAnchor: true });
+  const report = buildCheckReport({ line, slug });
   writeResult({
     ok: report.status === "passed",
     report: {
@@ -78,8 +94,8 @@ function runScaffold() {
       rootTaskId,
       milestone: { line, slug, path: relative(overviewPath) },
       charterDecision,
-      generatedMilestoneFiles: [relative(overviewPath), relative(roadmapPath), relative(dossierPath), htmlResult.path],
-      html: htmlResult,
+      generatedMilestoneFiles: [relative(overviewPath), relative(roadmapPath), relative(dossierPath), htmlResult?.path].filter(Boolean),
+      html: htmlResult ?? null,
       check: report
     },
     error: report.status === "passed" ? undefined : {
@@ -90,7 +106,15 @@ function runScaffold() {
 }
 
 function runRenderHtml() {
-  const htmlResult = renderMilestoneDossierHtml({ paths, artifactsDir });
+  const contract = requiredArtifacts();
+  const summaryArtifact = artifactForRole(contract, "machine-summary");
+  const htmlArtifact = contract.find((artifact) => artifact.role === "html") ?? publicOptionalHtml;
+  const htmlResult = renderMilestoneDossierHtml({
+    paths,
+    artifactsDir,
+    sourcePath: resolveArtifactPath(summaryArtifact, {}),
+    outputPath: resolveArtifactPath(htmlArtifact, {})
+  });
   writeResult({
     ok: true,
     report: {
@@ -105,8 +129,7 @@ function runRenderHtml() {
 function runCheck() {
   const line = optionalInput("line");
   const slug = optionalInput("slug");
-  const requireDecisionAnchor = optionalInput("requireDecisionAnchor") === "true";
-  const report = buildCheckReport({ line, slug, requireDecisionAnchor });
+  const report = buildCheckReport({ line, slug });
   writeResult({
     ok: report.status === "passed",
     report,
@@ -118,12 +141,12 @@ function runCheck() {
 }
 
 function buildCheckReport(options = {}) {
+  const contract = requiredArtifacts();
+  const overviewArtifact = artifactForRole(contract, "overview");
   const milestoneRoots = options.line && options.slug
-    ? [path.join(paths.milestonesRoot, options.line, options.slug, "00-overview.md")]
-    : walk(paths.milestonesRoot).filter((filePath) => path.basename(filePath) === "00-overview.md");
-  const roadmap = readOptional(path.join(paths.milestonesRoot, "00-roadmap.md"));
-  const dossier = readOptional(path.join(paths.milestonesRoot, "dossier-data.md"));
-  const items = milestoneRoots.map((overviewPath) => checkOverview(overviewPath, roadmap, dossier, options));
+    ? [resolveArtifactPath(overviewArtifact, options)]
+    : walk(paths.milestonesRoot).filter((filePath) => artifactPathMatches(overviewArtifact, filePath));
+  const items = milestoneRoots.map((overviewPath) => checkOverview(overviewPath, contract));
   const missing = items.flatMap((item) => item.missing.map((missingItem) => ({
     milestone: item.milestone,
     path: item.path,
@@ -138,6 +161,11 @@ function buildCheckReport(options = {}) {
     schema: "create-milestone-check-report/v1",
     status: missing.length === 0 ? "passed" : "blocked",
     checkedAt: new Date().toISOString(),
+    contract: {
+      source: policy ? "policy" : "public-default",
+      requiredArtifacts: contract,
+      optionalArtifacts: contract.some((artifact) => artifact.role === "html") ? [] : [publicOptionalHtml]
+    },
     summary: {
       milestones: items.length,
       green: items.filter((item) => item.status === "green").length,
@@ -153,7 +181,7 @@ function buildCheckReport(options = {}) {
   return report;
 }
 
-function checkOverview(overviewPath, roadmap, dossier, options) {
+function checkOverview(overviewPath, contract) {
   const body = readOptional(overviewPath);
   const rel = relative(overviewPath);
   const parts = toSlash(path.relative(paths.milestonesRoot, overviewPath)).split("/");
@@ -162,7 +190,8 @@ function checkOverview(overviewPath, roadmap, dossier, options) {
   const rootTask = matchScalar(body, /-\s+\*\*Root task\*\*:\s*(.+)/u);
   const status = matchScalar(body, /-\s+\*\*状态\*\*:\s*(.+)|-\s+\*\*Status\*\*:\s*(.+)/u);
   const mission = matchScalar(body, /-\s+\*\*Mission\*\*:\s*(.+)/u);
-  const decisionAnchors = [...body.matchAll(/\bdec_[A-Za-z0-9_]+\b/gu)].map((match) => match[0]);
+  const charterAnchor = stripMarkdown(matchScalar(body, /-\s+\*\*(?:Approval anchor|Decision 锚)\*\*:\s*(.+)/u));
+  const decisionAnchors = charterAnchor ? [charterAnchor] : [];
   const missing = [];
   const warnings = [];
   if (!body.includes("milestone-map:v1") && !/(?:目标 \(North Star\)|North Star)/u.test(body)) missing.push("milestone-map:v1 marker");
@@ -175,9 +204,13 @@ function checkOverview(overviewPath, roadmap, dossier, options) {
   if (!/(?:旧路径何时废止|Retired old path)/u.test(body)) missing.push("usage question: retired old path");
   if (!/(?:任务映射|Task Mapping|W 波次总表|Wave Decomposition)/u.test(body)) missing.push("task mapping section");
   if (!/(?:依赖与入口|Dependencies|入口条件)/u.test(body)) missing.push("dependencies and entry section");
-  if (options.requireDecisionAnchor && decisionAnchors.length === 0) missing.push("decision anchor");
-  if (options.requireDecisionAnchor && decisionAnchors.length > 0 && !decisionAnchors.some((decisionId) => findDecision(decisionId))) {
-    missing.push("decision anchor exists under decisions root");
+  const anchorRule = policy?.rules?.charterAnchor;
+  if (anchorRule?.required && !charterAnchor) missing.push("approval anchor");
+  if (charterAnchor && anchorRule && !new RegExp(anchorRule.idPattern, "u").test(charterAnchor)) {
+    missing.push("approval anchor matches policy idPattern");
+  }
+  if (charterAnchor && anchorRule?.entityType === "decision" && !findDecision(charterAnchor)) {
+    missing.push("approval anchor exists under decisions root");
   }
 
   const normalizedRoot = stripMarkdown(rootTask);
@@ -188,8 +221,23 @@ function checkOverview(overviewPath, roadmap, dossier, options) {
   if (/\bfan-out pending\b/u.test(body)) {
     warnings.push("任务映射表仍包含 fan-out pending 占位行。");
   }
-  if (!roadmapHasMilestone(roadmap, { rootTask: normalizedRoot, slug, title: titleFromBody(body) })) missing.push("00-roadmap.md row");
-  if (!dossierHasMilestone(dossier, { line, rootTask: normalizedRoot, title: titleFromBody(body) })) missing.push("dossier-data.md row");
+  const artifactChecks = checkRequiredArtifacts(contract, {
+    line,
+    slug,
+    rootTask: normalizedRoot,
+    title: titleFromBody(body),
+    overviewPath,
+    overviewBody: body
+  });
+  missing.push(...artifactChecks.missing);
+
+  if (!contract.some((artifact) => artifact.role === "html")) {
+    const htmlPath = resolveArtifactPath(publicOptionalHtml, { line, slug });
+    const htmlBody = readOptional(htmlPath);
+    if (htmlBody && !artifactHasMilestone(htmlBody, { line, rootTask: normalizedRoot, title: titleFromBody(body) })) {
+      missing.push(`optional html milestone entry (${relative(htmlPath)})`);
+    }
+  }
 
   return {
     status: missing.length === 0 ? "green" : "red",
@@ -197,6 +245,7 @@ function checkOverview(overviewPath, roadmap, dossier, options) {
     path: rel,
     rootTask: normalizedRoot || null,
     decisionAnchors: [...new Set(decisionAnchors)].sort(),
+    artifacts: artifactChecks.items,
     missing,
     warnings
   };
@@ -206,7 +255,14 @@ function renderOverview(input) {
   const waveRows = input.waves.length > 0
     ? input.waves.map((wave) => `| ${wave} | fan-out pending | planned | Run \`ha task create --title "${input.milestoneName} ${wave}" --vertical software/coding --preset standard-task --parent ${input.rootTaskId}\`, then replace this row with the child task id. |`).join("\n")
     : "| child | fan-out pending | planned | Run `ha task create --title \"<child title>\" --vertical software/coding --preset standard-task --parent <root task>` and replace this row. |";
-  return `# ${input.milestoneName}\n\n<!-- milestone-map:v1 -->\n\n## 新模型映射\n\n- **状态**: ${input.status}\n- **Root task**: \`${input.rootTaskId}\`\n- **Mission**: ${input.mission}\n- **Decision 锚**: ${input.charterDecision}\n\n### 使用侧三问\n\n| 问题 | 答案 |\n| --- | --- |\n| 谁第一个用 | ${input.firstUser} |\n| 何时强制切换 | ${input.switchWhen} |\n| 旧路径何时废止 | ${input.retireWhen} |\n\n### 任务映射\n\n| 层级 | Task | 状态 | 说明 |\n| --- | --- | --- | --- |\n| root | \`${input.rootTaskId}\` | planned | milestone root task。 |\n${waveRows}\n\n### Fan-out 引导\n\n- 如果已知波次，创建时传入 \`--input waves=W0,W1,W2\` 会预填波次行。\n- 将每个 \`fan-out pending\` 行替换成真实子任务，例如 \`ha task create --title "${input.milestoneName} W0" --vertical software/coding --preset standard-task --parent ${input.rootTaskId}\`。\n- 子任务 fan out 后同步更新任务映射表。\n\n### 依赖与入口条件\n\n- ${input.dependencies}\n\n### PR/merge 运维\n\n- 全局 merge-health 运维台账：\`task_01KWYKCPG5FZA3AFVX9R8XX3B7\`（Authority: \`decision/dec_mrat6152\`）。\n- 治理文档：\`harness/governance/standards/merge-queue-troubleshooting-standard.md\`。\n- CEO / orchestrator 每合并一个 PR 即清理对应远端分支、本地分支和 worktree，并定期 sweep；worker 结构性不会替全局清理。\n- 同一 PR 两次入队仍合不进，先读全局台账 facts，再跑 \`npm run pr:doctor\`，处置后把事件、尝试和结论作为 fact/progress 落回全局台账。\n\n## 附录：执行记录\n\n- 子任务 fan out 后同步更新任务映射表。\n`;
+  const anchorLine = input.charterDecision ? `\n- **Approval anchor**: ${input.charterDecision}` : "";
+  const references = (policy?.rules?.additionalReferences ?? []).map((reference) =>
+    `- **${reference.label}** (${reference.kind}): \`${reference.ref}\``
+  );
+  const referencesSection = references.length > 0
+    ? `\n\n### Project references\n\n${references.join("\n")}`
+    : "";
+  return `# ${input.milestoneName}\n\n<!-- milestone-map:v1 -->\n\n## 新模型映射\n\n- **状态**: ${input.status}\n- **Root task**: \`${input.rootTaskId}\`\n- **Mission**: ${input.mission}${anchorLine}\n\n### 使用侧三问\n\n| 问题 | 答案 |\n| --- | --- |\n| 谁第一个用 | ${input.firstUser} |\n| 何时强制切换 | ${input.switchWhen} |\n| 旧路径何时废止 | ${input.retireWhen} |\n\n### 任务映射\n\n| 层级 | Task | 状态 | 说明 |\n| --- | --- | --- | --- |\n| root | \`${input.rootTaskId}\` | planned | milestone root task。 |\n${waveRows}\n\n### Fan-out 引导\n\n- 如果已知波次，创建时传入 \`--input waves=W0,W1,W2\` 会预填波次行。\n- 将每个 \`fan-out pending\` 行替换成真实子任务，例如 \`ha task create --title "${input.milestoneName} W0" --vertical software/coding --preset standard-task --parent ${input.rootTaskId}\`。\n- 子任务 fan out 后同步更新任务映射表。\n\n### 依赖与入口条件\n\n- ${input.dependencies}${referencesSection}\n\n## 附录：执行记录\n\n- 子任务 fan out 后同步更新任务映射表。\n`;
 }
 
 function upsertRoadmapRow(filePath, input) {
@@ -246,16 +302,67 @@ function upsertMarkdownTableRow(filePath, row, header, rootTaskId) {
   }
 }
 
-function roadmapHasMilestone(body, input) {
+function artifactHasMilestone(body, input) {
   if (!body) return false;
   if (input.rootTask && input.rootTask !== "none" && body.includes(input.rootTask)) return true;
   return Boolean(input.title && body.toLowerCase().includes(input.title.toLowerCase()));
 }
 
-function dossierHasMilestone(body, input) {
-  if (!body) return false;
-  if (input.rootTask && input.rootTask !== "none" && body.includes(input.rootTask)) return true;
-  return Boolean(input.line && input.title && body.includes(`| ${input.line} |`) && body.toLowerCase().includes(input.title.toLowerCase()));
+function checkRequiredArtifacts(contract, input) {
+  const missing = [];
+  const items = contract.map((artifact) => {
+    const artifactPath = resolveArtifactPath(artifact, input);
+    const body = artifactPath === input.overviewPath ? input.overviewBody : readOptional(artifactPath);
+    let status = body ? "present" : "missing";
+    if (!body) {
+      missing.push(`${artifact.id} (${relative(artifactPath)})`);
+    } else if (["index", "machine-summary", "html"].includes(artifact.role) && !artifactHasMilestone(body, input)) {
+      status = "missing-milestone-entry";
+      missing.push(`${artifact.id} milestone entry (${relative(artifactPath)})`);
+    }
+    return {
+      id: artifact.id,
+      role: artifact.role,
+      path: relative(artifactPath),
+      status
+    };
+  });
+  return { items, missing };
+}
+
+function requiredArtifacts() {
+  const configured = policy?.rules?.requiredArtifacts;
+  return Array.isArray(configured) ? configured.map((artifact) => ({ ...artifact })) : publicRequiredArtifacts;
+}
+
+function artifactForRole(contract, role) {
+  const artifact = contract.find((candidate) => candidate.role === role);
+  if (!artifact) fail("invalid_policy_contract", `create-milestone artifact contract is missing role ${role}.`);
+  return artifact;
+}
+
+function resolveArtifactPath(artifact, values) {
+  const root = artifact.root === "task" ? outputRoot : paths.milestonesRoot;
+  const rendered = String(artifact.path)
+    .replaceAll("{{line}}", String(values.line ?? ""))
+    .replaceAll("{{slug}}", String(values.slug ?? ""));
+  if (/\{\{.+\}\}/u.test(rendered)) fail("invalid_policy_contract", `Artifact ${artifact.id} has unresolved path placeholders.`);
+  const resolved = path.resolve(root, rendered);
+  const relativePath = path.relative(root, resolved);
+  if (relativePath === ".." || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
+    fail("invalid_policy_contract", `Artifact ${artifact.id} resolves outside ${artifact.root} root.`);
+  }
+  return resolved;
+}
+
+function artifactPathMatches(artifact, filePath) {
+  if (artifact.root !== "milestones") return false;
+  const relativePath = toSlash(path.relative(paths.milestonesRoot, filePath));
+  const pattern = toSlash(artifact.path)
+    .replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
+    .replaceAll("\\{\\{line\\}\\}", "[^/]+")
+    .replaceAll("\\{\\{slug\\}\\}", "[^/]+");
+  return new RegExp(`^${pattern}$`, "u").test(relativePath);
 }
 
 function findTask(taskId) {
@@ -305,10 +412,17 @@ function requiredSlugInput(name) {
   return value;
 }
 
-function requiredDecisionInput(name) {
-  const value = optionalInput(name);
-  if (!value) fail("missing_input", `Input ${name} is required. Charter decisions are created by the CEO and must be passed as dec_*.`);
-  if (!/^dec_[A-Za-z0-9_]+$/u.test(value)) fail("invalid_input", `Input ${name} must be a dec_* id.`);
+function resolveCharterDecision() {
+  const value = optionalInput("charterDecision");
+  const rule = policy?.rules?.charterAnchor;
+  if (!value && rule?.required) fail("missing_input", "Input charterDecision is required by the project policy.");
+  if (!value) return "";
+  if (rule && !new RegExp(rule.idPattern, "u").test(value)) {
+    fail("invalid_input", "Input charterDecision does not match the project policy idPattern.");
+  }
+  if (rule?.entityType === "decision" && !findDecision(value)) {
+    fail("missing_charter_decision", `Charter decision ${value} was not found under decisions root.`);
+  }
   return value;
 }
 
