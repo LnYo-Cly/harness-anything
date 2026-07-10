@@ -1,4 +1,5 @@
 import type { CliResult, ParsedCommand } from "../types.ts";
+import type { CommandJsonInput } from "../json-input.ts";
 import type { CommandRunner } from "../runner-registry.ts";
 
 export type CommandParseResult =
@@ -14,7 +15,8 @@ export type CommandParser = (
   args: ReadonlyArray<string>,
   rootDir: string,
   json: boolean,
-  commandSpecs: ReadonlyArray<CommandDescriptorIdentity>
+  commandSpecs: ReadonlyArray<CommandDescriptorIdentity>,
+  input?: CommandJsonInput
 ) => CommandParseResult | null;
 
 export type RuntimeEventPolicy = "auto" | "direct" | "none" | "deferred";

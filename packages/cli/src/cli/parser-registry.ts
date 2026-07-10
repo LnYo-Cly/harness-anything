@@ -1,5 +1,6 @@
 import { commandSpecs } from "./command-spec/index.ts";
 import type { CommandParseResult, CommandParser } from "./command-spec/types.ts";
+import type { CommandJsonInput } from "./json-input.ts";
 import type { ParsedCommand } from "./types.ts";
 
 export type ParseResult = CommandParseResult;
@@ -18,9 +19,9 @@ export const parserRegistry = registeredParsers.map((parse) => ({
     .map((spec) => spec.kind)
 })) satisfies ReadonlyArray<ParserRegistryEntry>;
 
-export function parseRegisteredCommand(args: ReadonlyArray<string>, rootDir: string, json: boolean): ParseResult | null {
+export function parseRegisteredCommand(args: ReadonlyArray<string>, rootDir: string, json: boolean, input?: CommandJsonInput): ParseResult | null {
   for (const entry of parserRegistry) {
-    const parsed = entry.parse(args, rootDir, json, commandSpecs);
+    const parsed = entry.parse(args, rootDir, json, commandSpecs, input);
     if (parsed) return parsed;
   }
   return null;
