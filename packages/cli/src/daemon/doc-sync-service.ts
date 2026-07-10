@@ -265,22 +265,22 @@ function rpcOnlySignature(filePath: string, body: string, zones: ReadonlyArray<E
 
 function snapshotFiles(authoredRoot: string): Map<string, string> {
   const files = new Map<string, string>();
-  visit(authoredRoot);
-  return files;
-
-  function visit(current: string): void {
-    if (!existsSync(current)) return;
-    for (const entry of readdirSync(current)) {
-      const absolute = path.join(current, entry);
-      const stat = statSync(absolute);
-      if (stat.isDirectory()) {
-        if (entry === ".git") continue;
-        visit(absolute);
-        continue;
+  const pending = [authoredRoot];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (!existsSync(current)) continue;
+    const stat = statSync(current);
+    if (stat.isDirectory()) {
+      if (path.basename(current) === ".git") continue;
+      const entries = readdirSync(current).map((entry) => path.join(current, entry));
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        pending.push(entries[index]!);
       }
-      if (stat.isFile()) files.set(path.relative(authoredRoot, absolute).split(path.sep).join("/"), readFileSync(absolute, "utf8"));
+      continue;
     }
+    if (stat.isFile()) files.set(path.relative(authoredRoot, current).split(path.sep).join("/"), readFileSync(current, "utf8"));
   }
+  return files;
 }
 
 function restoreFiles(authoredRoot: string, before: ReadonlyMap<string, string>): void {

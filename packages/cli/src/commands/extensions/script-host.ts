@@ -126,7 +126,7 @@ export function runScriptHost(options: {
     };
   }
 
-  const beforeFiles = snapshotFiles(writeScope.roots);
+  const beforeFiles = new Set(writeScope.roots.flatMap((root) => listGeneratedFiles(root)));
   const result = spawnSync(process.execPath, [
     "--permission",
     ...checkScriptNodePermissionFlags(options.script.entry.metadata.kind),
@@ -183,7 +183,7 @@ export function runScriptHost(options: {
     return scriptFailure(options.commandName, CliErrorCode.ScriptResultFailed, "Script reported a failed result.", runDir, layout.rootDir);
   }
 
-  const generated = producedFilesSince(beforeFiles, snapshotFiles(writeScope.roots));
+  const generated = producedFilesSince(beforeFiles, new Set(writeScope.roots.flatMap((root) => listGeneratedFiles(root))));
   if (!matchesDeclaredProduces(generated, options.script.entry.metadata.produces, layout, outputRoot)) {
     return scriptFailure(options.commandName, CliErrorCode.ScriptDeclaredProduceMismatch, "Script produced files outside metadata.produces.", runDir, layout.rootDir);
   }
@@ -333,10 +333,6 @@ function readPresetScriptResult(resultPath: string | undefined): Record<string, 
       error: cliError(CliErrorCode.ScriptResultInvalid, "Preset script wrote invalid artifacts/preset-result.json.")
     };
   }
-}
-
-function snapshotFiles(roots: ReadonlyArray<string>): ReadonlySet<string> {
-  return new Set(roots.flatMap((root) => listGeneratedFiles(root)));
 }
 
 function producedFilesSince(before: ReadonlySet<string>, after: ReadonlySet<string>): ReadonlyArray<string> {
