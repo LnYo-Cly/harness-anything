@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -146,6 +146,24 @@ test("CLI record fact accepts schema-shaped JSON input from file", () => {
   });
 });
 
+test("CLI fact record from file never treats an injected flag as the task id", () => {
+  withTempRoot((rootDir) => {
+    const created = runJson(rootDir, ["task", "create", "--title", "JSON Fact Owner"]);
+    const payloadPath = path.join(rootDir, "fact-input-with-unknown-task-key.json");
+    writeFileSync(payloadPath, JSON.stringify({
+      task: created.taskId,
+      statement: "Unknown JSON keys cannot select a write path.",
+      source: "packages/cli/test/fact-cli.test.ts"
+    }), "utf8");
+
+    const result = runJson(rootDir, ["fact", "record", "--from-file", payloadPath], false);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error?.code, "missing_task_id");
+    assert.equal(existsSync(path.join(rootDir, "harness/tasks/--statement")), false);
+  });
+});
+
 test("CLI fact list show and invalidate use the fact write surface", () => {
   withTempRoot((rootDir) => {
     const created = runJson(rootDir, ["new-task", "--title", "Fact Commands"]);
@@ -200,6 +218,7 @@ function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = t
       encoding: "utf8",
       env: {
         ...process.env,
+        HARNESS_ACTOR: "agent:test",
         ANTIGRAVITY_SESSION_ID: "",
         CLAUDE_CODE_SESSION_ID: "",
         CLAUDE_SESSION_ID: "",

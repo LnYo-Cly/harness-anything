@@ -3,12 +3,15 @@ import {
   relationTypes,
   type RelationType
 } from "../../../../kernel/src/index.ts";
+import type { CommandDescriptorIdentity } from "../command-spec/types.ts";
 import { cliError, CliErrorCode } from "../error-codes.ts";
+import type { CommandJsonInput } from "../json-input.ts";
 import { readOption, readRepeatedRawOption } from "../parse-options.ts";
 import type { CliResult, DecisionEvidenceRelationInput, ParsedCommand } from "../types.ts";
 import { parseDecisionAmendPatches } from "./decision-amend.ts";
 import { parseChoiceInputs, parseClaimInputs, parseRejectedInputs } from "./decision-propose-inputs.ts";
 import { parseDecisionRelationOp } from "./decision-relation.ts";
+import { jsonBoolean, jsonPayloadFor, jsonString, jsonStringList, jsonValues, type JsonPayload } from "./json-values.ts";
 
 type ParseResult = { readonly ok: true; readonly value: ParsedCommand } | { readonly ok: false; readonly error: CliResult["error"] };
 
@@ -17,7 +20,13 @@ const tiers = new Set(["low", "medium", "high"]);
 const actorKinds = new Set(["agent", "human", "system"]);
 const evidenceTargetKinds = new Set(["task", "fact", "decision"]);
 
-export function parseDecisionArgs(args: ReadonlyArray<string>, rootDir: string, json: boolean): ParseResult | null {
+export function parseDecisionArgs(
+  args: ReadonlyArray<string>,
+  rootDir: string,
+  json: boolean,
+  _commandSpecs?: ReadonlyArray<CommandDescriptorIdentity>,
+  input?: CommandJsonInput
+): ParseResult | null {
   if (args[0] !== "decision") return null;
   const op = args[1];
   if (op === "list") {
@@ -38,7 +47,7 @@ export function parseDecisionArgs(args: ReadonlyArray<string>, rootDir: string, 
       selector: args[2]!
     });
   }
-  if (op === "propose") return parseDecisionPropose(args, rootDir, json);
+  if (op === "propose") return parseDecisionPropose(args, rootDir, json, jsonPayloadFor(input, "decision-propose"));
   if (op === "reckon" && args[2]) {
     const taskId = readOption(args, "--task");
     if (!taskId) return { ok: false, error: cliError(CliErrorCode.MissingTaskId, "Use decision reckon <decision-id> --task <task-id>.") };
@@ -87,46 +96,50 @@ export function parseDecisionArgs(args: ReadonlyArray<string>, rootDir: string, 
   return { ok: false, error: cliError(CliErrorCode.UnknownCommand, "Use decision list|show|propose|accept|reject|defer|supersede|amend|relate|reckon|relation|retire.") };
 }
 
-function parseDecisionPropose(args: ReadonlyArray<string>, rootDir: string, json: boolean): ParseResult {
-  const title = readOption(args, "--title");
-  const question = readOption(args, "--question");
-  const whyNot = readOption(args, "--why-not");
+function parseDecisionPropose(args: ReadonlyArray<string>, rootDir: string, json: boolean, payload?: JsonPayload): ParseResult {
+  const title = readOption(args, "--title") ?? jsonString(payload, "title");
+  const question = readOption(args, "--question") ?? jsonString(payload, "question");
+  const whyNot = readOption(args, "--why-not") ?? jsonString(payload, "why_not", "whyNot");
   if (!title) return { ok: false, error: cliError(CliErrorCode.MissingTitle, "Use decision propose --title <title>.") };
   if (!question) return { ok: false, error: cliError(CliErrorCode.MissingDecisionQuestion, "Use decision propose --question <text>.") };
-  const chosen = parseChoiceInputs(args);
+  const chosen = parseChoiceInputs(args, payload?.chosen);
   if (!chosen.ok) return { ok: false, error: chosen.error };
-  const rejected = parseRejectedInputs(args, whyNot);
+  const rejected = parseRejectedInputs(args, whyNot, payload?.rejected);
   if (!rejected.ok) return { ok: false, error: rejected.error };
-  const riskTier = readTier(readOption(args, "--risk-tier") ?? "medium");
-  const urgency = readTier(readOption(args, "--urgency") ?? "medium");
+  const riskTier = readTier(readOption(args, "--risk-tier") ?? jsonString(payload, "riskTier") ?? "medium");
+  const urgency = readTier(readOption(args, "--urgency") ?? jsonString(payload, "urgency") ?? "medium");
   if (!riskTier || !urgency) return { ok: false, error: cliError(CliErrorCode.InvalidDecisionTier, "Use low, medium, or high for --risk-tier and --urgency.") };
-  const proposedBy = readOption(args, "--proposed-by");
-  const arbiter = readOption(args, "--arbiter");
+  const proposedBy = readOption(args, "--proposed-by") ?? jsonString(payload, "proposedBy");
+  const arbiter = readOption(args, "--arbiter") ?? jsonString(payload, "arbiter");
   if (proposedBy && !isActorRef(proposedBy)) return invalidActor();
   if (arbiter && !isActorRef(arbiter)) return invalidActor();
-  const evidenceRelations = parseEvidenceRelations(args);
+  const evidenceRelations = parseEvidenceRelations(args, jsonValues(payload, "evidenceRelations"));
   if (!evidenceRelations.ok) return { ok: false, error: evidenceRelations.error };
-  const claims = parseClaimInputs(args, !args.includes("--non-load-bearing"));
+  const hasClaimFlags = readRepeatedRawOption(args, "--claim").length > 0;
+  const claims = parseClaimInputs(args, !args.includes("--non-load-bearing"), [
+    ...(hasClaimFlags ? [] : jsonValues(payload, "claim")),
+    ...jsonValues(payload, "claims")
+  ]);
   if (!claims.ok) return { ok: false, error: claims.error };
   return parsedDecision(rootDir, json, {
     kind: "decision-propose",
-    decisionId: readOption(args, "--id"),
+    decisionId: readOption(args, "--id") ?? jsonString(payload, "decisionId"),
     title,
     question,
     chosen: chosen.value,
     rejected: rejected.value,
-    claim: readOption(args, "--claim"),
+    claim: readOption(args, "--claim") ?? jsonString(payload, "claim"),
     claims: claims.value,
     claimLoadBearing: !args.includes("--non-load-bearing"),
     riskTier,
     urgency,
     proposedBy,
     arbiter,
-    modules: splitList(readOption(args, "--module")),
-    productLines: splitList(readOption(args, "--product-line")),
+    modules: [...jsonStringList(payload, "modules"), ...splitRepeatedList(args, "--module")],
+    productLines: [...jsonStringList(payload, "productLines"), ...splitRepeatedList(args, "--product-line")],
     evidenceRelations: evidenceRelations.value,
-    body: readOption(args, "--body"),
-    dryRun: args.includes("--dry-run")
+    body: readOption(args, "--body") ?? jsonString(payload, "body"),
+    dryRun: args.includes("--dry-run") || jsonBoolean(payload, "dryRun")
   });
 }
 
@@ -160,10 +173,10 @@ function parseDecisionRelate(args: ReadonlyArray<string>, rootDir: string, json:
   });
 }
 
-function parseEvidenceRelations(args: ReadonlyArray<string>):
+function parseEvidenceRelations(args: ReadonlyArray<string>, input: ReadonlyArray<unknown> = []):
   | { readonly ok: true; readonly value: ReadonlyArray<DecisionEvidenceRelationInput> }
   | { readonly ok: false; readonly error: CliResult["error"] } {
-  const values = readRepeatedRawOption(args, "--evidence-relation");
+  const values: ReadonlyArray<unknown> = [...input, ...readRepeatedRawOption(args, "--evidence-relation")];
   const relations: DecisionEvidenceRelationInput[] = [];
   for (const value of values) {
     const relation = parseEvidenceRelation(value);
@@ -178,8 +191,21 @@ function parseEvidenceRelations(args: ReadonlyArray<string>):
   return { ok: true, value: relations };
 }
 
-function parseEvidenceRelation(value: string | undefined): DecisionEvidenceRelationInput | null {
-  if (!value || value.startsWith("--")) return null;
+function parseEvidenceRelation(value: unknown): DecisionEvidenceRelationInput | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const candidate = value as Record<string, unknown>;
+    const anchor = typeof candidate.anchor === "string" ? candidate.anchor : undefined;
+    const type = typeof candidate.type === "string" ? candidate.type : undefined;
+    const target = typeof candidate.target === "string" ? candidate.target : undefined;
+    const rationale = typeof candidate.rationale === "string" ? candidate.rationale.trim() : "";
+    const targetRef = target ? parseEntityRef(target) : null;
+    if (!anchor || !/^[A-Za-z][A-Za-z0-9_-]*$/u.test(anchor)) return null;
+    if (!isRelationType(type)) return null;
+    if (!targetRef || targetRef.externalHarness || !evidenceTargetKinds.has(targetRef.kind)) return null;
+    if (!target || rationale.length === 0) return null;
+    return { anchor, type, target, rationale };
+  }
+  if (typeof value !== "string" || !value || value.startsWith("--")) return null;
   const [anchor, type, target, ...rationaleParts] = value.split(":");
   const rationale = rationaleParts.join(":").trim();
   const targetRef = target ? parseEntityRef(target) : null;
@@ -200,6 +226,10 @@ function readTier(value: string): "low" | "medium" | "high" | null {
 
 function splitList(value: string | undefined): ReadonlyArray<string> {
   return value ? value.split(",").map((entry) => entry.trim()).filter(Boolean) : [];
+}
+
+function splitRepeatedList(args: ReadonlyArray<string>, name: string): ReadonlyArray<string> {
+  return readRepeatedRawOption(args, name).flatMap(splitList);
 }
 
 function isActorRef(value: string): boolean {

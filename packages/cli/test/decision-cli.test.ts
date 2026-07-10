@@ -110,6 +110,26 @@ test("CLI decision propose preserves all chosen and rejected entries from file i
   });
 });
 
+test("CLI decision propose accepts schema-shaped rejected and why_not file input", () => {
+  withTempRoot((rootDir) => {
+    const inputPath = path.join(rootDir, "decision-input-snake-case.json");
+    writeFileSync(inputPath, JSON.stringify({
+      decisionId: "dec_SNAKECASE",
+      title: "Schema-shaped decision",
+      question: "Should file input preserve canonical snake_case fields?",
+      chosen: "Preserve structured input",
+      rejected: "Round-trip through argv strings",
+      why_not: "The round-trip is lossy"
+    }), "utf8");
+
+    const result = runJson(rootDir, ["decision", "propose", "--from-file", inputPath]);
+
+    assert.equal(result.ok, true);
+    const body = readFileSync(path.join(rootDir, "harness/decisions/decision-dec_SNAKECASE/decision.md"), "utf8");
+    assert.match(body, /rejected:\n  - \{ id: "RJ1", text: "Round-trip through argv strings", why_not: "The round-trip is lossy" \}/u);
+  });
+});
+
 test("CLI decision propose rejects strong evidence relation missing rationale", () => {
   withTempRoot((rootDir) => {
     const result = runJson(rootDir, [
@@ -479,6 +499,7 @@ function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = t
       encoding: "utf8",
       env: {
         ...process.env,
+        HARNESS_ACTOR: "agent:test",
         ANTIGRAVITY_SESSION_ID: "",
         CLAUDE_CODE_SESSION_ID: "",
         CLAUDE_SESSION_ID: "",

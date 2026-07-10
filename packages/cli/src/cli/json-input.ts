@@ -1,16 +1,21 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { commandDescriptors, type CommandDescriptor } from "./command-registry.ts";
-import { commandInputDescriptorFor, commandPath, type CommandInputShortcut } from "./command-input-descriptors.ts";
+import { commandInputDescriptorFor, commandPath, type JsonSchemaType } from "./command-input-descriptors.ts";
 import { cliError, CliErrorCode } from "./error-codes.ts";
 import type { CliResult } from "./types.ts";
 
 type JsonObject = Record<string, unknown>;
 
+export interface CommandJsonInput {
+  readonly commandKind: CommandDescriptor["kind"];
+  readonly payload: Readonly<JsonObject>;
+}
+
 export function applyJsonInputLayer(
   args: ReadonlyArray<string>,
   cwd: string
-): { readonly ok: true; readonly args: ReadonlyArray<string> } | { readonly ok: false; readonly error: CliResult["error"] } {
+): { readonly ok: true; readonly args: ReadonlyArray<string>; readonly input?: CommandJsonInput } | { readonly ok: false; readonly error: CliResult["error"] } {
   const extracted = extractJsonInput(args, cwd);
   if (!extracted.ok) return extracted;
   if (!extracted.payload) return { ok: true, args: extracted.args };
@@ -21,8 +26,15 @@ export function applyJsonInputLayer(
       error: cliError(CliErrorCode.InvalidJsonInput, "--json-input and --from-file require a known command before the input flags.")
     };
   }
-  const injected = jsonPayloadToArgs(descriptor, extracted.payload);
-  return { ok: true, args: [...extracted.args, ...injected] };
+  const typeIssue = findJsonTypeIssue(extracted.payload, commandInputDescriptorFor(descriptor).input.properties);
+  if (typeIssue) {
+    return { ok: false, error: cliError(CliErrorCode.InvalidJsonInput, typeIssue) };
+  }
+  return {
+    ok: true,
+    args: extracted.args,
+    input: { commandKind: descriptor.kind, payload: extracted.payload }
+  };
 }
 
 function extractJsonInput(
@@ -87,128 +99,36 @@ function findDescriptorForArgs(args: ReadonlyArray<string>): CommandDescriptor |
   return matches[0]?.descriptor;
 }
 
-function jsonPayloadToArgs(command: CommandDescriptor, payload: JsonObject): ReadonlyArray<string> {
-  const input = commandInputDescriptorFor(command);
-  const args: string[] = [];
-  for (const shortcut of input.shortcuts) {
-    const values = valuesForShortcut(payload, shortcut);
-    for (const value of values) {
-      if (typeof value === "boolean") {
-        if (value) args.push(shortcut.flag);
-        continue;
+interface JsonPropertyShape {
+  readonly type: JsonSchemaType | ReadonlyArray<JsonSchemaType>;
+  readonly items?: { readonly type: JsonSchemaType } | { readonly type: "object"; readonly properties: Record<string, unknown> };
+}
+
+function findJsonTypeIssue(payload: JsonObject, properties: Readonly<Record<string, JsonPropertyShape>>): string | undefined {
+  for (const [key, value] of Object.entries(payload)) {
+    const property = properties[key];
+    if (!property || value === undefined) continue;
+    const allowed = Array.isArray(property.type) ? property.type : [property.type];
+    const actual = jsonType(value);
+    if (!allowed.includes(actual as JsonSchemaType)) {
+      return `JSON command input field ${key} must be ${allowed.join(" or ")}; received ${actual}.`;
+    }
+    if (actual === "array" && property.items) {
+      const itemType = property.items.type;
+      const invalidIndex = (value as ReadonlyArray<unknown>).findIndex((item) => jsonType(item) !== itemType);
+      if (invalidIndex >= 0) {
+        return `JSON command input field ${key}[${invalidIndex}] must be ${itemType}; received ${jsonType((value as ReadonlyArray<unknown>)[invalidIndex])}.`;
       }
-      args.push(shortcut.flag, String(value));
     }
   }
-  return args;
+  return undefined;
 }
 
-function valuesForShortcut(payload: JsonObject, shortcut: CommandInputShortcut): ReadonlyArray<string | number | boolean> {
-  const pathKey = shortcut.path.replace(/^\$\./u, "");
-  const value = valueAtPath(payload, pathKey);
-  if (shortcut.flag === "--why-not" && value === undefined) return rejectedWhyNot(payload);
-  if (value === undefined || value === null) return [];
-  if (shortcut.flag === "--chosen") return chosenValues(value);
-  if (shortcut.flag === "--rejected") return rejectedValues(value);
-  if (shortcut.flag === "--claim") return claimValues(value);
-  if (shortcut.flag === "--evidence-relation") return evidenceRelationValues(value);
-  if (Array.isArray(value)) {
-    if (shortcut.flag === "--module" || shortcut.flag === "--product-line") return [value.map(stringValue).filter(Boolean).join(",")].filter(Boolean);
-    return value.map(stringValue).filter(Boolean);
-  }
-  if (typeof value === "object") return [JSON.stringify(value)];
-  return [value as string | number | boolean];
-}
-
-function claimValues(value: unknown): ReadonlyArray<string> {
-  if (typeof value === "string") return [value];
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
-    if (typeof entry === "string") return [entry];
-    if (!entry || typeof entry !== "object") return [];
-    const candidate = entry as { readonly id?: unknown; readonly text?: unknown; readonly load_bearing?: unknown };
-    if (typeof candidate.text !== "string") return [];
-    return [JSON.stringify({
-      ...(typeof candidate.id === "string" ? { id: candidate.id } : {}),
-      text: candidate.text,
-      ...(typeof candidate.load_bearing === "boolean" ? { load_bearing: candidate.load_bearing } : {})
-    })];
-  });
-}
-
-function valueAtPath(payload: JsonObject, pathKey: string): unknown {
-  const parts = pathKey.split(".");
-  let current: unknown = payload;
-  for (const part of parts) {
-    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current;
-}
-
-function chosenValues(value: unknown): ReadonlyArray<string> {
-  if (typeof value === "string") return [value];
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
-    if (typeof entry === "string") return [entry];
-    if (!entry || typeof entry !== "object") return [];
-    const candidate = entry as { readonly id?: unknown; readonly text?: unknown; readonly load_bearing?: unknown };
-    if (typeof candidate.text !== "string") return [];
-    return [JSON.stringify({
-      ...(typeof candidate.id === "string" ? { id: candidate.id } : {}),
-      text: candidate.text,
-      ...(typeof candidate.load_bearing === "boolean" ? { load_bearing: candidate.load_bearing } : {})
-    })];
-  });
-}
-
-function rejectedValues(value: unknown): ReadonlyArray<string> {
-  if (typeof value === "string") return [value];
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
-    if (typeof entry === "string") return [entry];
-    if (!entry || typeof entry !== "object") return [];
-    const candidate = entry as { readonly id?: unknown; readonly text?: unknown; readonly why_not?: unknown; readonly whyNot?: unknown };
-    const whyNot = typeof candidate.why_not === "string"
-      ? candidate.why_not
-      : typeof candidate.whyNot === "string"
-        ? candidate.whyNot
-        : undefined;
-    if (typeof candidate.text !== "string") return [];
-    return [JSON.stringify({
-      ...(typeof candidate.id === "string" ? { id: candidate.id } : {}),
-      text: candidate.text,
-      ...(whyNot ? { why_not: whyNot } : {})
-    })];
-  });
-}
-
-function rejectedWhyNot(payload: JsonObject): ReadonlyArray<string> {
-  const rejected = payload.rejected;
-  if (!Array.isArray(rejected)) return [];
-  const first = rejected[0];
-  if (!first || typeof first !== "object") return [];
-  const candidate = first as { readonly whyNot?: unknown; readonly why_not?: unknown };
-  return typeof candidate.whyNot === "string"
-    ? [candidate.whyNot]
-    : typeof candidate.why_not === "string"
-      ? [candidate.why_not]
-    : [];
-}
-
-function evidenceRelationValues(value: unknown): ReadonlyArray<string> {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
-    if (!entry || typeof entry !== "object") return [];
-    const candidate = entry as { readonly anchor?: unknown; readonly type?: unknown; readonly target?: unknown; readonly rationale?: unknown };
-    return typeof candidate.anchor === "string" && typeof candidate.type === "string" && typeof candidate.target === "string" && typeof candidate.rationale === "string"
-      ? [`${candidate.anchor}:${candidate.type}:${candidate.target}:${candidate.rationale}`]
-      : [];
-  });
-}
-
-function stringValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return "";
+function jsonType(value: unknown): JsonSchemaType | "null" {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  if (typeof value === "string") return "string";
+  if (typeof value === "number") return "number";
+  if (typeof value === "boolean") return "boolean";
+  return "object";
 }

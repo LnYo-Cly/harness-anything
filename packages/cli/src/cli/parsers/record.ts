@@ -1,25 +1,35 @@
 import { cliError, CliErrorCode } from "../error-codes.ts";
+import type { CommandDescriptorIdentity } from "../command-spec/types.ts";
+import type { CommandJsonInput } from "../json-input.ts";
 import { readOption } from "../parse-options.ts";
 import type { CliResult, ParsedCommand } from "../types.ts";
 import { isFactMemoryClass, isFactMemoryTag, type FactMemoryTag } from "../../../../kernel/src/index.ts";
+import { jsonBoolean, jsonPayloadFor, jsonString, jsonStringList, type JsonPayload } from "./json-values.ts";
 
 type ParseResult = { readonly ok: true; readonly value: ParsedCommand } | { readonly ok: false; readonly error: CliResult["error"] };
 
 const confidenceLevels = new Set(["low", "medium", "high"]);
 
-export function parseRecordArgs(args: ReadonlyArray<string>, rootDir: string, json: boolean): ParseResult | null {
-  if (args[0] === "fact") return parseFactArgs(args, rootDir, json);
+export function parseRecordArgs(
+  args: ReadonlyArray<string>,
+  rootDir: string,
+  json: boolean,
+  _commandSpecs?: ReadonlyArray<CommandDescriptorIdentity>,
+  input?: CommandJsonInput
+): ParseResult | null {
+  const payload = jsonPayloadFor(input, "record-fact");
+  if (args[0] === "fact") return parseFactArgs(args, rootDir, json, payload);
   const normalizedArgs = args;
   if (normalizedArgs[0] !== "record") return null;
   if (normalizedArgs[1] !== "fact") {
     return { ok: false, error: cliError(CliErrorCode.UnknownCommand, "Use fact record.") };
   }
-  return parseFactRecord(["fact", "record", ...normalizedArgs.slice(2)], rootDir, json);
+  return parseFactRecord(["fact", "record", ...normalizedArgs.slice(2)], rootDir, json, payload);
 }
 
-function parseFactArgs(args: ReadonlyArray<string>, rootDir: string, json: boolean): ParseResult {
+function parseFactArgs(args: ReadonlyArray<string>, rootDir: string, json: boolean, payload?: JsonPayload): ParseResult {
   const op = args[1];
-  if (op === "record") return parseFactRecord(args, rootDir, json);
+  if (op === "record") return parseFactRecord(args, rootDir, json, payload);
   if (op === "list") {
     const taskId = readOption(args, "--task") ?? args[2];
     if (!taskId) return { ok: false, error: cliError(CliErrorCode.MissingTaskId, "Use fact list --task <task-id>.") };
@@ -68,14 +78,15 @@ function parseFactArgs(args: ReadonlyArray<string>, rootDir: string, json: boole
   return { ok: false, error: cliError(CliErrorCode.UnknownCommand, "Use fact list|show|record|invalidate.") };
 }
 
-function parseFactRecord(args: ReadonlyArray<string>, rootDir: string, json: boolean): ParseResult {
+function parseFactRecord(args: ReadonlyArray<string>, rootDir: string, json: boolean, payload?: JsonPayload): ParseResult {
   const normalizedArgs = args;
-  const taskId = readOption(normalizedArgs, "--task") ?? normalizedArgs[2];
-  const statement = readOption(normalizedArgs, "--statement");
-  const source = readOption(normalizedArgs, "--source");
-  const confidence = readOption(normalizedArgs, "--confidence") ?? "medium";
-  const memoryClass = readOption(normalizedArgs, "--memory-class") ?? "episodic";
-  const memoryTags = readMemoryTags(normalizedArgs);
+  const positionalTaskId = normalizedArgs[2]?.startsWith("--") ? undefined : normalizedArgs[2];
+  const taskId = readOption(normalizedArgs, "--task") ?? positionalTaskId ?? jsonString(payload, "taskId");
+  const statement = readOption(normalizedArgs, "--statement") ?? jsonString(payload, "statement");
+  const source = readOption(normalizedArgs, "--source") ?? jsonString(payload, "source");
+  const confidence = readOption(normalizedArgs, "--confidence") ?? jsonString(payload, "confidence") ?? "medium";
+  const memoryClass = readOption(normalizedArgs, "--memory-class") ?? jsonString(payload, "memoryClass") ?? "episodic";
+  const memoryTags = readMemoryTags(normalizedArgs, payload);
   if (!taskId) return { ok: false, error: cliError(CliErrorCode.MissingTaskId, "Use fact record --task <task-id>.") };
   if (!statement) return { ok: false, error: cliError(CliErrorCode.MissingFactStatement, "Use fact record --statement <text>.") };
   if (!source) return { ok: false, error: cliError(CliErrorCode.MissingFactSource, "Use fact record --source <text>.") };
@@ -88,7 +99,7 @@ function parseFactRecord(args: ReadonlyArray<string>, rootDir: string, json: boo
   if (memoryTags === null) {
     return { ok: false, error: cliError(CliErrorCode.InvalidFactMemoryTag, "Use known fact memory tags with --memory-tag.") };
   }
-  const factId = readOption(normalizedArgs, "--id");
+  const factId = readOption(normalizedArgs, "--id") ?? jsonString(payload, "factId");
   if (factId && !/^F-[0-9A-HJKMNP-TV-Z]{8}$/u.test(factId)) {
     return { ok: false, error: cliError(CliErrorCode.InvalidFactId, "Use fact ids as F-<8 Crockford base32 chars>.") };
   }
@@ -103,18 +114,18 @@ function parseFactRecord(args: ReadonlyArray<string>, rootDir: string, json: boo
         factId,
         statement,
         source,
-        observedAt: readOption(normalizedArgs, "--observed-at"),
+        observedAt: readOption(normalizedArgs, "--observed-at") ?? jsonString(payload, "observedAt"),
         confidence: confidence as "low" | "medium" | "high",
         memoryClass,
         memoryTags,
-        dryRun: normalizedArgs.includes("--dry-run")
+        dryRun: normalizedArgs.includes("--dry-run") || jsonBoolean(payload, "dryRun")
       }
     }
   };
 }
 
-function readMemoryTags(args: ReadonlyArray<string>): ReadonlyArray<FactMemoryTag> | null {
-  const rawTags: string[] = [];
+function readMemoryTags(args: ReadonlyArray<string>, payload?: JsonPayload): ReadonlyArray<FactMemoryTag> | null {
+  const rawTags = jsonStringList(payload, "memoryTags").flatMap((value) => value.split(",").map((tag) => tag.trim()).filter(Boolean));
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] !== "--memory-tag") continue;
     const value = args[index + 1];

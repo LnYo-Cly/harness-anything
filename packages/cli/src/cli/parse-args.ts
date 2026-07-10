@@ -16,7 +16,7 @@ export function parseArgs(argv: ReadonlyArray<string>): { readonly ok: true; rea
   const help = parseHelpRequest(args, rootDir, json, layoutOverrides);
   if (help) return attachActor(attachDaemonRepoId(help, daemonRepoId), actor);
 
-  const parsed = parseRegisteredCommand(args, rootDir, json);
+  const parsed = parseRegisteredCommand(args, rootDir, json, jsonInput.input);
   if (parsed) return attachActor(attachDaemonRepoId(attachLayoutOverrides(parsed, layoutOverrides), daemonRepoId), actor);
   return {
     ok: false,

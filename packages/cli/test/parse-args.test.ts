@@ -423,39 +423,6 @@ test("parseArgs rejects invalid task metadata enum values", () => {
   assert.equal(invalidListUrgency.ok ? undefined : invalidListUrgency.error.code, "invalid_task_metadata");
 });
 
-test("parseArgs injects inline JSON input before command parsers and keeps flags as overrides", () => {
-  const payload = JSON.stringify({
-    title: "JSON Decision",
-    question: "Use global JSON input?",
-    chosen: [{ text: "Use injected input" }],
-    rejected: [{ text: "Per-parser payloads", whyNot: "They duplicate schema translation." }],
-    riskTier: "medium",
-    urgency: "high",
-    modules: ["cli", "m5-circulation"],
-    claims: [{ text: "JSON claim one" }, { id: "C9", text: "JSON claim two", load_bearing: false }],
-    dryRun: true
-  });
-  const parsed = parseArgs([
-    "decision",
-    "propose",
-    "--json-input",
-    payload,
-    "--title",
-    "Flag Title"
-  ]);
-
-  assert.equal(parsed.ok, true);
-  if (!parsed.ok) return;
-  assert.equal(parsed.value.action.kind, "decision-propose");
-  assert.equal(parsed.value.action.title, "Flag Title");
-  assert.equal(parsed.value.action.question, "Use global JSON input?");
-  assert.deepEqual(parsed.value.action.chosen, [{ text: "Use injected input" }]);
-  assert.deepEqual(parsed.value.action.rejected, [{ text: "Per-parser payloads", why_not: "They duplicate schema translation." }]);
-  assert.deepEqual(parsed.value.action.modules, ["cli", "m5-circulation"]);
-  assert.deepEqual(parsed.value.action.claims, [{ text: "JSON claim one" }, { id: "C9", text: "JSON claim two", load_bearing: false }]);
-  assert.equal(parsed.value.action.dryRun, true);
-});
-
 test("parseArgs keeps deprecated command aliases during the E77/F6 transition", () => {
   const cases = [
     { argv: ["new-task", "--title", "Alias Task"], kind: "new-task" },

@@ -3,6 +3,7 @@ export const testTierManifest = {
     "packages/adapters/local/test/task-writes.test.ts",
     "packages/cli/test/doc-sync-service.test.ts",
     "packages/cli/test/daemon-connect.test.ts",
+    "packages/cli/test/json-input.test.ts",
     "packages/cli/test/parse-args.test.ts",
     "packages/cli/test/path-utils.test.ts",
     "packages/daemon/test/local-json-rpc-client.test.ts",
