@@ -18,6 +18,7 @@ import { toCliError } from "../cli/error-mapper.ts";
 import { actionTaskId } from "../cli/parse-args.ts";
 import { requiresConflictMarkerPreflight, runRegisteredCommand } from "../cli/runner-registry.ts";
 import type { CliResult, ParsedCommand } from "../cli/types.ts";
+import { leaseEnforcementEnabled } from "../commands/settings.ts";
 import { CliActorAttributionError, resolveLocalCliActorAttribution, type CliActorAttribution } from "./actor-attribution.ts";
 import { CliPrincipalResolutionError, readConfiguredLocalPrincipal, resolveCliTaskHolderPrincipal } from "./local-principal.ts";
 import {
@@ -42,6 +43,7 @@ export async function runRegisteredCommandWithCliComposition(
     rootDir: command.rootDir,
     layoutOverrides: command.layoutOverrides
   };
+  const enforceTaskLease = leaseEnforcementEnabled(layoutInput);
   let currentSessionProbe: ReturnType<typeof makeEnvironmentCurrentSessionProbe> | undefined;
   const getCurrentSessionProbe = () => {
     currentSessionProbe ??= makeEnvironmentCurrentSessionProbe();
@@ -138,7 +140,7 @@ export async function runRegisteredCommandWithCliComposition(
       provenanceSessionExporter: makeSessionExporter(),
       syncExportedSession
     }, boundAt)
-  }), makeTaskHolder, getTaskHolderPrincipal), makeArtifactStore, getCurrentSessionProbe, makeSessionExporter, syncExportedSession, makeWriteCoordinator, getActorAttribution, getTaskHolderPrincipal, () => makeDecisionWriteService({
+  }), enforceTaskLease, makeTaskHolder, getTaskHolderPrincipal), makeArtifactStore, getCurrentSessionProbe, makeSessionExporter, syncExportedSession, makeWriteCoordinator, getActorAttribution, getTaskHolderPrincipal, () => makeDecisionWriteService({
     rootInput: layoutInput,
     coordinator: makeWriteCoordinator({ kind: "agent", id: "decision-cli" }),
     currentSessionProbe: getCurrentSessionProbe(),
@@ -150,7 +152,7 @@ export async function runRegisteredCommandWithCliComposition(
     currentSessionProbe: getCurrentSessionProbe(),
     provenanceSessionExporter: makeSessionExporter(),
     syncExportedSession
-  }), makeTaskHolder, getTaskHolderPrincipal), makeTaskHolder, () => makeRuntimeEventLedgerService({
+  }), enforceTaskLease, makeTaskHolder, getTaskHolderPrincipal), makeTaskHolder, () => makeRuntimeEventLedgerService({
     rootInput: layoutInput,
     coordinator: makeWriteCoordinator({ kind: "agent", id: "runtime-event-cli" })
   }), provider.runLedgerMaterializer).pipe(
@@ -177,10 +179,11 @@ type TaskHolderPrincipalFactory = () => TaskHolderPrincipal;
 
 function withOptionalLeaseGuard(
   engine: LifecycleEngine,
+  enabled: boolean,
   makeTaskHolder: TaskHolderServiceFactory,
   getTaskHolderPrincipal: TaskHolderPrincipalFactory
 ): LifecycleEngine {
-  if (!leaseEnforcementEnabled()) return engine;
+  if (!enabled) return engine;
   const guard = (taskId: string) => assertTaskLease(taskId, makeTaskHolder, getTaskHolderPrincipal);
   return {
     ...engine,
@@ -195,10 +198,11 @@ function withOptionalLeaseGuard(
 
 function withOptionalFactLeaseGuard(
   service: FactWriteService,
+  enabled: boolean,
   makeTaskHolder: TaskHolderServiceFactory,
   getTaskHolderPrincipal: TaskHolderPrincipalFactory
 ): FactWriteService {
-  if (!leaseEnforcementEnabled()) return service;
+  if (!enabled) return service;
   const guard = (taskId: string) => assertTaskLease(taskId, makeTaskHolder, getTaskHolderPrincipal);
   return {
     ...service,
@@ -240,11 +244,6 @@ function taskLeaseWriteError(error: unknown): WriteError {
     };
   }
   return { _tag: "JournalUnavailable", cause: error };
-}
-
-function leaseEnforcementEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const value = env.HARNESS_TASK_LEASE_ENFORCEMENT?.trim().toLowerCase();
-  return value === "1" || value === "true";
 }
 
 function withConflictMarkerFlushRecheck(
