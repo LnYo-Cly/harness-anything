@@ -113,7 +113,6 @@
       "directWrites": [
         { "file": "packages/kernel/src/store/local-lock-registry.ts" },
         { "file": "packages/kernel/src/store/markdown-artifact-store.ts" },
-        { "file": "packages/kernel/src/store/write-journal-coordinator.ts" },
         { "file": "packages/kernel/src/store/write-journal-decision-documents.ts" },
         { "file": "packages/kernel/src/store/write-journal-durable.ts" },
         { "file": "packages/kernel/src/store/write-journal-locks.ts" },
