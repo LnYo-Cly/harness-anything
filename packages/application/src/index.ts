@@ -210,6 +210,14 @@ export interface DecisionProjectionRow {
   readonly path: string;
   readonly moduleKeys: ReadonlyArray<string>;
   readonly productLineKeys: ReadonlyArray<string>;
+  readonly riskTier?: "low" | "medium" | "high";
+  readonly urgency?: "low" | "medium" | "high";
+  readonly vertical?: string;
+  readonly preset?: string;
+  readonly proposedBy?: { readonly kind: "agent" | "human" | "system"; readonly id: string };
+  readonly proposedAt?: string;
+  readonly arbiter?: { readonly kind: "agent" | "human" | "system"; readonly id: string };
+  readonly provenance?: ReadonlyArray<{ readonly runtime: string; readonly sessionId: string; readonly boundAt: string }>;
   readonly decidedAt?: string;
 }
 
@@ -293,6 +301,7 @@ export interface FactProjectionRow {
   readonly confidence: FactConfidence;
   readonly memoryClass: FactMemoryClass;
   readonly memoryTags: ReadonlyArray<FactMemoryTag>;
+  readonly provenance: ReadonlyArray<{ readonly runtime: string; readonly sessionId: string; readonly boundAt: string }>;
 }
 
 export interface TaskFactListSuccess extends LocalControllerSuccess {

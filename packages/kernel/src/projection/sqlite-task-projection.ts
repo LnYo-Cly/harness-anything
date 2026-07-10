@@ -97,6 +97,17 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
     return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
   }
 
+  if (existing.meta.version !== "entity-projection/d4-v2") {
+    warnings.push(warning(
+      "generated-cache",
+      "projection_stale",
+      "Projection cache schema version was stale and has been rebuilt from markdown.",
+      "Run harness-anything governance rebuild after upgrading projection schema."
+    ));
+    const rebuilt = rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions });
+    return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
+  }
+
   if (existing.meta.sourceHash !== source.hash) {
     warnings.push(warning(
       "generated-cache",
