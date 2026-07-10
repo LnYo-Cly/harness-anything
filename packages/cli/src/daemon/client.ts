@@ -2,6 +2,10 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  taskHolderExecutorFromJournalActor,
+  type TaskHolderExecutor
+} from "../../../application/src/index.ts";
+import {
   daemonIdFromEnv,
   daemonUserRoot,
   defaultDaemonAutostartTimeoutMs,
@@ -17,6 +21,7 @@ import { CliErrorCode, cliError } from "../cli/error-codes.ts";
 import type { CommandFailureReceipt, CommandReceipt } from "../cli/receipt.ts";
 import { toCommandReceipt } from "../cli/receipt.ts";
 import type { ParsedCommand } from "../cli/types.ts";
+import { CliActorAttributionError, readCliJournalActorFromEnv } from "../composition/actor-attribution.ts";
 import { parsePositiveIntegerOr } from "../cli/value-utils.ts";
 
 export {
@@ -49,6 +54,13 @@ export interface RemoteDaemonConfig {
   readonly repoId: string;
 }
 
+type TaskHolderParsedCommand = ParsedCommand & {
+  readonly action:
+    | { readonly kind: "task-claim"; readonly taskId: string; readonly ttlMs?: number }
+    | { readonly kind: "task-holder"; readonly taskId: string }
+    | { readonly kind: "task-release"; readonly taskId: string };
+};
+
 export function readDaemonClientConfig(env: NodeJS.ProcessEnv = process.env): DaemonClientConfig {
   const mode = readMode(env.HARNESS_DAEMON_MODE);
   const userRoot = daemonUserRoot(env);
@@ -72,6 +84,9 @@ export async function runCommandThroughDaemon(
       ? await runRemoteCommand(command, config.remote)
       : await runLocalCommand(command, config);
   } catch (error) {
+    if (error instanceof CliActorAttributionError) {
+      return daemonActorAttributionReceipt(command, error);
+    }
     return daemonUnavailableReceipt(command, error);
   }
 }
@@ -84,9 +99,22 @@ async function runLocalCommand(command: ParsedCommand, config: DaemonClientConfi
     daemonId: config.daemonId,
     autoRegisterSingleRepo: true
   });
+  if (isTaskHolderCommand(command)) {
+    const response = await requestLocalDaemonJsonRpcForTarget(target, taskHolderMethod(command), {
+      repo: { repoId: target.repoId },
+      payload: taskHolderPayload(command)
+    }, 200, {
+      entryPath: daemonClientCliEntrypointPath(),
+      idleExitMs: config.idleExitMs,
+      timeoutMs: config.autostartTimeoutMs,
+      layoutOverrides: command.layoutOverrides
+    });
+    if (isCommandReceipt(response)) return normalizeTaskHolderReceipt(response, command.action.kind);
+    throw new Error(`${taskHolderMethod(command)} did not return command-receipt/v2`);
+  }
   const response = await requestLocalDaemonJsonRpcForTarget(target, "repo.command.run", {
     repo: { repoId: target.repoId },
-    payload: { command: commandForTarget(command, target) as unknown as JsonObject }
+    payload: commandRunPayload(commandForTarget(command, target))
   }, 200, {
     entryPath: daemonClientCliEntrypointPath(),
     idleExitMs: config.idleExitMs,
@@ -125,9 +153,17 @@ async function runWithLineClient(
 ): Promise<CommandReceipt | CommandFailureReceipt> {
   try {
     await client.request("protocol.hello", { protocolVersion: currentDaemonProtocolVersion });
+    if (isTaskHolderCommand(command)) {
+      const response = await client.request(taskHolderMethod(command), {
+        repo: { repoId },
+        payload: taskHolderPayload(command)
+      });
+      if (isCommandReceipt(response)) return normalizeTaskHolderReceipt(response, command.action.kind);
+      throw new Error(`${taskHolderMethod(command)} did not return command-receipt/v2`);
+    }
     const response = await client.request("repo.command.run", {
       repo: { repoId },
-      payload: { command: command as unknown as JsonObject }
+      payload: commandRunPayload(command)
     });
     if (isCommandReceipt(response)) return response as unknown as CommandReceipt | CommandFailureReceipt;
     throw new Error("daemon command.run did not return command-receipt/v2");
@@ -146,6 +182,16 @@ function daemonUnavailableReceipt(command: ParsedCommand, error: unknown): Comma
     )
   });
   if (receipt.ok) throw new Error("daemon unavailable receipt unexpectedly succeeded");
+  return receipt;
+}
+
+function daemonActorAttributionReceipt(command: ParsedCommand, error: CliActorAttributionError): CommandFailureReceipt {
+  const receipt = toCommandReceipt({
+    ok: false,
+    command: command.action.kind,
+    error: cliError(CliErrorCode.AuthMissing, error.message)
+  });
+  if (receipt.ok) throw new Error("daemon actor attribution receipt unexpectedly succeeded");
   return receipt;
 }
 
@@ -181,4 +227,49 @@ function requiredEnv(env: NodeJS.ProcessEnv, name: string): string {
 
 function isCommandReceipt(value: JsonObject): boolean {
   return value.schema === "command-receipt/v2" && typeof value.ok === "boolean" && typeof value.command === "string";
+}
+
+function isTaskHolderCommand(command: ParsedCommand): command is TaskHolderParsedCommand {
+  return command.action.kind === "task-claim" || command.action.kind === "task-holder" || command.action.kind === "task-release";
+}
+
+function taskHolderMethod(command: TaskHolderParsedCommand): "repo.task.claim" | "repo.task.holder" | "repo.task.release" {
+  if (command.action.kind === "task-claim") return "repo.task.claim";
+  if (command.action.kind === "task-holder") return "repo.task.holder";
+  return "repo.task.release";
+}
+
+function taskHolderPayload(command: TaskHolderParsedCommand): JsonObject {
+  const executor = taskHolderExecutorPayload();
+  return {
+    taskId: command.action.taskId,
+    ...(executor !== undefined ? { executor } : {}),
+    ...(command.action.kind === "task-claim" && command.action.ttlMs ? { ttlMs: command.action.ttlMs } : {})
+  };
+}
+
+function commandRunPayload(command: ParsedCommand): JsonObject {
+  const executor = taskHolderExecutorPayload();
+  return {
+    command: command as unknown as JsonObject,
+    ...(executor !== undefined ? { executor } : {})
+  };
+}
+
+function taskHolderExecutorPayload(): JsonObject | null | undefined {
+  const actor = readCliJournalActorFromEnv(process.env);
+  if (!actor) return undefined;
+  return taskHolderExecutorJson(taskHolderExecutorFromJournalActor(actor));
+}
+
+function taskHolderExecutorJson(executor: TaskHolderExecutor | null): JsonObject | null {
+  return executor ? { kind: executor.kind, id: executor.id } : null;
+}
+
+function normalizeTaskHolderReceipt(response: JsonObject, commandKind: "task-claim" | "task-holder" | "task-release"): CommandReceipt | CommandFailureReceipt {
+  return {
+    ...(response as unknown as CommandReceipt | CommandFailureReceipt),
+    command: commandKind,
+    action: commandKind.replace(/^task-/u, "task.")
+  };
 }

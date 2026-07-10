@@ -1,11 +1,11 @@
 import { Effect } from "effect";
-import type { DecisionWriteService, FactWriteService, ProvenanceSessionExporter, ProvenanceSessionExporterRejected, ProvenanceSessionExportResult, RuntimeEventLedgerService } from "../../../application/src/index.ts";
+import type { DecisionWriteService, FactWriteService, ProvenanceSessionExporter, ProvenanceSessionExporterRejected, ProvenanceSessionExportResult, RuntimeEventLedgerService, TaskHolderPrincipal, TaskHolderService } from "../../../application/src/index.ts";
 import type { ArtifactStore, CurrentSessionProbePort } from "../../../kernel/src/index.ts";
 import type { ArtifactStoreError, DomainStatus, EngineError, PriorityTier, TaskWorkKind, WriteError } from "../../../kernel/src/index.ts";
 import type { HarnessLayoutInput, HarnessLayoutOverrides } from "../../../kernel/src/index.ts";
 import { createHarnessRuntimeContext } from "../../../kernel/src/index.ts";
 import type { WriteCoordinator } from "../../../kernel/src/index.ts";
-import { requiresConflictMarkerPreflight } from "./command-event-policy.ts";
+import { requiresConflictMarkerPreflight, taskPrincipalRequiredForAction } from "./command-event-policy.ts";
 import type { CommandRunnerId } from "./command-registry.ts";
 import { runnerIdForAction } from "./command-registry.ts";
 import { readConflictMarkerPreflight } from "./conflict-preflight.ts";
@@ -51,8 +51,10 @@ export interface CommandRunnerContext {
   readonly runtimeEventLedgerService: RuntimeEventLedgerService;
   readonly makeWriteCoordinator: (actor: { readonly kind: "agent" | "human" | "system"; readonly id: string }) => WriteCoordinator;
   readonly actorAttribution: () => CliActorAttribution;
+  readonly taskHolderPrincipal: () => TaskHolderPrincipal;
   readonly decisionWriteService: DecisionWriteService;
   readonly factWriteService: FactWriteService;
+  readonly taskHolderService: TaskHolderService;
   readonly runLedgerMaterializer: (options: { readonly dryRun?: boolean }) => MaterializerCommandReport;
 }
 
@@ -148,8 +150,10 @@ export function runRegisteredCommand(
   syncExportedSession: (result: ProvenanceSessionExportResult) => Effect.Effect<void, ProvenanceSessionExporterRejected>,
   makeWriteCoordinator: (actor: { readonly kind: "agent" | "human" | "system"; readonly id: string }) => WriteCoordinator,
   actorAttribution: () => CliActorAttribution,
+  taskHolderPrincipal: () => TaskHolderPrincipal,
   makeDecisionWriteService: () => DecisionWriteService,
   makeFactWriteService: () => FactWriteService,
+  makeTaskHolderService: () => TaskHolderService,
   makeRuntimeEventLedgerService: () => RuntimeEventLedgerService,
   runLedgerMaterializer: (rootInput: HarnessLayoutInput, options: { readonly dryRun?: boolean }) => MaterializerCommandReport
 ): CommandRunnerEffect {
@@ -173,6 +177,7 @@ export function runRegisteredCommand(
   let provenanceSessionExporter: ProvenanceSessionExporter | undefined;
   let decisionWriteService: DecisionWriteService | undefined;
   let factWriteService: FactWriteService | undefined;
+  let taskHolderService: TaskHolderService | undefined;
   let runtimeEventLedgerService: RuntimeEventLedgerService | undefined;
   const context: CommandRunnerContext = {
     rootDir: command.rootDir,
@@ -197,6 +202,7 @@ export function runRegisteredCommand(
     syncExportedSession,
     makeWriteCoordinator,
     actorAttribution,
+    taskHolderPrincipal,
     get decisionWriteService() {
       decisionWriteService ??= makeDecisionWriteService();
       return decisionWriteService;
@@ -205,12 +211,28 @@ export function runRegisteredCommand(
       factWriteService ??= makeFactWriteService();
       return factWriteService;
     },
+    get taskHolderService() {
+      taskHolderService ??= makeTaskHolderService();
+      return taskHolderService;
+    },
     get runtimeEventLedgerService() {
       runtimeEventLedgerService ??= makeRuntimeEventLedgerService();
       return runtimeEventLedgerService;
     },
     runLedgerMaterializer: (options) => runLedgerMaterializer(layoutInput, options)
   };
+  if (taskPrincipalRequiredForAction(command.action)) {
+    try {
+      context.taskHolderPrincipal();
+    } catch (error) {
+      return Effect.succeed({
+        ok: false,
+        command: command.action.kind,
+        taskId: actionTaskId(command.action),
+        error: cliError(CliErrorCode.AuthMissing, error instanceof Error ? error.message : String(error))
+      } satisfies CliResult);
+    }
+  }
   return runner(context, command).pipe(
     Effect.catchAll((error) => Effect.succeed({
       ok: false,

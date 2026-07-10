@@ -7,6 +7,7 @@ import type { CliResult } from "../../cli/types.ts";
 import type { CommandRunner, CommandRunnerContext } from "../../cli/runner-registry.ts";
 import { runTaskArchive } from "./task-archive.ts";
 import { runTaskAmend } from "./task-amend.ts";
+import { runTaskClaim, runTaskHolder, runTaskRelease } from "./task-holder.ts";
 import { lifecycleReason } from "./task-lifecycle-shared.ts";
 import { runTaskRelate } from "./task-relations.ts";
 import { runTaskSupersede } from "./task-supersede.ts";
@@ -15,12 +16,18 @@ export const FORCE_STATUS_AUDIT_MARKER = "FORCE_STATUS_SET_AUDIT";
 
 type TaskLifecycleAction = Extract<
   Parameters<CommandRunner>[1]["action"],
-  { readonly kind: "status-set" | "progress-append" | "task-amend" | "task-archive" | "task-supersede" | "task-delete" | "task-reopen" | "task-relate" }
+  { readonly kind: "task-claim" | "task-holder" | "task-release" | "status-set" | "progress-append" | "task-amend" | "task-archive" | "task-supersede" | "task-delete" | "task-reopen" | "task-relate" }
 >;
 
 export const runTaskLifecycleCommand: CommandRunner = (context, command) => {
   const action = command.action as TaskLifecycleAction;
   switch (action.kind) {
+    case "task-claim":
+      return runTaskClaim(context, action);
+    case "task-holder":
+      return runTaskHolder(context, action);
+    case "task-release":
+      return runTaskRelease(context, action);
     case "status-set":
       return runStatusSet(context, action.taskId, action.status, action.force, action.reason);
     case "progress-append":

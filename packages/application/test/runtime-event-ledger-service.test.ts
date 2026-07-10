@@ -52,7 +52,9 @@ test("runtime event ledger appends fsynced JSONL and reads schema-validated reco
     const readBack = await runEffect(ledger.readSession("codex-session-1"));
     assert.equal(readBack.events.length, 1);
     assert.deepEqual(readBack.events[0], appended.event);
-    assert.equal(readBack.events[0]?.actor?.personId, "person_zeyu");
+    assert.equal(readBack.events[0]?.actor?.principal.personId, "person_zeyu");
+    assert.equal(readBack.events[0]?.actor?.executor, null);
+    assert.equal(readBack.events[0]?.actor?.responsibleHuman, "person:person_zeyu");
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

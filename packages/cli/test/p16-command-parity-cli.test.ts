@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { ensureTestHarnessIdentity } from "./helpers/git-fixtures.ts";
 
 const cliEntry = path.resolve("packages/cli/src/index.ts");
 
@@ -136,6 +137,7 @@ function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = t
 function withTempRoot<T>(fn: (rootDir: string) => T): T {
   const rootDir = mkdtempSync(path.join(tmpdir(), "ha-p16-"));
   try {
+    ensureTestHarnessIdentity(rootDir);
     return fn(rootDir);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });

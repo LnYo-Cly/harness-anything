@@ -413,11 +413,13 @@ test("RBAC rejects non-arbiter methods and records a runtime event with actor", 
     assert.equal(receipt.error?.code, "rbac_forbidden");
     assert.equal((receipt.details.actor as { readonly personId?: string }).personId, "person_viewer");
     const event = JSON.parse(readFileSync(path.join(rootDir, ".harness/generated/runtime-events/codex-session-rbac.jsonl"), "utf8")) as {
-      readonly actor?: { readonly personId?: string };
+      readonly actor?: { readonly principal?: { readonly personId?: string }; readonly executor?: unknown; readonly responsibleHuman?: string };
       readonly result?: { readonly errorCode?: string };
       readonly tool?: { readonly toolName?: string };
     };
-    assert.equal(event.actor?.personId, "person_viewer");
+    assert.equal(event.actor?.principal?.personId, "person_viewer");
+    assert.equal(event.actor?.executor, null);
+    assert.equal(event.actor?.responsibleHuman, "person:person_viewer");
     assert.equal(event.result?.errorCode, "rbac_forbidden");
     assert.equal(event.tool?.toolName, "repo.tasks.review");
   } finally {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -70,6 +70,28 @@ test("CLI failed command results append failed command events", () => {
     assert.equal(events[0].result.status, "failed");
     assert.equal(events[0].result.summary, "CLI command failed: status-set");
     assert.equal(typeof events[0].result.errorCode, "string");
+  });
+});
+
+test("CLI task transition runtime event records dual-axis actor", () => {
+  withTempRoot((rootDir) => {
+    const created = runJson(rootDir, ["new-task", "--title", "Transition Actor Task"]);
+    const sessionId = "codex-transition-actor";
+    const transitioned = runJson(rootDir, ["task", "transition", created.taskId, "active"], true, {
+      CODEX_SESSION_ID: sessionId,
+      CODEX_THREAD_ID: "",
+      HARNESS_ACTOR: "agent:codex-cli"
+    });
+    const ledgerPath = path.join(rootDir, ".harness/generated/runtime-events", `${sessionId}.jsonl`);
+    const events = readJsonl(ledgerPath);
+
+    assert.equal(transitioned.ok, true);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].tool.toolName, "status-set");
+    assert.equal(events[0].session.taskId, created.taskId);
+    assert.equal(events[0].actor.principal.personId, "person_tester");
+    assert.deepEqual(events[0].actor.executor, { kind: "agent", id: "codex-cli" });
+    assert.equal(events[0].actor.responsibleHuman, "person:person_tester");
   });
 });
 
@@ -184,6 +206,15 @@ test("CLI event append rejects unsupported steering vocabulary", () => {
 function withTempRoot<T>(fn: (rootDir: string) => T): T {
   const rootDir = mkdtempSync(path.join(tmpdir(), "ha-runtime-event-cli-"));
   try {
+    mkdirSync(path.join(rootDir, "harness"), { recursive: true });
+    writeFileSync(path.join(rootDir, "harness/harness.yaml"), [
+      "schema: harness-anything/v1",
+      "settings:",
+      "  identity:",
+      "    personId: person_tester",
+      "    displayName: Harness Tester",
+      ""
+    ].join("\n"), "utf8");
     return fn(rootDir);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
@@ -213,7 +244,14 @@ function runJson(
   try {
     const stdout = execFileSync(process.execPath, [cliEntry, "--root", rootDir, "--json", ...args], {
       encoding: "utf8",
-      env: { ...process.env, ...cleanRuntimeEnv, ...env }
+      env: {
+        ...process.env,
+        ...cleanRuntimeEnv,
+        HARNESS_ACTOR: "human:tester",
+        HARNESS_GIT_AUTHOR_NAME: "Harness Tester",
+        HARNESS_GIT_AUTHOR_EMAIL: "tester@example.test",
+        ...env
+      }
     });
     return unwrapCommandReceipt(JSON.parse(stdout) as Record<string, any>);
   } catch (error) {
