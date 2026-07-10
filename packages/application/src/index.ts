@@ -16,6 +16,16 @@ export { bindCreateProvenance } from "./provenance-binding.ts";
 export { makeDecisionWriteService } from "./decision-write-service.ts";
 export { makeFactWriteService } from "./fact-write-service.ts";
 export {
+  taskWriteApiRoutePolicies,
+  taskWriteCliRoutePolicies,
+  taskWriteCliRoutePolicy
+} from "./task-write-route-policy.ts";
+export type {
+  TaskWriteApiRoutePolicy,
+  TaskWriteCliRoutePolicy,
+  TaskWriteCommandClass
+} from "./task-write-route-policy.ts";
+export {
   TaskClaimCollisionError,
   TaskLeaseRequiredError,
   TaskReleaseNotHolderError,

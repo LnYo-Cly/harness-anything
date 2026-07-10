@@ -369,9 +369,11 @@ async function acquireTaskHolderMutationLock(lockPath: string, taskId: string): 
 }
 
 function recoverAbandonedTaskHolderMutationLock(lockPath: string): void {
-  if (!localRuntimeStateFileSystem.exists(lockPath)) return;
   const record = readTaskHolderMutationLock(lockPath);
-  const ageMs = Date.now() - (record ? Date.parse(record.acquiredAt) : localRuntimeStateFileSystem.modifiedAtMs(lockPath));
+  const modifiedAtMs = record ? null : readTaskHolderMutationLockModifiedAtMs(lockPath);
+  const acquiredAtMs = record ? Date.parse(record.acquiredAt) : modifiedAtMs;
+  if (acquiredAtMs === null) return;
+  const ageMs = Date.now() - acquiredAtMs;
   const abandoned = record?.hostname === hostname()
     ? !processIsAlive(record.pid)
     : Number.isFinite(ageMs) && ageMs > mutationLockStaleMs;
@@ -382,6 +384,15 @@ function recoverAbandonedTaskHolderMutationLock(lockPath: string): void {
     localRuntimeStateFileSystem.remove(quarantinePath);
   } catch (error) {
     if (!isMissingFileError(error)) throw error;
+  }
+}
+
+function readTaskHolderMutationLockModifiedAtMs(lockPath: string): number | null {
+  try {
+    return localRuntimeStateFileSystem.modifiedAtMs(lockPath);
+  } catch (error) {
+    if (isMissingFileError(error)) return null;
+    throw error;
   }
 }
 

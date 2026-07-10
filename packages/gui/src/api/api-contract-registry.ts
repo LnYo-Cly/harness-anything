@@ -1,4 +1,4 @@
-import type { LocalControllerService } from "../../../application/src/index.ts";
+import { taskWriteApiRoutePolicies, type LocalControllerService } from "../../../application/src/index.ts";
 import type { TerminalSessionService } from "../terminal/session-registry.ts";
 
 export type ApiRouteMethod = "GET" | "POST" | "PUT" | "DELETE" | "WS";
@@ -17,6 +17,8 @@ export interface ApiRouteContract {
   readonly serviceMethod: ApiServiceMethod;
   readonly auth: ApiRouteAuth;
   readonly guiBridgeMethod?: string;
+  readonly leaseRequired?: boolean;
+  readonly commandClass?: "repo-write" | "arbiter";
 }
 
 export interface ApiSchemaContract {
@@ -98,42 +100,7 @@ export const apiRouteContracts = [
     auth: "local-session-token",
     guiBridgeMethod: "getTaskDocument"
   },
-  {
-    id: "tasks.status.set",
-    method: "POST",
-    path: "/api/tasks/:taskId/status",
-    inputSchemaId: "application.set-task-status-payload/v1",
-    outputSchemaId: "application.local-controller-result/v1",
-    errorSchemaId: "application.local-controller-error/v1",
-    service: "LocalControllerService",
-    serviceMethod: "setTaskStatus",
-    auth: "local-session-token",
-    guiBridgeMethod: "setTaskStatus"
-  },
-  {
-    id: "tasks.review",
-    method: "POST",
-    path: "/api/tasks/:taskId/review",
-    inputSchemaId: "application.task-id-payload/v1",
-    outputSchemaId: "application.local-controller-result/v1",
-    errorSchemaId: "application.local-controller-error/v1",
-    service: "LocalControllerService",
-    serviceMethod: "reviewTask",
-    auth: "local-session-token",
-    guiBridgeMethod: "reviewTask"
-  },
-  {
-    id: "tasks.progress.append",
-    method: "POST",
-    path: "/api/tasks/:taskId/progress",
-    inputSchemaId: "application.append-task-progress-payload/v1",
-    outputSchemaId: "application.local-controller-result/v1",
-    errorSchemaId: "application.local-controller-error/v1",
-    service: "LocalControllerService",
-    serviceMethod: "appendTaskProgress",
-    auth: "local-session-token",
-    guiBridgeMethod: "appendTaskProgress"
-  },
+  ...taskWriteApiRoutePolicies,
   {
     id: "governance.rebuild",
     method: "POST",

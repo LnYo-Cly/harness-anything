@@ -91,6 +91,33 @@ test("write-road registry rejects an unregistered mutating GUI route", () => {
   }
 });
 
+test("write-road registry rejects an unregistered task write CLI policy", () => {
+  const root = makeFixtureRoot();
+  try {
+    writeFixture(root, { extraTaskCliAction: "unregistered-task-action" });
+    const result = runChecker(root);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /task write CLI route unregistered-task-action/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("write-road registry rejects an unregistered task write API policy", () => {
+  const root = makeFixtureRoot();
+  try {
+    writeFixture(root, {
+      extraTaskApiRoute: "{ id: 'tasks.unregistered', method: 'POST', guiBridgeMethod: 'unregisteredTaskBridge' }"
+    });
+    const result = runChecker(root);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /mutating API route tasks\.unregistered/u);
+    assert.match(result.stderr, /mutating GUI bridge method unregisteredTaskBridge/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("write-road registry rejects an unregistered preset script output scope", () => {
   const root = makeFixtureRoot();
   try {
@@ -136,13 +163,19 @@ function writeFixture(root, overrides = {}) {
     "declare const hashPayload: unknown;",
     "writeCoordinatedPayload(coordinator, hashPayload, { entityId: 'task/t1', kind: 'registered_kind', payload: {} });"
   ]);
+  const taskCliPolicies = ["{ actionKind: 'registered-action' }"];
+  if (overrides.extraTaskCliAction) taskCliPolicies.push(`{ actionKind: '${overrides.extraTaskCliAction}' }`);
+  const taskApiPolicies = ["{ id: 'registered.route', method: 'POST', guiBridgeMethod: 'registeredBridge' }"];
+  if (overrides.extraTaskApiRoute) taskApiPolicies.push(overrides.extraTaskApiRoute);
+  writeLines(root, "packages/application/src/task-write-route-policy.ts", [
+    `export const taskWriteCliRoutePolicies = [${taskCliPolicies.join(", ")}] as const;`,
+    `export const taskWriteApiRoutePolicies = [${taskApiPolicies.join(", ")}] as const;`
+  ]);
   writeLines(root, "packages/daemon/src/protocol/method-registry.ts", [
-    "const repoWriteCliActionKinds = new Set<string>(['registered-action']);",
+    "const repoWriteCliActionKinds = new Set<string>([]);",
     "const arbiterCliActionKinds = new Set<string>([]);"
   ]);
-  const apiRoutes = [
-    "{ id: 'registered.route', method: 'POST', path: '/api/registered', inputSchemaId: 'in', outputSchemaId: 'out', errorSchemaId: 'err', service: 'LocalControllerService', serviceMethod: 'setTaskStatus', auth: 'local-session-token', guiBridgeMethod: 'registeredBridge' }"
-  ];
+  const apiRoutes = [];
   if (overrides.extraApiRoute) apiRoutes.push(overrides.extraApiRoute);
   writeLines(root, "packages/gui/src/api/api-contract-registry.ts", [
     `export const apiRouteContracts = [${apiRoutes.join(", ")}] as const;`

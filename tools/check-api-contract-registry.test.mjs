@@ -10,6 +10,20 @@ test("API contract registry accepts the repository route registry", () => {
   assert.deepEqual(evaluateApiContractRegistry(), []);
 });
 
+test("API contract registry accepts task write routes projected from application policy", async () => {
+  await withFixtureRepo(async (root) => {
+    writeFixture(root, {
+      preloadMethods: ["getTasks"],
+      handlerMethods: ["getTasks"],
+      serviceMethods: ["getTasks"],
+      registryEntries: [],
+      taskWritePolicyEntries: [route({ guiBridgeMethod: "getTasks", serviceMethod: "getTasks" })]
+    });
+
+    assert.deepEqual(evaluateApiContractRegistry(root), []);
+  });
+});
+
 test("API contract registry rejects preload methods missing from registry", async () => {
   await withFixtureRepo(async (root) => {
     writeFixture(root, {
@@ -394,13 +408,24 @@ function writeFixture(root, options) {
     ?? options.handlerMethods.map((method) => ({ method, serviceMethod: method }));
   const terminalRoutes = options.terminalRoutes ?? requiredTerminalRoutes();
   const terminalMethods = options.terminalMethods ?? [...new Set(terminalRoutes.map((entry) => entry.serviceMethod))];
+  const taskWritePolicyEntries = options.taskWritePolicyEntries ?? [];
+  writeFileSync(path.join(root, "packages/application/src/task-write-route-policy.ts"), [
+    "export const taskWriteApiRoutePolicies = [",
+    ...taskWritePolicyEntries.map((entry) => `  ${JSON.stringify(entry)},`),
+    "] as const;",
+    ""
+  ].join("\n"), "utf8");
   writeFileSync(path.join(root, "packages/gui/src/api/api-contract-registry.ts"), [
+    ...(taskWritePolicyEntries.length > 0
+      ? ["import { taskWriteApiRoutePolicies } from '../../../application/src/task-write-route-policy.ts';"]
+      : []),
     "export interface EmptyGuiPayload {}",
     "export const apiSchemaContracts = [",
     ...schemaContracts.map((entry) => `  ${JSON.stringify(entry)},`),
     "] as const;",
     "export const apiRouteContracts = [",
     ...options.registryEntries.map((entry) => `  ${JSON.stringify(entry)},`),
+    ...(taskWritePolicyEntries.length > 0 ? ["  ...taskWriteApiRoutePolicies,"] : []),
     ...terminalRoutes.map((entry) => `  ${JSON.stringify(entry)},`),
     "] as const;",
     "export const deferredGuiBridgeContracts = [",

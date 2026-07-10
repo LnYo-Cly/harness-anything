@@ -268,20 +268,25 @@ function discoverDaemonCliActions() {
       out.push(discovery("daemon-cli-action", rel, node.name, sourceFile, `daemon repo.command.run action ${value}`, { cliAction: value }));
     }
   });
+  const taskPolicyRel = "packages/application/src/task-write-route-policy.ts";
+  const taskPolicySource = parseSource(taskPolicyRel);
+  for (const element of objectElementsInArray(taskPolicySource, "taskWriteCliRoutePolicies")) {
+    const actionKind = stringProperty(element, "actionKind");
+    if (actionKind) {
+      out.push(discovery("daemon-cli-action", taskPolicyRel, element, taskPolicySource, `task write CLI route ${actionKind}`, { cliAction: actionKind }));
+    }
+  }
   return uniqueDiscoveries(out);
 }
 
 function discoverApiRoutes() {
-  const rel = "packages/gui/src/api/api-contract-registry.ts";
-  const sourceFile = parseSource(rel);
   const out = [];
-  visit(sourceFile, (node) => {
-    if (!ts.isVariableDeclaration(node) || !ts.isIdentifier(node.name) || node.name.text !== "apiRouteContracts") return;
-    if (!node.initializer || !ts.isAsExpression(node.initializer) && !ts.isSatisfiesExpression(node.initializer)) return;
-    const array = unwrapExpression(node.initializer);
-    if (!ts.isArrayLiteralExpression(array)) return;
-    for (const element of array.elements) {
-      if (!ts.isObjectLiteralExpression(element)) continue;
+  for (const [rel, arrayName] of [
+    ["packages/gui/src/api/api-contract-registry.ts", "apiRouteContracts"],
+    ["packages/application/src/task-write-route-policy.ts", "taskWriteApiRoutePolicies"]
+  ]) {
+    const sourceFile = parseSource(rel);
+    for (const element of objectElementsInArray(sourceFile, arrayName)) {
       const id = stringProperty(element, "id");
       const method = stringProperty(element, "method");
       const guiBridgeMethod = stringProperty(element, "guiBridgeMethod");
@@ -292,8 +297,19 @@ function discoverApiRoutes() {
         }
       }
     }
-  });
+  }
   return uniqueDiscoveries(out);
+}
+
+function objectElementsInArray(sourceFile, arrayName) {
+  const elements = [];
+  visit(sourceFile, (node) => {
+    if (!ts.isVariableDeclaration(node) || !ts.isIdentifier(node.name) || node.name.text !== arrayName || !node.initializer) return;
+    const array = unwrapExpression(node.initializer);
+    if (!ts.isArrayLiteralExpression(array)) return;
+    elements.push(...array.elements.filter(ts.isObjectLiteralExpression));
+  });
+  return elements;
 }
 
 function discoverPresetDeclarations() {
