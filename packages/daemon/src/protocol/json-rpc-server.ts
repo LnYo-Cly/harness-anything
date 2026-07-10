@@ -353,7 +353,7 @@ async function validateTaskLeaseForServiceWrite(
   repo: DaemonRepoNamespace | undefined,
   options: JsonRpcServerOptions
 ): Promise<ReturnType<typeof failureReceipt> | undefined> {
-  if (!repo || !options.leaseEnforcementEnabled?.(repo) || !taskLeaseGuardedRouteIds.has(contract.routeId ?? "")) return undefined;
+  if (!repo || !options.leaseEnforcementEnabled?.(repo) || contract.leaseRequired !== true) return undefined;
   const taskId = typeof payload?.taskId === "string" ? payload.taskId : undefined;
   if (!taskId) return failureReceipt(contract.method, "task_id_required", "Task lease enforcement requires payload.taskId.");
   if (!services.TaskHolderService) {
@@ -370,11 +370,6 @@ async function validateTaskLeaseForServiceWrite(
     return failureReceipt(contract.method, "task_holder_failed", error instanceof Error ? error.message : String(error));
   }
 }
-
-const taskLeaseGuardedRouteIds = new Set<string>([
-  "tasks.status.set",
-  "tasks.progress.append"
-]);
 
 function resolveServicesForRepo(
   method: string,

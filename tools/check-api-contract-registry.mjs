@@ -10,6 +10,7 @@ const defaults = {
   allowlistPath: "packages/gui/src/preload/allowlist.ts",
   bridgePath: "packages/gui/src/api/service-bridge.ts",
   applicationPath: "packages/application/src/index.ts",
+  taskWritePolicyPath: "packages/application/src/task-write-route-policy.ts",
   terminalPath: "packages/gui/src/terminal/session-registry.ts",
   daemonMethodRegistryPath: "packages/daemon/src/protocol/method-registry.ts",
   daemonApiSchemaFixtureRoot: "packages/daemon/fixtures/api-schemas"
@@ -40,7 +41,7 @@ const schemaIdPattern = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*\/v[1-9][0-9]*$/u;
 export function evaluateApiContractRegistry(root = process.cwd(), options = {}) {
   const paths = { ...defaults, ...options };
   const violations = [];
-  const registry = collectApiRouteContracts(root, paths.registryPath, violations);
+  const registry = collectApiRouteContracts(root, paths.registryPath, paths.taskWritePolicyPath, violations);
   const schemaContracts = collectApiSchemaContracts(root, paths.registryPath, violations);
   const deferredContracts = collectDeferredGuiBridgeContracts(root, paths.registryPath, violations);
   inspectPreloadProjection(root, paths.allowlistPath, violations);
@@ -165,8 +166,11 @@ function collectDeferredGuiBridgeContracts(root, relativePath, violations) {
   return collectStringObjectArray(root, relativePath, "deferredGuiBridgeContracts", violations);
 }
 
-function collectApiRouteContracts(root, relativePath, violations) {
-  return collectStringObjectArray(root, relativePath, "apiRouteContracts", violations);
+function collectApiRouteContracts(root, relativePath, taskWritePolicyPath, violations) {
+  const taskWriteRoutes = collectStringObjectArray(root, taskWritePolicyPath, "taskWriteApiRoutePolicies", violations);
+  return collectStringObjectArray(root, relativePath, "apiRouteContracts", violations, {
+    spreadEntries: new Map([["taskWriteApiRoutePolicies", taskWriteRoutes]])
+  });
 }
 
 function inspectPreloadProjection(root, relativePath, violations) {
@@ -184,7 +188,7 @@ function inspectPreloadProjection(root, relativePath, violations) {
   }
 }
 
-function collectStringObjectArray(root, relativePath, variableName, violations) {
+function collectStringObjectArray(root, relativePath, variableName, violations, options = {}) {
   const source = readSource(root, relativePath, violations);
   if (!source) return [];
   const registryNode = findVariableInitializer(source.file, variableName);
@@ -196,6 +200,13 @@ function collectStringObjectArray(root, relativePath, variableName, violations) 
   const entries = [];
   const arrayNode = stripAsExpression(registryNode);
   for (const element of arrayNode.elements) {
+    if (ts.isSpreadElement(element) && ts.isIdentifier(element.expression)) {
+      const projectedEntries = options.spreadEntries?.get(element.expression.text);
+      if (projectedEntries) {
+        entries.push(...projectedEntries);
+        continue;
+      }
+    }
     if (!ts.isObjectLiteralExpression(element)) {
       violations.push(`${relativePath}: ${variableName} entries must be object literals`);
       continue;

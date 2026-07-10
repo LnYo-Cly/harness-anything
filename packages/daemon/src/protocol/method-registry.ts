@@ -1,4 +1,5 @@
 import { apiRouteContracts, type ApiRouteContract } from "../../../gui/src/api/api-contract-registry.ts";
+import { taskWriteCliRoutePolicies, taskWriteCliRoutePolicy } from "../../../application/src/index.ts";
 import type { DaemonCommandClass } from "../identity/types.ts";
 
 export const currentDaemonProtocolVersion = 1 as const;
@@ -20,6 +21,7 @@ export interface JsonRpcMethodContract {
   readonly requiresRepo: boolean;
   readonly commandClass?: DaemonCommandClass;
   readonly commandClassDerivation?: "repo-command-run-action";
+  readonly leaseRequired?: boolean;
 }
 
 const protocolMethodContracts = [
@@ -163,8 +165,6 @@ const adminReservedContracts = [
   }
 ] as const satisfies ReadonlyArray<JsonRpcMethodContract>;
 
-const arbiterApiRouteIds = new Set<string>(["tasks.status.set", "tasks.review"]);
-
 export function deriveJsonRpcServiceMethodContracts(
   contracts: ReadonlyArray<ApiRouteContract> = apiRouteContracts
 ): ReadonlyArray<JsonRpcMethodContract> {
@@ -180,12 +180,13 @@ export function deriveJsonRpcServiceMethodContracts(
     routeId: contract.id,
     auth: contract.auth,
     requiresRepo: true,
-    commandClass: commandClassForApiRoute(contract)
+    commandClass: commandClassForApiRoute(contract),
+    ...(contract.leaseRequired === true ? { leaseRequired: true } : {})
   }));
 }
 
 export function commandClassForApiRoute(contract: ApiRouteContract): DaemonCommandClass {
-  if (arbiterApiRouteIds.has(contract.id)) return "arbiter";
+  if (contract.commandClass) return contract.commandClass;
   if (contract.method === "GET" || contract.method === "WS") return "repo-read";
   return "repo-write";
 }
@@ -264,27 +265,17 @@ const repoWriteCliActionKinds = new Set<string>([
   "module-scaffold",
   "module-step",
   "module-unregister",
-  "new-task",
   "preset-action",
   "preset-install",
   "preset-run",
   "preset-seed",
   "preset-uninstall",
-  "progress-append",
   "record-fact",
   "runtime-event-append",
   "script-run",
   "session-backfill",
   "session-export",
   "session-sync",
-  "task-amend",
-  "task-archive",
-  "task-claim",
-  "task-delete",
-  "task-relate",
-  "task-reopen",
-  "task-release",
-  "task-supersede",
   "worktree-create"
 ]);
 
@@ -294,15 +285,13 @@ const arbiterCliActionKinds = new Set<string>([
   "decision-reject",
   "decision-retire",
   "decision-supersede",
-  "status-set",
-  "task-complete",
-  "task-review"
 ]);
 
 export const repoCommandRunClassifiedActionKinds = [
   ...repoReadCliActionKinds,
   ...repoWriteCliActionKinds,
-  ...arbiterCliActionKinds
+  ...arbiterCliActionKinds,
+  ...taskWriteCliRoutePolicies.map((policy) => policy.actionKind)
 ].sort();
 
 export function commandClassForJsonRpcRequest(
@@ -321,6 +310,8 @@ export function commandClassForCliCommandPayload(params: unknown): DaemonCommand
   const action = isRecord(command) ? command.action : undefined;
   const kind = isRecord(action) && typeof action.kind === "string" ? action.kind : undefined;
   if (!kind) return undefined;
+  const taskWritePolicy = taskWriteCliRoutePolicy(kind);
+  if (taskWritePolicy) return taskWritePolicy.commandClass;
   if (repoReadCliActionKinds.has(kind)) return "repo-read";
   if (repoWriteCliActionKinds.has(kind)) return "repo-write";
   if (arbiterCliActionKinds.has(kind)) return "arbiter";

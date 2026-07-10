@@ -128,6 +128,49 @@ test("task lease enforcement guards daemon task progress API writes when enabled
   }
 });
 
+test("task lease enforcement rejects review by an arbiter who is not the holder", async () => {
+  const previous = process.env.HARNESS_TASK_LEASE_ENFORCEMENT;
+  const rootDir = createHarnessRoot(["settings:", "  tasks:", "    leaseEnforcement: true"]);
+  try {
+    delete process.env.HARNESS_TASK_LEASE_ENFORCEMENT;
+    let reviewWrites = 0;
+    const { alice, bob } = makeActorServers(rootDir, {
+      ...emptyLocalController(),
+      reviewTask: async () => {
+        reviewWrites += 1;
+        return { ok: true };
+      }
+    });
+    await hello(alice);
+    await hello(bob);
+
+    const taskId = "task_01KX19GEKWMEJNGSMRT6JJH6HY";
+    const claimed = resultReceipt(await alice.handle(taskHolderRequest("repo.task.claim", taskId, { ttlMs: 60_000 })));
+    assert.equal(claimed.ok, true);
+
+    const denied = resultReceipt(await bob.handle({
+      jsonrpc: "2.0",
+      id: "review-lease-denied",
+      method: "repo.tasks.review",
+      params: {
+        repo: { repoId: "canonical" },
+        payload: { taskId }
+      }
+    }));
+    assert.equal(denied.ok, false);
+    assert.equal(denied.error?.code, "task_lease_required");
+    assert.equal(denied.details.holder.principal.personId, "person_alice");
+    assert.equal(reviewWrites, 0);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.HARNESS_TASK_LEASE_ENFORCEMENT;
+    } else {
+      process.env.HARNESS_TASK_LEASE_ENFORCEMENT = previous;
+    }
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("daemon lease enforcement accepts explicit environment disable over workspace configuration", async () => {
   const previous = process.env.HARNESS_TASK_LEASE_ENFORCEMENT;
   const rootDir = createHarnessRoot(["settings:", "  tasks:", "    leaseEnforcement: true"]);
@@ -181,6 +224,7 @@ function makeActorServers(
   };
   return {
     alice: createActorServer(rootDir, roster, "alice", services, appendRuntimeEvent),
+    bob: createActorServer(rootDir, roster, "bob", services, appendRuntimeEvent),
     maint: createActorServer(rootDir, roster, "maint", services, appendRuntimeEvent)
   };
 }
@@ -188,7 +232,7 @@ function makeActorServers(
 function createActorServer(
   rootDir: string,
   roster: PeopleRoster,
-  username: "alice" | "maint",
+  username: "alice" | "bob" | "maint",
   services: Parameters<typeof createJsonRpcProtocolServer>[0]["services"],
   appendRuntimeEvent?: Parameters<typeof createJsonRpcProtocolServer>[0]["appendRuntimeEvent"]
 ) {
@@ -275,6 +319,14 @@ function sampleRoster(): PeopleRoster {
     "      - kind: ssh-username",
     "        issuer: host:team-host",
     "        subject: alice",
+    "  - personId: person_bob",
+    "    displayName: Bob Admin",
+    "    primaryEmail: bob@example.com",
+    "    roles: [owner]",
+    "    credentials:",
+    "      - kind: ssh-username",
+    "        issuer: host:team-host",
+    "        subject: bob",
     "  - personId: person_maint",
     "    displayName: Mina Maintainer",
     "    primaryEmail: maint@example.com",
