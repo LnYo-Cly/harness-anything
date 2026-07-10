@@ -43,7 +43,15 @@ export async function runRegisteredCommandWithCliComposition(
     rootDir: command.rootDir,
     layoutOverrides: command.layoutOverrides
   };
-  const enforceTaskLease = leaseEnforcementEnabled(layoutInput);
+  let enforceTaskLeaseResolved = false;
+  let enforceTaskLeaseValue = false;
+  const enforceTaskLease = () => {
+    if (!enforceTaskLeaseResolved) {
+      enforceTaskLeaseValue = leaseEnforcementEnabled(layoutInput);
+      enforceTaskLeaseResolved = true;
+    }
+    return enforceTaskLeaseValue;
+  };
   let currentSessionProbe: ReturnType<typeof makeEnvironmentCurrentSessionProbe> | undefined;
   const getCurrentSessionProbe = () => {
     currentSessionProbe ??= makeEnvironmentCurrentSessionProbe();
@@ -140,7 +148,7 @@ export async function runRegisteredCommandWithCliComposition(
       provenanceSessionExporter: makeSessionExporter(),
       syncExportedSession
     }, boundAt)
-  }), enforceTaskLease, makeTaskHolder, getTaskHolderPrincipal), makeArtifactStore, getCurrentSessionProbe, makeSessionExporter, syncExportedSession, makeWriteCoordinator, getActorAttribution, getTaskHolderPrincipal, () => makeDecisionWriteService({
+  }), enforceTaskLease(), makeTaskHolder, getTaskHolderPrincipal), makeArtifactStore, getCurrentSessionProbe, makeSessionExporter, syncExportedSession, makeWriteCoordinator, getActorAttribution, getTaskHolderPrincipal, () => makeDecisionWriteService({
     rootInput: layoutInput,
     coordinator: makeWriteCoordinator({ kind: "agent", id: "decision-cli" }),
     currentSessionProbe: getCurrentSessionProbe(),
@@ -152,7 +160,7 @@ export async function runRegisteredCommandWithCliComposition(
     currentSessionProbe: getCurrentSessionProbe(),
     provenanceSessionExporter: makeSessionExporter(),
     syncExportedSession
-  }), enforceTaskLease, makeTaskHolder, getTaskHolderPrincipal), makeTaskHolder, () => makeRuntimeEventLedgerService({
+  }), enforceTaskLease(), makeTaskHolder, getTaskHolderPrincipal), makeTaskHolder, () => makeRuntimeEventLedgerService({
     rootInput: layoutInput,
     coordinator: makeWriteCoordinator({ kind: "agent", id: "runtime-event-cli" })
   }), provider.runLedgerMaterializer).pipe(
