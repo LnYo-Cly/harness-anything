@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -189,6 +189,55 @@ test("doc sync submit accepts non-markdown task prose when registry bearing reso
 
     assert.equal(result.ok, true);
     assert.equal(result.appliedChanges[0]?.path, `tasks/${taskId}/notes.txt`);
+  });
+});
+
+test("doc sync snapshot fails closed on a broken symlink child", async () => {
+  await withHarnessFixture(async ({ rootDir, harnessRoot }) => {
+    symlinkSync("missing-target", path.join(harnessRoot, "broken-link"));
+    const service = makeDocSyncService({ rootDir, commitAuthor });
+
+    await assert.rejects(
+      service.submit(submitRequest({
+        baseLedgerSha: git(harnessRoot, "rev-parse", "HEAD"),
+        intentId: "intent-broken-symlink",
+        changes: []
+      })),
+      (error: NodeJS.ErrnoException) => error.code === "ENOENT"
+    );
+  });
+});
+
+test("doc sync snapshot preserves ENOTDIR for an ordinary-file authored root", async () => {
+  await withHarnessFixture(async ({ rootDir, harnessRoot }) => {
+    rmSync(harnessRoot, { recursive: true, force: true });
+    writeFileSync(harnessRoot, "not a directory", "utf8");
+    const service = makeDocSyncService({ rootDir, commitAuthor });
+
+    await assert.rejects(
+      service.submit(submitRequest({
+        baseLedgerSha: "no-git-head",
+        intentId: "intent-file-root",
+        changes: []
+      })),
+      (error: NodeJS.ErrnoException) => error.code === "ENOTDIR"
+    );
+  });
+});
+
+test("doc sync snapshot traverses an authored root named .git", async () => {
+  await withHarnessFixture(async ({ rootDir, harnessRoot }) => {
+    symlinkSync("missing-target", path.join(harnessRoot, ".git", "broken-link"));
+    const service = makeDocSyncService({ rootDir, layoutOverrides: { authoredRoot: "harness/.git" }, commitAuthor });
+
+    await assert.rejects(
+      service.submit(submitRequest({
+        baseLedgerSha: git(harnessRoot, "rev-parse", "HEAD"),
+        intentId: "intent-dot-git-root",
+        changes: []
+      })),
+      (error: NodeJS.ErrnoException) => error.code === "ENOENT"
+    );
   });
 });
 

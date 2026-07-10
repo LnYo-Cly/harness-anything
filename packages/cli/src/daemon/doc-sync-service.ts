@@ -265,20 +265,28 @@ function rpcOnlySignature(filePath: string, body: string, zones: ReadonlyArray<E
 
 function snapshotFiles(authoredRoot: string): Map<string, string> {
   const files = new Map<string, string>();
-  const pending = [authoredRoot];
-  while (pending.length > 0) {
-    const current = pending.pop()!;
-    if (!existsSync(current)) continue;
-    const stat = statSync(current);
-    if (stat.isDirectory()) {
-      if (path.basename(current) === ".git") continue;
-      const entries = readdirSync(current).map((entry) => path.join(current, entry));
-      for (let index = entries.length - 1; index >= 0; index -= 1) {
-        pending.push(entries[index]!);
-      }
+  if (!existsSync(authoredRoot)) return files;
+  const frames: Array<{ readonly current: string; readonly entries: ReadonlyArray<string>; index: number }> = [{
+    current: authoredRoot,
+    entries: readdirSync(authoredRoot),
+    index: 0
+  }];
+  while (frames.length > 0) {
+    const frame = frames.at(-1)!;
+    const entry = frame.entries[frame.index];
+    if (entry === undefined) {
+      frames.pop();
       continue;
     }
-    if (stat.isFile()) files.set(path.relative(authoredRoot, current).split(path.sep).join("/"), readFileSync(current, "utf8"));
+    frame.index += 1;
+    const absolute = path.join(frame.current, entry);
+    const stat = statSync(absolute);
+    if (stat.isDirectory()) {
+      if (entry === ".git") continue;
+      frames.push({ current: absolute, entries: readdirSync(absolute), index: 0 });
+      continue;
+    }
+    if (stat.isFile()) files.set(path.relative(authoredRoot, absolute).split(path.sep).join("/"), readFileSync(absolute, "utf8"));
   }
   return files;
 }
