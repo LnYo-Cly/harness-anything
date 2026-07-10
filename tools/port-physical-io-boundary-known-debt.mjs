@@ -108,6 +108,11 @@ export const portPhysicalIoBoundaryKnownDebt = [
     file: "packages/kernel/src/store/write-journal-operations.ts",
     decision: "task_01KWXKR6YSV4J4E0H5FGPHKZYN",
     reason: "Existing journal operation implementation owns local authored-file write operations."
+  },
+  {
+    file: "packages/kernel/src/store/write-journal-operations-internal.ts",
+    decision: "task_01KX68A7MK6HH9TM16T95M8ZZK",
+    reason: "P3-1 split of write-journal-operations.ts (already-frozen exception): read-side apply helpers relocated with the same debt; no new physical I/O surface. Dissolves with the P1-3 port extraction."
   }
 ];
 

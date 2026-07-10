@@ -43,10 +43,10 @@ export function commitTouchedPaths(
     if (unforcedPaths.length > 0) vcs.add(plan.repoRoot, { paths: unforcedPaths });
     unstageLogFiles(plan.repoRoot, plan.relativePaths, vcs);
     const staged = vcs.stagedFiles(plan.repoRoot, plan.relativePaths).trim();
-    if (staged.length === 0) return currentGitHead(plan.repoRoot, vcs);
+    if (staged.length === 0) return vcs.currentHead(plan.repoRoot);
 
     vcs.commit(plan.repoRoot, message ?? `harness write ${opIds.join(",")}`, options.author);
-    return currentGitHead(plan.repoRoot, vcs);
+    return vcs.currentHead(plan.repoRoot);
   } finally {
     if (sessionBranch && trunkBranch) vcs.checkout(plan.repoRoot, trunkBranch);
   }
@@ -103,14 +103,6 @@ function resolveCommitTarget(rootDir: string, authoredRoot: string, touchedPaths
   return { repoRoot: authoredRepo };
 }
 
-export function ledgerGitTopLevel(inputPath: string, versionControlSystem: VersionControlSystem = defaultVersionControlSystem): string | null {
-  return versionControlSystem.topLevel(inputPath);
-}
-
-export function checkoutTrunk(repoRoot: string, trunkBranch: string, versionControlSystem: VersionControlSystem = defaultVersionControlSystem): void {
-  versionControlSystem.checkout(repoRoot, trunkBranch);
-}
-
 // Resolve the repository's trunk (integration) branch. The session-branch write model
 // checks out trunk, branches sessions/<id> from it, then materializes back into trunk;
 // hardcoding "master" broke every repo whose trunk is "main" (or anything else). Order:
@@ -127,45 +119,9 @@ export function resolveTrunkBranch(repoRoot: string, explicit?: string, versionC
   if (originHead) return originHead;
 
   for (const candidate of ["main", "master"]) {
-    if (localBranchExists(repoRoot, candidate, versionControlSystem)) return candidate;
+    if (versionControlSystem.refExists(repoRoot, `refs/heads/${candidate}`)) return candidate;
   }
   return "main";
-}
-
-function localBranchExists(repoRoot: string, branch: string, vcs: VersionControlSystem): boolean {
-  return refExists(repoRoot, `refs/heads/${branch}`, vcs);
-}
-
-export function mergeNoFf(repoRoot: string, branch: string, message: string, versionControlSystem: VersionControlSystem = defaultVersionControlSystem): void {
-  versionControlSystem.mergeNoFf(repoRoot, branch, message);
-}
-
-export function deleteBranch(repoRoot: string, branch: string, versionControlSystem: VersionControlSystem = defaultVersionControlSystem): void {
-  versionControlSystem.deleteBranch(repoRoot, branch);
-}
-
-export function abortMerge(repoRoot: string, versionControlSystem: VersionControlSystem = defaultVersionControlSystem): void {
-  versionControlSystem.abortMerge(repoRoot);
-}
-
-export function sessionBranches(repoRoot: string, versionControlSystem: VersionControlSystem = defaultVersionControlSystem): ReadonlyArray<string> {
-  return versionControlSystem.sessionBranches(repoRoot);
-}
-
-export function commitsNotInTrunk(repoRoot: string, trunkBranch: string, branch: string, versionControlSystem: VersionControlSystem = defaultVersionControlSystem): ReadonlyArray<string> {
-  return versionControlSystem.commitsNotInTrunk(repoRoot, trunkBranch, branch);
-}
-
-export function currentGitHead(repoRoot: string, versionControlSystem: VersionControlSystem = defaultVersionControlSystem): string {
-  return versionControlSystem.currentHead(repoRoot);
-}
-
-export function changedFilesBetween(repoRoot: string, before: string, after: string, versionControlSystem: VersionControlSystem = defaultVersionControlSystem): ReadonlyArray<string> {
-  return versionControlSystem.changedFilesBetween(repoRoot, before, after);
-}
-
-export function refExists(repoRoot: string, ref: string, versionControlSystem: VersionControlSystem = defaultVersionControlSystem): boolean {
-  return versionControlSystem.refExists(repoRoot, ref);
 }
 
 function resolveForceAddSet(

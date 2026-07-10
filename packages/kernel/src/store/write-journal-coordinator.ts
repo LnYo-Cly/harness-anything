@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Effect } from "effect";
 import type {
@@ -10,22 +10,14 @@ import type {
   WriteOp
 } from "../ports/write-coordinator.ts";
 import type { VersionControlSystem } from "../ports/version-control-system.ts";
-import type { EntityId, TaskId, WriteError } from "../domain/index.ts";
-import {
-  isDomainStatus,
-  isPackageDisposition,
-  isTerminalStatus,
-  taskIdFromEntityId
-} from "../domain/index.ts";
-import { evaluateEntityDisposition } from "../entity/disposition.ts";
+import type { EntityId, WriteError } from "../domain/index.ts";
+import { taskIdFromEntityId } from "../domain/index.ts";
 import { stablePayloadHash } from "../integrity/stable-hash.ts";
-import { readFrontmatter, readScalar } from "../markdown/frontmatter.ts";
 import { assertDocumentWritePathsDoNotCollide } from "./markdown-artifact-store.ts";
 import {
   createHarnessRuntimeContext,
   type HarnessLayoutInput,
   resolveHarnessLayout,
-  taskPackagePath
 } from "../layout/index.ts";
 import { updateTaskProjectionIncrementally } from "../projection/sqlite-task-incremental-projection.ts";
 import { hashTaskProjectionRows } from "../projection/sqlite-task-projection.ts";
@@ -34,13 +26,14 @@ import { appendJsonLineDurably, readDurableState, readPayloadRef, writePayloadRe
 import { assertCommitPlanAddable, commitTouchedPaths } from "./write-journal-git.ts";
 import { runLedgerMaterializer } from "./ledger-materializer.ts";
 import { assertDirectWriteAllowed, withRepoLocks, WriteLockHeldError } from "./write-journal-locks.ts";
-import { NonTaskWriteEntityError, taskIdForJournalRecord, taskIdForWriteOp } from "./write-journal-entity.ts";
-import { decisionDocumentTargetPath, decisionWriteKinds } from "./write-journal-decision-documents.ts";
-import { rejectTaskWrite, rejectWrite, WriteRejectedError } from "./write-journal-rejection.ts";
+import { NonTaskWriteEntityError, taskIdForJournalRecord } from "./write-journal-entity.ts";
+import { rejectWrite, WriteRejectedError } from "./write-journal-rejection.ts";
 import {
   applyWriteOp,
   documentWritesForWriteOp,
+  readHardDeletePayload,
   isProgressAppendDeltaPayload,
+  validateWriteTransaction,
   writeOpTouchedPaths
 } from "./write-journal-operations.ts";
 import type { ApplyMarkerRecord, DeleteAuditRecord, GitCommitAuthor, JournalActor, JournalRecord, JournalRecordKind, JournaledWriteCoordinatorOptions, LockConflictRetryOptions, LockTakeoverRecord, WriteWatermark } from "./write-journal-types.ts";
@@ -249,24 +242,20 @@ function flushRecords(
 }
 
 function applyRecord(rootDir: string, rootInput: HarnessLayoutInput, journalPath: string, record: JournalRecord): void {
-  if (record.kind === "package_delete_hard") {
-    const taskId = taskIdForJournalRecord(record);
-    const payload = readHardDeletePayload(rootDir, record);
-    assertHardDeleteAllowed(rootInput, taskId, { allowMissing: true });
-    rmSync(taskPackagePath(rootInput, taskId), { recursive: true, force: true });
+  const op = recordToOp(rootDir, record);
+  applyWriteOp(rootInput, op);
+  if (op.kind === "package_delete_hard") {
+    const payload = readHardDeletePayload(op);
     appendJsonLineDurably(journalPath, {
       schema: "delete-audit/v1",
       opId: `${record.opId}:applied`,
-      taskId,
+      taskId: taskIdForJournalRecord(record),
       kind: "package_delete_hard_applied",
       actor: record.actor,
       at: new Date().toISOString(),
       reason: payload.reason
     });
-    return;
   }
-  const op = recordToOp(rootDir, record);
-  applyWriteOp(rootInput, op);
   // Delta appends are not idempotent: replaying one after a crash between apply and
   // watermark would duplicate the text/JSONL row. Mark the file mutation durably so
   // replay skips the write while still committing and watermarking the op (ADR-0016 D2/D1).
@@ -329,18 +318,7 @@ function toJournalPayload(op: { readonly opId: string; readonly payload?: unknow
 }
 
 function recordTouchedPaths(rootDir: string, rootInput: HarnessLayoutInput, record: JournalRecord): ReadonlyArray<string> {
-  if (record.kind === "package_delete_hard") {
-    return [taskPackagePath(rootInput, taskIdForJournalRecord(record))];
-  }
   return writeOpTouchedPaths(rootInput, recordToOp(rootDir, record));
-}
-
-function readHardDeletePayload(rootDir: string, record: JournalRecord): { readonly reason: string } {
-  const payload = readVerifiedPayload(rootDir, record);
-  if (typeof payload.reason !== "string" || payload.reason.trim().length === 0) {
-    rejectWrite(`hard delete requires reason payload: ${record.opId}`, record.entityId);
-  }
-  return { reason: payload.reason };
 }
 
 function readVerifiedPayload(rootDir: string, record: JournalRecord): Record<string, unknown> {
@@ -405,43 +383,6 @@ function recordCommitDetail(kind: JournalRecordKind, payload: Record<string, unk
   return "";
 }
 
-function assertHardDeleteAllowed(
-  rootInput: HarnessLayoutInput,
-  taskId: TaskId,
-  options: { readonly allowMissing?: boolean } = {}
-): void {
-  const packagePath = taskPackagePath(rootInput, taskId);
-  const indexPath = path.join(packagePath, "INDEX.md");
-  if (!existsSync(indexPath)) {
-    if (options.allowMissing) return;
-    rejectTaskWrite(`hard delete forbidden: task package missing ${taskId}`, taskId);
-  }
-
-  const frontmatter = readFrontmatter(readFileSync(indexPath, "utf8"));
-  if (!frontmatter) rejectTaskWrite(`hard delete forbidden: malformed task package ${taskId}`, taskId);
-  const packageDisposition = readScalar(frontmatter, "packageDisposition");
-  if (!isPackageDisposition(packageDisposition)) {
-    rejectTaskWrite(`hard delete forbidden: invalid package disposition ${taskId}`, taskId);
-  }
-  if (packageDisposition === "archived") {
-    rejectTaskWrite(`hard delete forbidden for archived task: ${taskId}`, taskId);
-  }
-  const status = readScalar(frontmatter, "  status");
-  if (!isDomainStatus(status)) rejectTaskWrite(`hard delete forbidden: invalid task status ${taskId}`, taskId);
-  if (isTerminalStatus(status)) {
-    rejectTaskWrite(`hard delete forbidden for terminal task: ${taskId}`, taskId);
-  }
-  const evaluation = evaluateEntityDisposition({
-    rootDir: typeof rootInput === "string" ? path.resolve(rootInput) : rootInput.rootDir,
-    layoutOverrides: typeof rootInput === "string" ? undefined : rootInput.layoutOverrides,
-    entityRef: `task/${taskId}`,
-    action: "hard-delete"
-  });
-  if (!evaluation.allowed) {
-    rejectTaskWrite(evaluation.reason, taskId);
-  }
-}
-
 function rebuildProjectionHash(
   rootDir: string,
   rootInput: HarnessLayoutInput,
@@ -491,17 +432,7 @@ function compactJournalDurably(journalPath: string, coveredOpIds: ReadonlySet<st
 function validateOp(rootInput: HarnessLayoutInput, op: WriteOp): void {
   if (op.opId.length === 0) rejectWrite("opId is required", op.entityId);
   if (op.entityId.length === 0) rejectWrite("entityId is required", op.entityId);
-  if (decisionWriteKinds.has(op.kind)) {
-    decisionDocumentTargetPath(rootInput, op);
-    return;
-  }
-  if (op.kind === "package_delete_hard") {
-    const payload = toJournalPayload(op);
-    if (typeof payload.reason !== "string" || payload.reason.trim().length === 0) {
-      rejectWrite(`hard delete requires reason payload: ${op.opId}`, op.entityId);
-    }
-    assertHardDeleteAllowed(rootInput, taskIdForWriteOp(op));
-  }
+  validateWriteTransaction(rootInput, op);
 }
 
 function toJournalError(cause: unknown, context: { readonly entityId?: EntityId } = {}): WriteError {

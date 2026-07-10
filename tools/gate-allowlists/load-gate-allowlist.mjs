@@ -37,7 +37,6 @@ export function loadGateAllowlist(gateId, options = {}) {
   }
 
   const currentCount = validateEntryTree(gateId, parsed.entries, "entries");
-  if (currentCount === 0) fail(gateId, `${displayPath} must contain at least one governed entry`);
 
   const previousCount = previousEntryCount(displayPath);
   const trend = previousCount === null ? "previous=unavailable" : `previous=${previousCount} delta=${currentCount - previousCount}`;
@@ -75,7 +74,6 @@ export function patternEntries(entries) {
 
 function validateEntryTree(gateId, value, label) {
   if (Array.isArray(value)) {
-    if (value.length === 0) fail(gateId, `${label} must not be an empty list`);
     for (const [index, entry] of value.entries()) validateEntry(gateId, entry, `${label}[${index}]`);
     return value.length;
   }
