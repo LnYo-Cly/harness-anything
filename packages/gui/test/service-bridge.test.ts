@@ -158,6 +158,9 @@ test("GUI bridge projects a hermetic decision-task-fact ledger into renderer dat
 
     assert.deepEqual(projection.decisions.map((decision) => decision.decisionId), ["dec_gui"]);
     assert.deepEqual(projection.facts.map((fact) => fact.anchor), ["task-1/F-12345678"]);
+    assert.deepEqual(projection.facts.map((fact) => fact.confidence), ["high"]);
+    assert.deepEqual(projection.factAnchors.map((anchor) => anchor.factRef), ["fact/task-1/F-12345678"]);
+    assert.deepEqual(projection.coverageRows.map((row) => row.coveringFactRef), ["fact/task-1/F-12345678"]);
     assert.deepEqual(projection.relations.map((relation) => relation.kind).sort(), [
       "derives",
       "evidenced-by",
@@ -420,7 +423,7 @@ function writeTriadicLedger(rootDir: string): void {
     "  - { id: \"CH1\", text: \"Use the public projection path\" }",
     "rejected: []",
     "claims:",
-    "  - { id: \"C1\", text: \"The renderer consumes kernel relation names\", load_bearing: false }",
+    "  - { id: \"CH1\", text: \"The renderer consumes kernel relation names\", load_bearing: true }",
     "relations:",
     `  ${formatRelationFlowRecord({
       relation_id: deriveRelationId({ source: "decision/dec_gui", target: "task/task-1", type: "derives", direction: "directed" }),

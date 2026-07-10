@@ -16,6 +16,7 @@ import type {
 } from "../model/types";
 import { FactInspector } from "../components/FactInspector";
 import { VerdictCard, sortKey } from "./decisions-verdict";
+import type { RelationCoverageRow } from "../../api/renderer-dto";
 
 export type DecideAction = "accept" | "reject" | "defer";
 
@@ -28,6 +29,10 @@ export function DecisionsView({
   onCallAgent,
   onDecide,
   readOnly = false,
+  onNavigateDecision,
+  onNavigateTask,
+  onFocusGraph,
+  coverageRows = [],
 }: {
   decisions: DecisionRow[];
   tasks: TaskRow[];
@@ -37,6 +42,10 @@ export function DecisionsView({
   onCallAgent?: (cmd: string) => void;
   onDecide: (id: string, action: DecideAction) => void;
   readOnly?: boolean;
+  onNavigateDecision?: (decisionId: string) => void;
+  onNavigateTask?: (taskId: string) => void;
+  onFocusGraph?: (ref: string) => void;
+  coverageRows?: ReadonlyArray<RelationCoverageRow>;
 }) {
   const [trace, setTrace] = useState<string | null>(null);
   // 本会话跳过的 id 集合(不改状态,仅本会话后移)
@@ -190,6 +199,7 @@ export function DecisionsView({
                 )}
                 <VerdictCard
                   d={current}
+                  decisions={decisions}
                   facts={facts}
                   tasks={tasks}
                   relations={relations}
@@ -290,6 +300,10 @@ export function DecisionsView({
             decisions={decisions}
             relations={relations}
             onClose={() => setInspectedFactRef(null)}
+            onNavigateDecision={onNavigateDecision}
+            onNavigateTask={onNavigateTask}
+            onFocusGraph={onFocusGraph}
+            coverageRows={coverageRows}
           />
         )}
       </div>

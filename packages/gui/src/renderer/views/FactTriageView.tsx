@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Funnel, WarningCircle, Warning, Info } from "@phosphor-icons/react";
+import { useEffect, useMemo, useState } from "react";
+import { Funnel, Graph, WarningCircle, Warning, Info } from "@phosphor-icons/react";
 import type { DecisionRow, FactRef, RelationEdge, TaskRow } from "../model/types";
 import {
   buildFactTriage,
@@ -11,6 +11,10 @@ import {
 import { buildFactTriageContext } from "../model/copy-context";
 import { FactInspector } from "../components/FactInspector";
 import { CopyContextButton } from "../components/CopyContextButton";
+import type {
+  FactAnchorRow,
+  RelationCoverageRow,
+} from "../../api/renderer-dto";
 
 /** 信号 → 颜色/图标(triage 卡片 badge 语言) */
 const SIGNAL_VISUAL: Record<
@@ -19,17 +23,15 @@ const SIGNAL_VISUAL: Record<
 > = {
   INVALIDATED: { cls: "bg-danger/15 text-danger border-danger/30", icon: WarningCircle },
   ORPHAN: { cls: "bg-stale/15 text-stale border-stale/30", icon: Warning },
-  WEAKLY_CITED: { cls: "bg-stale/10 text-stale border-stale/20", icon: Warning },
-  SUPERSEDES_OTHER: { cls: "bg-accent/10 text-accent border-accent/25", icon: Info },
-  MARGINAL_SOURCE: { cls: "bg-surface-raised text-text-muted border-border", icon: Info },
+  LOW_CONFIDENCE: { cls: "bg-stale/10 text-stale border-stale/20", icon: Warning },
+  SUPERSEDED: { cls: "bg-surface-raised text-text-muted border-border", icon: Info },
 };
 
 const SIGNAL_ORDER: FactTriageSignalKind[] = [
   "INVALIDATED",
   "ORPHAN",
-  "WEAKLY_CITED",
-  "SUPERSEDES_OTHER",
-  "MARGINAL_SOURCE",
+  "LOW_CONFIDENCE",
+  "SUPERSEDED",
 ];
 
 export function FactTriageView({
@@ -37,26 +39,45 @@ export function FactTriageView({
   relations,
   decisions,
   tasks,
+  coverageRows,
+  factAnchors,
   onNavigateDecision,
   onNavigateTask,
+  focusedFactRef,
+  onFocusGraph,
 }: {
   facts: FactRef[];
   relations: RelationEdge[];
   decisions: DecisionRow[];
   tasks: TaskRow[];
+  coverageRows: ReadonlyArray<RelationCoverageRow>;
+  factAnchors: ReadonlyArray<FactAnchorRow>;
   /** 活链接:点击 decision ref 跳转 */
   onNavigateDecision?: (decisionId: string) => void;
   /** 活链接:点击 task ref 跳转 */
   onNavigateTask?: (taskId: string) => void;
+  focusedFactRef?: string | null;
+  onFocusGraph?: (ref: string) => void;
 }) {
   const [signalFilter, setSignalFilter] = useState<Set<FactTriageSignalKind>>(
     new Set(SIGNAL_ORDER),
   );
   const [inspectedFactRef, setInspectedFactRef] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!focusedFactRef) return;
+    setInspectedFactRef(focusedFactRef);
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .getElementById(`triage-${focusedFactRef.replaceAll("/", "-")}`)
+        ?.scrollIntoView({ block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusedFactRef]);
+
   const triage = useMemo(
-    () => buildFactTriage(facts, relations, decisions, tasks),
-    [facts, relations, decisions, tasks],
+    () => buildFactTriage(facts, relations, coverageRows, factAnchors),
+    [facts, relations, coverageRows, factAnchors],
   );
 
   // 信号计数(用于 filter chip 显示)
@@ -98,7 +119,7 @@ export function FactTriageView({
             </span>
           </div>
           <p className="mt-1 text-[12px] leading-relaxed text-text-muted">
-            triage 维度全部从 relation 图投影现算,不改 kernel fact schema。
+            triage 维度从 coverageRows、factAnchors 与 relation 图投影现算,不改 kernel fact schema。
             健康 fact(severity=0)不进池——只顶有异常信号的到最前。
           </p>
         </header>
@@ -156,6 +177,8 @@ export function FactTriageView({
                   onInspect={() => setInspectedFactRef(`fact/${item.fact.anchor}`)}
                   onNavigateDecision={onNavigateDecision}
                   onNavigateTask={onNavigateTask}
+                  focused={focusedFactRef === `fact/${item.fact.anchor}`}
+                  onFocusGraph={onFocusGraph}
                 />
               ))}
             </div>
@@ -173,6 +196,8 @@ export function FactTriageView({
           onClose={() => setInspectedFactRef(null)}
           onNavigateDecision={onNavigateDecision}
           onNavigateTask={onNavigateTask}
+          onFocusGraph={onFocusGraph}
+          coverageRows={coverageRows}
         />
       )}
     </div>
@@ -187,6 +212,8 @@ function FactTriageCard({
   onInspect,
   onNavigateDecision,
   onNavigateTask,
+  focused,
+  onFocusGraph,
 }: {
   item: FactTriageItem;
   tasks: TaskRow[];
@@ -195,6 +222,8 @@ function FactTriageCard({
   onInspect: () => void;
   onNavigateDecision?: (decisionId: string) => void;
   onNavigateTask?: (taskId: string) => void;
+  focused: boolean;
+  onFocusGraph?: (ref: string) => void;
 }) {
   const { fact, signals, citingDecisionIds, severity } = item;
   const sourceTask = tasks.find((t) => t.taskId === fact.taskId);
@@ -209,7 +238,12 @@ function FactTriageCard({
 
   return (
     <article
-      className="rounded-lg border border-border bg-surface px-3 py-3"
+      id={`triage-fact-${fact.anchor.replaceAll("/", "-")}`}
+      data-fact-ref={`fact/${fact.anchor}`}
+      data-focused={focused || undefined}
+      className={`rounded-lg border bg-surface px-3 py-3 ${
+        focused ? "border-accent bg-accent/5 ring-1 ring-accent/30" : "border-border"
+      }`}
       style={{ borderLeft: `3px solid ${accentColor}` }}
     >
       <div className="flex items-start gap-3">
@@ -287,10 +321,21 @@ function FactTriageCard({
 
         {/* 右侧:复制上下文按钮 */}
         <div className="shrink-0">
-          <CopyContextButton
-            compact
-            buildText={() => buildFactTriageContext(item, relations, decisions, tasks)}
-          />
+          <div className="flex flex-col items-end gap-1">
+            <CopyContextButton
+              compact
+              buildText={() => buildFactTriageContext(item, relations, decisions, tasks)}
+            />
+            {onFocusGraph && (
+              <button
+                onClick={() => onFocusGraph(`fact/${fact.anchor}`)}
+                className="inline-flex items-center gap-1 text-[11px] text-text-faint hover:text-accent"
+                title="在关系图中聚焦此 fact"
+              >
+                <Graph weight="bold" /> 图中聚焦
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </article>

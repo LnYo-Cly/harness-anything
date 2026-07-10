@@ -9,14 +9,16 @@ export function normalizeTaskId(raw: string): string {
 }
 
 export function spawningDecisionOf(task: TaskRow, relations: RelationEdge[]): string | undefined {
-  if (task.spawningDecision) return normalizeDecisionId(task.spawningDecision);
   const edge = relations.find(
     (relation) =>
       relation.kind === "derives" &&
       relation.from.startsWith("decision/") &&
       normalizeTaskId(relation.to) === task.taskId,
   );
-  return edge ? normalizeDecisionId(edge.from) : undefined;
+  if (edge) return normalizeDecisionId(edge.from);
+  return task.spawningDecision
+    ? normalizeDecisionId(task.spawningDecision)
+    : undefined;
 }
 
 export function derivedTasks(

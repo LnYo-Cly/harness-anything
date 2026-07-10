@@ -175,6 +175,8 @@ export interface FactRef {
   category: "finding" | "progress" | "lesson";
   text: string;
   at: string;
+  /** Immutable observation confidence from task-fact-row/v1. */
+  confidence: "low" | "medium" | "high";
   /** 是否已被 invalidated-by/supersedes-fact 边标记失效（由图投影推得） */
   invalidated?: boolean;
 }

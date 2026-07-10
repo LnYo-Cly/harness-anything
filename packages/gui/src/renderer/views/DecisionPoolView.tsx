@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   CheckCircle,
   Funnel,
+  Graph,
   GitBranch,
   WarningCircle,
 } from "@phosphor-icons/react";
@@ -101,10 +102,14 @@ export function DecisionPoolView({
   decisions,
   facts,
   relations,
+  focusedDecisionId,
+  onFocusGraph,
 }: {
   decisions: DecisionRow[];
   facts: FactRef[];
   relations: RelationEdge[];
+  focusedDecisionId?: string | null;
+  onFocusGraph?: (ref: string) => void;
 }) {
   const [tab, setTab] = useState<PoolTab>("proposed");
   const [stateFilter, setStateFilter] = useState<DecisionState | "all">("all");
@@ -114,6 +119,40 @@ export function DecisionPoolView({
   const [presetFilter, setPresetFilter] = useState("all");
   const [proposedByFilter, setProposedByFilter] = useState<DecisionRow["proposedBy"]["kind"] | "all">("all");
   const [timeRange, setTimeRange] = useState<TimeRange>("all");
+  const handledFocusRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!focusedDecisionId) {
+      handledFocusRef.current = null;
+      return;
+    }
+    if (handledFocusRef.current === focusedDecisionId) return;
+    const decision = decisions.find(
+      (candidate) => candidate.decisionId === focusedDecisionId,
+    );
+    if (!decision) return;
+    handledFocusRef.current = focusedDecisionId;
+    const targetTab: PoolTab =
+      decision.state === "active"
+        ? "active"
+        : decision.state === "retired"
+          ? "retired"
+          : "proposed";
+    setTab(targetTab);
+    setStateFilter("all");
+    setRiskFilter("all");
+    setUrgencyFilter("all");
+    setVerticalFilter("all");
+    setPresetFilter("all");
+    setProposedByFilter("all");
+    setTimeRange("all");
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .getElementById(`decision-card-${focusedDecisionId}`)
+        ?.scrollIntoView({ block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [decisions, focusedDecisionId]);
 
   const verticals = useMemo(() => [...new Set(decisions.map((decision) => decision.vertical))].sort(), [decisions]);
   const presets = useMemo(() => [...new Set(decisions.map((decision) => decision.preset))].sort(), [decisions]);
@@ -212,7 +251,16 @@ export function DecisionPoolView({
       <div className="min-h-0 flex-1 overflow-auto p-4">
         <div className="space-y-2">
           {rows.map((decision) => (
-            <article key={decision.decisionId} className="rounded-lg border border-border bg-surface px-3 py-3">
+            <article
+              key={decision.decisionId}
+              id={`decision-card-${decision.decisionId}`}
+              data-focused={decision.decisionId === focusedDecisionId || undefined}
+              className={`rounded-lg border bg-surface px-3 py-3 transition-colors ${
+                decision.decisionId === focusedDecisionId
+                  ? "border-accent bg-accent/5 ring-1 ring-accent/30"
+                  : "border-border"
+              }`}
+            >
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -231,6 +279,15 @@ export function DecisionPoolView({
                     <span>proposed {decision.proposedAt.slice(5, 16).replace("T", " ")}</span>
                   </div>
                 </div>
+                {onFocusGraph && (
+                  <button
+                    onClick={() => onFocusGraph(`decision/${decision.decisionId}`)}
+                    title="在关系图中聚焦此 decision"
+                    className="grid size-7 shrink-0 place-items-center rounded text-text-faint hover:bg-surface-raised hover:text-accent"
+                  >
+                    <Graph weight="bold" />
+                  </button>
+                )}
               </div>
               <div className="mt-2 rounded-md border border-border bg-surface-raised/50 px-2.5 py-2">
                 <ChainView decision={decision} relations={relations} />

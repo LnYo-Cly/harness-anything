@@ -29,6 +29,8 @@ import {
   rationaleFor,
   supersedeChain,
 } from "../model/triadic";
+import { CopyContextButton } from "../components/CopyContextButton";
+import { buildEntityJumpContext } from "../model/copy-context";
 
 const dateLabel = (iso?: string) => (iso ? iso.slice(0, 16).replace("T", " ") : "—");
 
@@ -282,6 +284,7 @@ function ClaimList({
  */
 export function VerdictCard({
   d,
+  decisions,
   facts,
   tasks,
   relations,
@@ -292,6 +295,7 @@ export function VerdictCard({
   readOnly = false,
 }: {
   d: DecisionRow;
+  decisions: DecisionRow[];
   facts: FactRef[];
   tasks: TaskRow[];
   relations: RelationEdge[];
@@ -343,6 +347,19 @@ export function VerdictCard({
           <div className="mt-0.5 text-[12px] italic text-text-muted">Q: {d.question}</div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <CopyContextButton
+            compact
+            buildText={() =>
+              buildEntityJumpContext(
+                `decision/${d.decisionId}`,
+                relations,
+                decisions,
+                facts,
+                tasks,
+                "正在检查此 decision 的证据覆盖、就绪信号与关系上下游",
+              )
+            }
+          />
           {/* 两轴徽章正交并排,不合并成单分 */}
           <RiskTierBadge tier={d.riskTier} />
           <UrgencyBadge urgency={d.urgency} />
