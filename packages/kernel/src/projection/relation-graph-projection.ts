@@ -6,6 +6,11 @@ import type { HarnessLayoutInput } from "../layout/index.ts";
 import { resolveHarnessLayout } from "../layout/index.ts";
 import { readFrontmatter, readScalar } from "../markdown/frontmatter.ts";
 import { parseRelationFlowRecords } from "./relation-flow-frontmatter.ts";
+import {
+  deriveRelationTaskAuthoredSources,
+  relationDecisionAuthoredSourceKind,
+  type RelationAuthoredSourceKind
+} from "./relation-source-manifest.ts";
 import { sourcePath } from "./sqlite-task-source.ts";
 import { readDirIfPresent, readTextFileIfPresent, statPathIfPresent } from "./toctou-safe-fs.ts";
 
@@ -50,6 +55,7 @@ interface DecisionSource {
   readonly decisionRef: string;
   readonly filePath: string;
   readonly frontmatter: string;
+  readonly sourceKind: RelationAuthoredSourceKind;
   readonly visible: boolean;
 }
 
@@ -64,7 +70,7 @@ interface GraphRefIndex {
 export interface RelationRecordEntry {
   readonly hostRef: string;
   readonly ownerRef: string;
-  readonly sourceKind: "task-index" | "task-facts" | "decision-document";
+  readonly sourceKind: RelationAuthoredSourceKind;
   readonly record: EntityRelationRecord;
   readonly sourcePath: string;
   readonly recordIndex: number;
@@ -160,34 +166,31 @@ function collectRelationRecordEntries(
 
   for (const taskDir of listTaskDirs(layout.tasksRoot)) {
     const taskId = readTaskPackageId(taskDir);
-    const indexPath = path.join(taskDir, "INDEX.md");
-    if (existsSync(indexPath)) {
-      const indexBody = readTextFileIfPresent(indexPath);
-      const frontmatter = indexBody === null ? null : readFrontmatter(indexBody);
-      if (frontmatter) {
+    for (const source of deriveRelationTaskAuthoredSources(taskDir)) {
+      if (!existsSync(source.filePath)) continue;
+      const body = readTextFileIfPresent(source.filePath);
+      if (body === null) continue;
+      if (source.content === "frontmatter") {
+        const frontmatter = readFrontmatter(body);
+        if (!frontmatter) continue;
         entries.push(...recordsToEntries({
           hostRef: `task/${taskId}`,
           ownerRef: `task/${taskId}`,
-          sourceKind: "task-index",
+          sourceKind: source.kind,
           records: parseRelationFlowRecords(frontmatter),
-          sourceFile: indexPath,
+          sourceFile: source.filePath,
+          rootDir
+        }));
+      } else {
+        entries.push(...recordsToEntries({
+          hostRefForRecord: (record) => factRelationHostRef(taskId, record),
+          ownerRef: `task/${taskId}`,
+          sourceKind: source.kind,
+          records: parseRelationFlowRecords(body),
+          sourceFile: source.filePath,
           rootDir
         }));
       }
-    }
-
-    const factsPath = path.join(taskDir, layout.factDocumentName);
-    if (existsSync(factsPath)) {
-      const factsBody = readTextFileIfPresent(factsPath);
-      if (factsBody === null) continue;
-      entries.push(...recordsToEntries({
-        hostRefForRecord: (record) => factRelationHostRef(taskId, record),
-        ownerRef: `task/${taskId}`,
-        sourceKind: "task-facts",
-        records: parseRelationFlowRecords(factsBody),
-        sourceFile: factsPath,
-        rootDir
-      }));
     }
   }
 
@@ -196,7 +199,7 @@ function collectRelationRecordEntries(
     entries.push(...recordsToEntries({
       hostRef: decision.decisionRef,
       ownerRef: decision.decisionRef,
-      sourceKind: "decision-document",
+      sourceKind: decision.sourceKind,
       records: parseRelationFlowRecords(decision.frontmatter),
       sourceFile: decision.filePath,
       rootDir
@@ -397,7 +400,8 @@ function readDecisionSources(rootInput: HarnessLayoutInput): ReadonlyArray<Decis
   const decisions: Array<Omit<DecisionSource, "visible"> & { readonly watermark: string }> = [];
   const watermarkCounts = new Map<string, number>();
   for (const filePath of listTextFiles(layout.decisionsRoot)) {
-    if (path.basename(filePath) !== "decision.md") continue;
+    const sourceKind = relationDecisionAuthoredSourceKind(filePath);
+    if (sourceKind === null) continue;
     const body = readTextFileIfPresent(filePath);
     if (body === null) continue;
     const frontmatter = readFrontmatter(body);
@@ -410,6 +414,7 @@ function readDecisionSources(rootInput: HarnessLayoutInput): ReadonlyArray<Decis
       decisionRef: `decision/${decisionId}`,
       filePath,
       frontmatter,
+      sourceKind,
       watermark
     });
   }
@@ -418,6 +423,7 @@ function readDecisionSources(rootInput: HarnessLayoutInput): ReadonlyArray<Decis
     decisionRef: decision.decisionRef,
     filePath: decision.filePath,
     frontmatter: decision.frontmatter,
+    sourceKind: decision.sourceKind,
     visible: decision.watermark.length > 0 && watermarkCounts.get(decision.watermark) === 1
   })).sort((a, b) => a.decisionRef.localeCompare(b.decisionRef));
 }
@@ -430,8 +436,9 @@ function buildGraphRefIndex(rootInput: HarnessLayoutInput, decisions: ReadonlyAr
   for (const taskDir of listTaskDirs(layout.tasksRoot)) {
     const taskId = readTaskPackageId(taskDir);
     taskIds.add(taskId);
-    const factsPath = path.join(taskDir, layout.factDocumentName);
-    if (!existsSync(factsPath)) continue;
+    const factsPath = deriveRelationTaskAuthoredSources(taskDir)
+      .find((source) => source.kind === "task-facts")?.filePath;
+    if (!factsPath || !existsSync(factsPath)) continue;
     const factsBody = readTextFileIfPresent(factsPath);
     if (factsBody === null) continue;
     for (const record of parseFactFlowRecords(factsBody)) {

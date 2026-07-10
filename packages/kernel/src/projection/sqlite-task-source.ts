@@ -6,6 +6,11 @@ import { sha256Text } from "../integrity/stable-hash.ts";
 import type { HarnessLayoutInput } from "../layout/index.ts";
 import { resolveHarnessLayout } from "../layout/index.ts";
 import { readFrontmatter, readNestedScalar, readScalar } from "../markdown/frontmatter.ts";
+import {
+  deriveRelationTaskAuthoredSources,
+  relationDecisionAuthoredSourceKind,
+  type RelationAuthoredSourceKind
+} from "./relation-source-manifest.ts";
 import type { ProjectionCanonicalStatus, CoordinationStatus, ProjectionWarning, TaskFieldExtensionProjection, TaskProjectionRow } from "./types.ts";
 import { readDirIfPresent, readDirNamesIfPresent, readTextFileIfPresent, statPathIfPresent } from "./toctou-safe-fs.ts";
 
@@ -26,23 +31,23 @@ export function readTaskProjectionSourceHashInputs(rootInput: HarnessLayoutInput
   return readTaskProjectionSource(rootInput).sourceInputs;
 }
 
+export function readRelationGraphSourceHashInputKinds(rootInput: HarnessLayoutInput): ReadonlyArray<RelationAuthoredSourceKind> {
+  return [...new Set(readTaskProjectionSource(rootInput).relationSourceInputs.map((input) => input.kind))].sort();
+}
+
 function readTaskProjectionSource(rootInput: HarnessLayoutInput): {
   readonly entries: ReadonlyArray<TaskSourceEntry>;
   readonly sourceInputs: ReadonlyArray<TaskProjectionSourceHashInput>;
+  readonly relationSourceInputs: ReadonlyArray<RelationSourceHashInput>;
   readonly warnings: ReadonlyArray<ProjectionWarning>;
 } {
   const layout = resolveHarnessLayout(rootInput);
   const rootDir = layout.rootDir;
   const tasksDir = layout.tasksRoot;
-  if (!existsSync(tasksDir)) {
-    return { entries: [], sourceInputs: [], warnings: [] };
-  }
-
   const warnings: ProjectionWarning[] = [];
   const entries: TaskSourceEntry[] = [];
-  const taskEntries = readDirNamesIfPresent(tasksDir);
-  if (taskEntries === null) return { entries: [], sourceInputs: [], warnings: [] };
-  for (const name of taskEntries.sort()) {
+  const taskEntries = existsSync(tasksDir) ? readDirNamesIfPresent(tasksDir) : [];
+  for (const name of (taskEntries ?? []).sort()) {
     const indexPath = path.join(tasksDir, name, "INDEX.md");
     if (!existsSync(indexPath)) continue;
     const body = readTextFileIfPresent(indexPath);
@@ -65,17 +70,19 @@ function readTaskProjectionSource(rootInput: HarnessLayoutInput): {
     }
   }
 
+  const relationSourceInputs = readRelationGraphSourceInputs(rootDir, layout, entries);
+  const supplementalSourceInputs = readTaskSupplementalSourceInputs(rootDir, entries);
+  const taskIndexInputs = entries.flatMap((entry) => relationSourceInputs.filter((input) =>
+    input.kind === "task-index" && input.taskId === entry.taskId
+  ));
+  const remainingSourceInputs = [
+    ...relationSourceInputs.filter((input) => input.kind !== "task-index"),
+    ...supplementalSourceInputs
+  ].sort((a, b) => a.sourcePath.localeCompare(b.sourcePath));
   return {
     entries,
-    sourceInputs: [
-      ...entries.map((entry) => ({
-        kind: "task-index",
-        taskId: entry.taskId,
-        sourcePath: sourcePath(rootDir, entry.indexPath),
-        body: entry.body
-      })),
-      ...readRelationGraphSourceInputs(rootDir, layout, entries)
-    ],
+    sourceInputs: [...taskIndexInputs, ...remainingSourceInputs],
+    relationSourceInputs,
     warnings
   };
 }
@@ -91,6 +98,11 @@ export interface TaskProjectionSourceHashInput {
   readonly kind: string;
   readonly sourcePath: string;
   readonly body: string;
+}
+
+interface RelationSourceHashInput extends TaskProjectionSourceHashInput {
+  readonly kind: RelationAuthoredSourceKind;
+  readonly taskId?: string;
 }
 
 export function taskEntryToRow(
@@ -203,10 +215,48 @@ function readRelationGraphSourceInputs(
   rootDir: string,
   layout: ReturnType<typeof resolveHarnessLayout>,
   entries: ReadonlyArray<TaskSourceEntry>
-): ReadonlyArray<{ readonly kind: string; readonly sourcePath: string; readonly body: string }> {
+): ReadonlyArray<RelationSourceHashInput> {
   const taskDocumentInputs = entries
+    .flatMap((entry) => deriveRelationTaskAuthoredSources(path.dirname(entry.indexPath)).map((source) => ({
+      kind: source.kind,
+      path: source.filePath,
+      ...(source.kind === "task-index" ? { taskId: entry.taskId } : {}),
+      ...(source.filePath === entry.indexPath ? { body: entry.body } : {})
+    })))
+    .filter((input) => input.body !== undefined || existsSync(input.path))
+    .flatMap((input) => {
+      const body = input.body ?? readTextFileIfPresent(input.path);
+      return body === null
+        ? []
+        : [{
+          kind: input.kind,
+          ...(input.taskId ? { taskId: input.taskId } : {}),
+          sourcePath: sourcePath(rootDir, input.path),
+          body
+        }];
+    });
+  const decisionInputs = listDecisionDocuments(layout.decisionsRoot)
+    .flatMap((decisionPath) => {
+      const kind = relationDecisionAuthoredSourceKind(decisionPath);
+      if (kind === null) return [];
+      const body = readTextFileIfPresent(decisionPath);
+      return body === null
+        ? []
+        : [{
+          kind,
+          sourcePath: sourcePath(rootDir, decisionPath),
+          body
+        }];
+    });
+  return [...taskDocumentInputs, ...decisionInputs];
+}
+
+function readTaskSupplementalSourceInputs(
+  rootDir: string,
+  entries: ReadonlyArray<TaskSourceEntry>
+): ReadonlyArray<TaskProjectionSourceHashInput> {
+  return entries
     .flatMap((entry) => [
-      { kind: "task-facts", path: path.join(path.dirname(entry.indexPath), layout.factDocumentName) },
       { kind: "task-module", path: path.join(path.dirname(entry.indexPath), "module.md") },
       { kind: "task-review", path: path.join(path.dirname(entry.indexPath), "review.md") },
       { kind: "task-closeout", path: path.join(path.dirname(entry.indexPath), "closeout.md") }
@@ -222,25 +272,13 @@ function readRelationGraphSourceInputs(
           body
         }];
     });
-  const decisionInputs = listDecisionDocuments(layout.decisionsRoot)
-    .flatMap((decisionPath) => {
-      const body = readTextFileIfPresent(decisionPath);
-      return body === null
-        ? []
-        : [{
-          kind: "decision-document",
-          sourcePath: sourcePath(rootDir, decisionPath),
-          body
-        }];
-    });
-  return [...taskDocumentInputs, ...decisionInputs].sort((a, b) => a.sourcePath.localeCompare(b.sourcePath));
 }
 
 function listDecisionDocuments(decisionsRoot: string): ReadonlyArray<string> {
   if (!existsSync(decisionsRoot)) return [];
   const stat = statPathIfPresent(decisionsRoot);
   if (stat === null) return [];
-  if (stat.isFile()) return path.basename(decisionsRoot) === "decision.md" ? [decisionsRoot] : [];
+  if (stat.isFile()) return relationDecisionAuthoredSourceKind(decisionsRoot) === null ? [] : [decisionsRoot];
   if (!stat.isDirectory()) return [];
   const entries = readDirIfPresent(decisionsRoot);
   if (entries === null) return [];

@@ -5,10 +5,14 @@ import test from "node:test";
 import { deriveRelationId, formatFactFlowRecord, formatRelationFlowRecord } from "../../src/index.ts";
 import type { EntityRelationRecord, FactRecord } from "../../src/index.ts";
 import { readRelationGraphAuthoredSourceKinds } from "../../src/projection/relation-graph-projection.ts";
-import { readTaskProjectionSourceHashInputs } from "../../src/projection/sqlite-task-source.ts";
+import {
+  readMarkdownSource,
+  readRelationGraphSourceHashInputKinds,
+  readTaskProjectionSourceHashInputs
+} from "../../src/projection/sqlite-task-source.ts";
 import { withTempStore } from "../store/helpers.ts";
 
-test("relation authored source kinds are covered by task projection sourceHash inputs", () => {
+test("relation graph collection and freshness enumerate the same authored source kinds", () => {
   withTempStore((rootDir) => {
     writeIndex(rootDir, "task-source", "Task Source", [
       relationRecord({
@@ -48,11 +52,51 @@ test("relation authored source kinds are covered by task projection sourceHash i
     ]);
 
     const authoredKinds = readRelationGraphAuthoredSourceKinds({ rootDir });
-    const sourceHashKinds = new Set(readTaskProjectionSourceHashInputs({ rootDir }).map((input) => input.kind));
-    const missingKinds = authoredKinds.filter((kind) => !sourceHashKinds.has(kind));
+    const sourceHashKinds = readRelationGraphSourceHashInputKinds({ rootDir });
 
     assert.deepEqual(authoredKinds, ["decision-document", "task-facts", "task-index"]);
-    assert.deepEqual(missingKinds, []);
+    assert.deepEqual(sourceHashKinds, ["decision-document", "task-facts", "task-index"]);
+    assert.deepEqual(sourceHashKinds, authoredKinds);
+  });
+});
+
+test("freshness preserves task index hash input order", () => {
+  withTempStore((rootDir) => {
+    writeIndex(rootDir, "task_a", "Lowercase Task");
+    writeIndex(rootDir, "task_Z", "Uppercase Task");
+
+    const taskIndexPaths = readTaskProjectionSourceHashInputs({ rootDir })
+      .filter((input) => input.kind === "task-index")
+      .map((input) => input.sourcePath);
+
+    assert.deepEqual(taskIndexPaths, [
+      "harness/tasks/task_Z/INDEX.md",
+      "harness/tasks/task_a/INDEX.md"
+    ]);
+  });
+});
+
+test("decision-only relation changes invalidate freshness", () => {
+  withTempStore((rootDir) => {
+    writeDecision(rootDir, "dec_SOURCE", [
+      relationRecord({
+        source: "decision/dec_SOURCE/C1",
+        target: "task/task-before",
+        type: "derives"
+      })
+    ]);
+    const before = readMarkdownSource({ rootDir }).hash;
+
+    writeDecision(rootDir, "dec_SOURCE", [
+      relationRecord({
+        source: "decision/dec_SOURCE/C1",
+        target: "task/task-after",
+        type: "derives"
+      })
+    ]);
+
+    assert.notEqual(readMarkdownSource({ rootDir }).hash, before);
+    assert.deepEqual(readRelationGraphSourceHashInputKinds({ rootDir }), ["decision-document"]);
   });
 });
 
