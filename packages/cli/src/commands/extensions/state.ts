@@ -274,10 +274,12 @@ function presetLayerRoots(rootInput: HarnessLayoutInput, layer: "project" | "use
 }
 
 function presetUserHomeRoot(): string {
+  // Default lives under ~/.harness so the cross-project layer never claims a
+  // bare directory in the OS home; HARNESS_USER_HOME points at that root.
   return path.resolve(
     process.env.HARNESS_USER_HOME && process.env.HARNESS_USER_HOME.length > 0
       ? process.env.HARNESS_USER_HOME
-      : os.homedir()
+      : path.join(os.homedir(), ".harness")
   );
 }
 
