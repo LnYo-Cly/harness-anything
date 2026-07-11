@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { unwrapCommandReceipt } from "./helpers/receipt.ts";
 
@@ -15,7 +16,7 @@ test("CLI decision propose writes a decision package through the coordinator", (
       "decision",
       "propose",
       "--id",
-      "dec_TESTCLI",
+      "dec_mrg9r6j7",
       "--title",
       "Decision CLI",
       "--question",
@@ -32,11 +33,11 @@ test("CLI decision propose writes a decision package through the coordinator", (
 
     assert.equal(result.ok, true);
     assert.equal(result.command, "decision-propose");
-    assert.equal(result.decisionId, "dec_TESTCLI");
+    assert.equal(result.decisionId, "dec_mrg9r6j7");
     assert.equal(result.decisionState, "proposed");
-    const body = readFileSync(path.join(rootDir, "harness/decisions/decision-dec_TESTCLI/decision.md"), "utf8");
+    const body = readFileSync(path.join(rootDir, "harness/decisions/decision-dec_mrg9r6j7/decision.md"), "utf8");
     assert.match(body, /schema: decision-package\/v1/);
-    assert.match(body, /decision_id: dec_TESTCLI/);
+    assert.match(body, /decision_id: dec_mrg9r6j7/);
     assert.match(body, /_coordinatorWatermark: /);
     assert.match(body, /runtime: "human"/);
     assert.match(body, /sessionId: "human-cli-\d+"/);
@@ -49,6 +50,43 @@ test("CLI decision propose writes a decision package through the coordinator", (
     assert.equal(sessionManifest.sessionId, sessionId);
     assert.equal(sessionManifest.runtime, "human");
     assert.match(readFileSync(path.join(rootDir, ".harness/write-journal/watermark.json"), "utf8"), /write-watermark\/v1/);
+  });
+});
+
+test("CLI decision propose generates distinct high-entropy ids in the same millisecond", () => {
+  withTempRoot((rootDir) => {
+    const clockPath = path.join(rootDir, "fixed-clock.mjs");
+    writeFileSync(clockPath, [
+      "const OriginalDate = Date;",
+      "const fixedNow = 1_783_707_123_456;",
+      "globalThis.Date = class extends OriginalDate {",
+      "  constructor(...args) { super(...(args.length > 0 ? args : [fixedNow])); }",
+      "  static now() { return fixedNow; }",
+      "};"
+    ].join("\n"), "utf8");
+    const nodeOptions = `${process.env.NODE_OPTIONS ?? ""} --import=${pathToFileURL(clockPath).href}`.trim();
+    const proposeArgs = [
+      "decision",
+      "propose",
+      "--title",
+      "High entropy decision",
+      "--question",
+      "Should generated decision ids include entropy?",
+      "--chosen",
+      "Use random ULID entropy",
+      "--rejected",
+      "Use timestamp only",
+      "--why-not",
+      "Timestamp-only ids collide across writers"
+    ];
+
+    const first = runJson(rootDir, proposeArgs, true, { NODE_OPTIONS: nodeOptions });
+    const second = runJson(rootDir, proposeArgs, true, { NODE_OPTIONS: nodeOptions });
+
+    assert.match(first.decisionId, /^dec_[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$/u);
+    assert.match(second.decisionId, /^dec_[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$/u);
+    assert.equal(first.decisionId.slice(4, 14), second.decisionId.slice(4, 14));
+    assert.notEqual(first.decisionId, second.decisionId);
   });
 });
 
@@ -497,7 +535,12 @@ function withTempRoot<T>(fn: (rootDir: string) => T): T {
   }
 }
 
-function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = true): Record<string, any> {
+function runJson(
+  rootDir: string,
+  args: ReadonlyArray<string>,
+  expectSuccess = true,
+  envOverrides: NodeJS.ProcessEnv = {}
+): Record<string, any> {
   try {
     const stdout = execFileSync(process.execPath, [cliEntry, "--root", rootDir, "--json", ...args], {
       encoding: "utf8",
@@ -509,7 +552,8 @@ function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = t
         CLAUDE_SESSION_ID: "",
         CODEX_SESSION_ID: "",
         CODEX_THREAD_ID: "",
-        ZCODE_SESSION_ID: ""
+        ZCODE_SESSION_ID: "",
+        ...envOverrides
       }
     });
     return unwrapCommandReceipt(JSON.parse(stdout) as Record<string, any>);

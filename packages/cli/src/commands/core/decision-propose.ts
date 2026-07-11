@@ -5,6 +5,7 @@ import {
 } from "../../../../application/src/index.ts";
 import {
   deriveRelationId,
+  generateTaskId,
   type EntityRelationRecord,
   type WriteError
 } from "../../../../kernel/src/index.ts";
@@ -50,7 +51,7 @@ function withDocSyncWarning(rootInput: HarnessLayoutInput, result: CliResult): C
 function proposedDecision(action: ProposeAction, now: string, relations: ReadonlyArray<EntityRelationRecord>): DecisionCreateInput {
   return {
     schema: "decision-package/v1",
-    decision_id: action.decisionId ?? `dec_${Date.now().toString(36)}`,
+    decision_id: action.decisionId ?? generateTaskId().replace(/^task_/u, "dec_"),
     title: action.title,
     state: "proposed",
     riskTier: action.riskTier,
