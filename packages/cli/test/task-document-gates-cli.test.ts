@@ -261,10 +261,9 @@ test("CLI Review verdict rejects unknown values before writing", () => {
   });
 });
 
-test("CLI complete consumes an approved Execution Review and preserves the legacy document gates", () => {
+test("CLI complete consumes an approved Execution Review without the legacy review.md gate", () => {
   withTempRoot((rootDir) => {
     writeIndex(rootDir, executionTaskId, "Execution Complete", "in_review");
-    writeReview(rootDir, executionTaskId);
     writeFact(rootDir, executionTaskId);
     writeRealCloseout(rootDir, executionTaskId);
     writeExecution(rootDir, executionTaskId, executionId, "worker-agent");
@@ -490,7 +489,7 @@ function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = t
   try {
     const stdout = execFileSync(process.execPath, [cliEntry, "--root", rootDir, "--json", ...args], {
       encoding: "utf8",
-      env: { ...process.env, HARNESS_SKIP_NPM_INSTALL: "1", ...env },
+      env: { ...process.env, HARNESS_SKIP_NPM_INSTALL: "1", ...testActorEnv, ...env },
       stdio: ["ignore", "pipe", "pipe"]
     });
     const result = JSON.parse(stdout) as Record<string, any>;

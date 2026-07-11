@@ -390,10 +390,11 @@ export const coreCommandSpecs = defineCommandSpecs([
     "parse": parseCoreTaskArgs,
     "run": runTaskGatesCommand,
     "receiptContract": {
-      "data": ["taskId", "status", "reviewContract", "completionGate"],
+      "data": ["taskId", "status", "completionGate"],
       "optionalData": {
         "report": "Only emitted for completion paths that surface a review or gate report; clean completion emits reviewContract and completionGate.",
-        "executionId": "Only emitted when completion accepts a submitted Execution."
+        "executionId": "Only emitted when completion accepts a submitted Execution.",
+        "reviewContract": "Present only for a legacy task package without Execution history; Execution-bearing tasks use Review Entities."
       },
       "paths": []
     },

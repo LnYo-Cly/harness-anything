@@ -58,6 +58,7 @@ export interface TaskExecutionTrace {
 
 export type ProvenanceCoverage = "missing" | "partial" | "dangling";
 export type ProvenanceFindingKind =
+  | "task_execution_missing"
   | "execution_session_binding_missing"
   | "submitted_execution_review_missing"
   | "review_execution_missing"
@@ -160,6 +161,12 @@ export function auditTaskProvenance(options: ProjectionReaderOptions & { readonl
       .map((row) => row.session_id));
     const executionIds = new Set(executions.map((execution) => execution.executionId));
     const findings: ProvenanceAuditFinding[] = [];
+    if (executions.length === 0) findings.push({
+      coverage: "missing",
+      kind: "task_execution_missing",
+      taskId: options.taskId,
+      detail: `Task ${options.taskId} has no Execution provenance.`
+    });
     for (const review of reviews) {
       if (!executionIds.has(review.executionId)) findings.push({
         coverage: "dangling",

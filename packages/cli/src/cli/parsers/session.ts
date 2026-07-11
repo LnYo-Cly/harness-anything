@@ -11,7 +11,7 @@ export function parseSessionArgs(args: ReadonlyArray<string>, rootDir: string, j
   const subcommand = args[1];
   if (subcommand !== "export" && subcommand !== "backfill" && subcommand !== "sync") return null;
   if (subcommand === "sync") {
-    return { ok: true, value: { rootDir, json, action: { kind: "session-sync" } } };
+    return { ok: true, value: { rootDir, json, action: { kind: "session-sync", mode: args.includes("--apply") ? "apply" : "dry-run" } } };
   }
 
   const runtime = readRuntime(args, "--runtime");

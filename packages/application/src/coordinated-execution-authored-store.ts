@@ -143,9 +143,6 @@ function finalizeSessionBindings(rootInput: HarnessLayoutInput, bindings: Readon
     const sessionId = record.session_ref.slice("session/".length);
     try {
       const session = readSessionEntityDocument(rootInput, sessionId);
-      if (session.format !== "manifest") {
-        throw new Error(`Session ${sessionId} has no finalized snapshot manifest`);
-      }
       return { ...record, archive_status: session.manifest.archiveStatus };
     } catch (error) {
       const prefix = record.role === "primary" ? "primary Session" : "Session";

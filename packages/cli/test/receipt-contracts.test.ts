@@ -209,6 +209,14 @@ test("optional receipt contract fields carry non-empty absence reasons", () => {
     field: "data.executionId",
     reason: "Only emitted when completion accepts a submitted Execution."
   }, {
+    command: "task-complete",
+    field: "data.reviewContract",
+    reason: "Present only for a legacy task package without Execution history; Execution-bearing tasks use Review Entities."
+  }, {
+    command: "session-sync",
+    field: "paths.primary",
+    reason: "Present when at least one legacy Session requires conversion."
+  }, {
     command: "governance-rebuild",
     field: "data.generated",
     reason: "Only emitted for apply/archive rebuild modes that write generated governance views."
