@@ -48,7 +48,7 @@ export interface ProvenanceSessionBackfillResult {
 export interface ProvenanceSessionExporterRejected {
   readonly _tag: "ProvenanceSessionExporterRejected";
   readonly sessionId: string;
-  readonly code: "transcript_unavailable" | "privacy_scan_failed" | "session_not_found" | "read_failed" | "write_failed";
+  readonly code: "transcript_unavailable" | "session_not_found" | "read_failed" | "write_failed";
   readonly reason: string;
 }
 
@@ -115,17 +115,13 @@ function writeSessionDocument(
         "transcript_unavailable"
       ));
     }
+    // Capture is report-only: sessions land in the private ledger (system of record),
+    // so findings are recorded honestly in the manifest and enforcement stays at the
+    // publish boundary (buildPublishableProjection fails closed there).
     const privacyFindings = [
       ...scanPrivateText(JSON.stringify(session), "manifest"),
       ...conversation.messages.flatMap((message, index) => scanPrivateText(message.text, `snapshot.messages.${index}`))
     ];
-    if (privacyFindings.some((finding) => finding.severity === "error")) {
-      return yield* Effect.fail(sessionRejection(
-        session.sessionId,
-        `privacy scan failed: ${privacyFindings.map((finding) => finding.ruleId).join(", ")}`,
-        "privacy_scan_failed"
-      ));
-    }
     const body = renderSessionMarkdown(session, conversation);
     const bodyRef = yield* Effect.try({
       try: () => ({
@@ -277,7 +273,7 @@ function toSessionManifest(
       },
       privacyScan: {
         scannerVersion: privateTextScannerVersion,
-        passed: true,
+        passed: !privacyFindings.some((finding) => finding.severity === "error"),
         findings: privacyFindings
       }
     }

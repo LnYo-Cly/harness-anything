@@ -182,14 +182,14 @@ test("provenance session exporter accepts an explicit runtime transcript file", 
   }
 });
 
-test("provenance session exporter fails closed before persisting privacy scan findings", async () => {
+test("provenance session exporter records privacy scan findings in the manifest without blocking capture", async () => {
   const rootDir = createHarnessRoot();
   try {
     const transcriptFile = path.join(rootDir, "private-thread.jsonl");
     writeFileSync(transcriptFile, JSON.stringify({
       timestamp: "2026-07-03T00:00:00.000Z",
       type: "event_msg",
-      payload: { type: "user_message", message: "api_key=must-not-persist" }
+      payload: { type: "user_message", message: "API_KEY=captured-in-private-ledger" }
     }), "utf8");
     const exporter = makeTestProvenanceSessionExporter(rootDir, {
       currentSessionProbe: fixedSessionProbe({
@@ -203,10 +203,13 @@ test("provenance session exporter fails closed before persisting privacy scan fi
 
     const result = await runEffectExit(exporter.exportCurrentSession({ transcriptFile }));
 
-    assert.equal(result._tag, "Failure");
-    assert.match(String(result.cause), /privacy scan failed/u);
-    assert.equal(existsSync(path.join(rootDir, "harness/sessions/private-session.md")), false);
-    assert.equal(existsSync(path.join(rootDir, "harness/objects")), false);
+    assert.equal(result._tag, "Success");
+    const manifest = JSON.parse(readFileSync(path.join(rootDir, "harness/sessions/private-session.md"), "utf8")) as {
+      snapshot: { privacyScan: { passed: boolean; findings: ReadonlyArray<{ ruleId: string }> } };
+    };
+    assert.equal(manifest.snapshot.privacyScan.passed, false);
+    assert.equal(manifest.snapshot.privacyScan.findings.some((finding) => finding.ruleId === "env-secret-marker"), true);
+    assert.equal(existsSync(path.join(rootDir, "harness/objects")), true);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }
