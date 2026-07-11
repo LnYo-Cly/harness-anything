@@ -1,9 +1,10 @@
+// harness-test-tier: fast
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import test from "node:test";
 import { collectSlowTests, formatSlowTestSummary, parseCompletedTestLine, parseRunnerArgs, resolveTestConcurrency, selectTestFiles, validateManifest } from "./node-test-runner-lib.mjs";
-import { deriveTestTierManifest, discoverTestTierManifest, testTierNames } from "./test-tier-manifest.mjs";
+import { deriveTestTierManifest, discoverTestTierManifest, parseTestTierMarker, testTierNames } from "./test-tier-manifest.mjs";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 
@@ -109,16 +110,36 @@ test("validateManifest rejects duplicates and missing manifest entries", () => {
   ]);
 });
 
-test("unregistered test files default to the integration tier", () => {
+test("inline test tier markers derive the manifest", () => {
   const manifest = deriveTestTierManifest(
     ["fast.test.ts", "contract.test.ts", "new.test.ts"],
-    { fast: ["fast.test.ts"], contract: ["contract.test.ts"] }
+    (file) => `// harness-test-tier: ${file === "new.test.ts" ? "integration" : file.split(".")[0]}\n`
   );
   assert.deepEqual(manifest, {
     fast: ["fast.test.ts"],
     contract: ["contract.test.ts"],
     integration: ["new.test.ts"]
   });
+});
+
+test("inline test tier markers fail closed when missing, repeated, or invalid", () => {
+  assert.throws(() => parseTestTierMarker("import test from \"node:test\";\n", "missing.test.ts"), /test tier marker missing: missing\.test\.ts/u);
+  assert.throws(
+    () => parseTestTierMarker("// harness-test-tier: fast\n// harness-test-tier: contract\n", "duplicate.test.ts"),
+    /multiple test tier markers: duplicate\.test\.ts/u
+  );
+  assert.throws(
+    () => parseTestTierMarker("// harness-test-tier: slow\n", "invalid.test.ts"),
+    /invalid test tier marker: invalid\.test\.ts/u
+  );
+  assert.throws(
+    () => parseTestTierMarker("import test from \"node:test\";\n// harness-test-tier: fast\n", "late.test.ts"),
+    /test tier marker must be the first line: late\.test\.ts/u
+  );
+  assert.throws(
+    () => parseTestTierMarker(`// harness-test-tier: fast\n${"\n".repeat(20)}// harness-test-tier: contract\n`, "distant-duplicate.test.ts"),
+    /multiple test tier markers: distant-duplicate\.test\.ts/u
+  );
 });
 
 test("integration discovery equals the files executed by the CI runner", () => {

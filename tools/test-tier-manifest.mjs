@@ -1,131 +1,43 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 const testFilePattern = /\.(test|spec)\.(?:mjs|js|ts)$/u;
 const ignoredDirectoryNames = new Set(["node_modules", "dist", "out", "coverage", ".git"]);
-
-export const explicitTestTierManifest = {
-  fast: [
-    "packages/adapters/local/test/task-writes.test.ts",
-    "packages/cli/test/doc-sync-service.test.ts",
-    "packages/cli/test/daemon-connect.test.ts",
-    "packages/cli/test/json-input.test.ts",
-    "packages/cli/test/parse-args.test.ts",
-    "packages/cli/test/path-utils.test.ts",
-    "packages/daemon/test/local-json-rpc-client.test.ts",
-    "packages/gui/test/markdown-sanitize.test.ts",
-    "packages/gui/test/terminal-backend-policy.test.ts",
-    "packages/gui/test/terminal-no-ingestion.test.ts",
-    "packages/gui/test/terminal-session-registry.test.ts",
-    "packages/gui/test/workspace-shell.test.ts",
-    "packages/gui/test/favorites-storage.test.ts",
-    "packages/kernel/test/domain/binding-immutability.test.ts",
-    "packages/kernel/test/domain/decision-document.test.ts",
-    "packages/kernel/test/domain/domain-status.test.ts",
-    "packages/kernel/test/domain/entity-ref.test.ts",
-    "packages/kernel/test/domain/fact-record.test.ts",
-    "packages/kernel/test/layout/entity-root-resolver.test.ts",
-    "packages/kernel/test/integrity/stable-hash.test.ts",
-    "packages/kernel/test/layout/portable-path.test.ts",
-    "packages/kernel/test/markdown/frontmatter.test.ts",
-    "packages/kernel/test/publish/idempotency.test.ts",
-    "packages/kernel/test/write-coordination/write-helpers.test.ts",
-    "tools/run-gui-tests.test.mjs",
-    "tools/run-gui-e2e-tests.test.mjs",
-    "tools/run-local-gates-check.test.mjs",
-    "tools/run-local-check.test.mjs",
-    "tools/run-node-tests.test.mjs",
-    "tools/run-manifest-gates.test.mjs",
-    "tools/check-integration-test-shards.test.mjs",
-    "tools/check-github-required-contexts.test.mjs",
-    "tools/check-mergify-queue-contexts.test.mjs"
-  ],
-  contract: [
-    "packages/application/test/code-doc-reconciliation.test.ts",
-    "packages/application/test/current-session-probe.test.ts",
-    "packages/application/test/decision-write-service.test.ts",
-    "packages/application/test/fact-write-service.test.ts",
-    "packages/application/test/provenance-binding-service.test.ts",
-    "packages/application/test/provenance-session-exporter.test.ts",
-    "packages/application/test/runtime-session-logs.test.ts",
-    "packages/application/test/runtime-event-ledger-service.test.ts",
-    "packages/application/test/task-holder-service.test.ts",
-    "packages/application/test/task-lifecycle-gates.test.ts",
-    "packages/application/test/task-lifecycle-write-failure.test.ts",
-    "packages/daemon/test/doc-sync-protocol.test.ts",
-    "packages/daemon/test/json-rpc-protocol.test.ts",
-    "packages/daemon/test/task-holder-rpc.test.ts",
-    "packages/cli/test/package-surface.test.ts",
-    "packages/cli/test/receipt-contracts.test.ts",
-    "packages/gui/test/electron-security-policy.test.ts",
-    "packages/gui/test/env-profile-contract.test.ts",
-    "packages/gui/test/ipc-handler-registration.test.ts",
-    "packages/gui/test/local-api-auth.test.ts",
-    "packages/gui/test/path-traversal.test.ts",
-    "packages/gui/test/preload-allowlist.test.ts",
-    "packages/gui/test/remote-tunnel.test.ts",
-    "packages/gui/test/renderer-no-node.test.ts",
-    "packages/gui/test/runtime-release-readiness.test.ts",
-    "packages/gui/test/supply-chain-release-readiness.test.ts",
-    "packages/gui/test/trust-policy-contract.test.ts",
-    "packages/gui/test/service-bridge.test.ts",
-    "packages/gui/test/window-config.test.ts",
-    "packages/kernel/test/contracts/docmap.test.ts",
-    "packages/kernel/test/contracts/extension-model.test.ts",
-    "packages/kernel/test/contracts/forbidden-symbols.test.ts",
-    "packages/kernel/test/contracts/import-boundary.test.ts",
-    "packages/kernel/test/contracts/kernel-index.test.ts",
-    "packages/kernel/test/contracts/legacy-import.test.ts",
-    "packages/kernel/test/contracts/legacy-intake-schema.test.ts",
-    "packages/kernel/test/contracts/lifecycle-engine-contract.test.ts",
-    "packages/kernel/test/contracts/port-registry.test.ts",
-    "packages/kernel/test/contracts/public-surface.test.ts",
-    "packages/kernel/test/contracts/relation-source-hash-inputs.test.ts",
-    "packages/kernel/test/contracts/schema-domain-vocabulary-alignment.test.ts",
-    "packages/kernel/test/contracts/schema-frontmatter.test.ts",
-    "packages/kernel/test/publish/private-evidence-rejection.test.ts",
-    "packages/kernel/test/publish/redaction.test.ts",
-    "packages/kernel/test/publish/schema-lockdown.test.ts",
-    "tools/check-api-contract-registry.test.mjs",
-    "tools/check-bypass-write-boundary.test.mjs",
-    "tools/check-capabilities-kind-source.test.mjs",
-    "tools/check-cli-error-codes.test.mjs",
-    "tools/check-cli-help-contract.test.mjs",
-    "tools/check-cli-structure.test.mjs",
-    "tools/check-duplicate-definitions.test.mjs",
-    "tools/check-enforcement-debt-sunset.test.mjs",
-    "tools/check-docmap-fresh.test.mjs",
-    "tools/check-error-classification.test.mjs",
-    "tools/check-gate-manifest-invariants.test.mjs",
-    "tools/check-gate-surface.test.mjs",
-    "tools/check-integrity-single-source.test.mjs",
-    "tools/check-legacy-intake-readiness.test.mjs",
-    "tools/check-locale-content.test.mjs",
-    "tools/check-pr-body-bilingual.test.mjs",
-    "tools/check-pr-governance.test.mjs",
-    "tools/check-private-boundary.test.mjs",
-    "tools/check-relation-cycle-substrate.test.mjs",
-    "tools/check-service-mappability.test.mjs",
-    "tools/check-schema-field-coverage.test.mjs",
-    "tools/check-template-command-surface.test.mjs",
-    "tools/check-write-road-registry.test.mjs",
-    "tools/check-write-coordinator-boundary.test.mjs",
-    "tools/port-physical-io-eslint-boundary.test.mjs",
-    "tools/skill-contracts.test.mjs",
-    "tools/smoke-cli-package.test.mjs",
-    "tools/scan-forbidden-symbols.test.mjs"
-  ]
-};
+const markerPattern = /^\s*\/\/\s*harness-test-tier:\s*(\S+)\s*$/u;
 
 export const testTierNames = Object.freeze(["fast", "contract", "integration"]);
 
-export function deriveTestTierManifest(testFiles, explicitManifest = explicitTestTierManifest) {
-  const explicitlyClassified = new Set(Object.values(explicitManifest).flat());
-  return {
-    fast: [...(explicitManifest.fast ?? [])],
-    contract: [...(explicitManifest.contract ?? [])],
-    integration: [...testFiles].filter((file) => !explicitlyClassified.has(file)).sort()
-  };
+export function parseTestTierMarker(source, file = "test file") {
+  const lines = source.split(/\r?\n/u);
+  const markerLines = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => /^\s*\/\/\s*harness-test-tier:/u.test(line));
+
+  if (markerLines.length === 0) {
+    throw new Error(`test tier marker missing: ${file}`);
+  }
+  if (markerLines.length > 1) {
+    throw new Error(`multiple test tier markers: ${file}`);
+  }
+  if (markerLines[0].index !== 0) {
+    throw new Error(`test tier marker must be the first line: ${file}`);
+  }
+
+  const match = markerLines[0].line.match(markerPattern);
+  const tier = match?.[1];
+  if (tier === undefined || !testTierNames.includes(tier)) {
+    throw new Error(`invalid test tier marker: ${file}: ${markerLines[0].line.trim()}; expected ${testTierNames.join(", ")}`);
+  }
+  return tier;
+}
+
+export function deriveTestTierManifest(testFiles, readSource) {
+  if (typeof readSource !== "function") throw new Error("deriveTestTierManifest requires a source reader");
+  const manifest = Object.fromEntries(testTierNames.map((tier) => [tier, []]));
+  for (const file of [...testFiles].sort()) {
+    manifest[parseTestTierMarker(readSource(file), file)].push(file);
+  }
+  return manifest;
 }
 
 export function discoverTestFiles(repoRoot, roots = ["packages", "tools"]) {
@@ -139,7 +51,7 @@ export function discoverTestFiles(repoRoot, roots = ["packages", "tools"]) {
 export function discoverTestTierManifest(repoRoot, options = {}) {
   return deriveTestTierManifest(
     discoverTestFiles(repoRoot, options.roots),
-    options.explicitManifest ?? explicitTestTierManifest
+    options.readSource ?? ((file) => readFileSync(path.join(repoRoot, file), "utf8"))
   );
 }
 

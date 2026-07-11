@@ -1,3 +1,4 @@
+// harness-test-tier: integration
 import assert from "node:assert/strict";
 import { initializeNestedHarnessRepo, withTestHarnessRoot as withTempRoot } from "./helpers/git-fixtures.ts";
 import { unwrapCommandReceipt } from "./helpers/receipt.ts";

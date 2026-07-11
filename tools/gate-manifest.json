@@ -976,7 +976,7 @@
         "package.json:scripts.test:integration"
       ],
       "consumerScope": [
-        "all disk-discovered node:test suites not explicitly classified as fast or contract",
+        "all disk-discovered node:test suites whose first-line harness-test-tier marker is integration",
         "deterministically derived integration shard execution sets"
       ],
       "githubContext": {
@@ -999,7 +999,7 @@
         "allowed": false,
         "location": null,
         "adrOrDecisionRequired": false,
-        "notes": "Integration is the fail-safe default for disk-discovered tests; fast and contract remain explicitly registered."
+        "notes": "Every disk-discovered Node test must declare exactly one valid first-line harness-test-tier marker; missing, repeated, or invalid declarations fail closed."
       },
       "changeControl": {
         "ordinaryImplementationMayModify": false,

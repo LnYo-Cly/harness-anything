@@ -1,3 +1,4 @@
+// harness-test-tier: contract
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";

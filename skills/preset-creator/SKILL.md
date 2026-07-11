@@ -34,7 +34,7 @@ Preset behavior belongs in the preset package:
 6. For script entrypoints, declare the narrowest possible `reads` and `writes`.
 7. Put all preset-specific action logic in `scripts/`, not CLI command dispatch.
 8. Run `ha preset validate <manifest>` before publishing the preset.
-9. Add tests in the correct tier and update `tools/test-tier-manifest.mjs` when adding new test files.
+9. Add tests in the correct tier by putting exactly one `// harness-test-tier: fast|contract|integration` declaration on each new Node test file's first line.
 
 ## Manifest v2 Contract
 

@@ -1,3 +1,4 @@
+// harness-test-tier: contract
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";

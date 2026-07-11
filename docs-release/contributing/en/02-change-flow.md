@@ -30,8 +30,9 @@ receipt shapes, error codes, and tests together. A command that works but cannot
 be discovered by `--help`, cannot emit structured output, or returns an
 unregistered error shape is not finished.
 
-When you add or change tests under `packages/**` or `tools/**`, update
-`tools/test-tier-manifest.mjs`. Unclassified tests are expected to fail closed.
+Every Node test added under `packages/**` or `tools/**` must declare its tier on
+the first line, for example `// harness-test-tier: integration`. Missing,
+repeated, or invalid declarations fail closed; no central file list is updated.
 
 ## Docs changes
 

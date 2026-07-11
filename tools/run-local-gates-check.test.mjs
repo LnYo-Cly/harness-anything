@@ -1,3 +1,4 @@
+// harness-test-tier: fast
 import assert from "node:assert/strict";
 import test from "node:test";
 import { selectLocalGateChecks } from "./run-local-gates-check.mjs";

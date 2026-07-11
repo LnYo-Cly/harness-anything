@@ -1,3 +1,4 @@
+// harness-test-tier: contract
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";

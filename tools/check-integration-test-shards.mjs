@@ -10,10 +10,9 @@ import {
   validateIntegrationTestShards
 } from "./integration-test-shards.mjs";
 import {
-  deriveTestTierManifest,
   discoverTestFiles,
   discoverTestTierManifest,
-  explicitTestTierManifest
+  parseTestTierMarker
 } from "./test-tier-manifest.mjs";
 import { validateManifest } from "./node-test-runner-lib.mjs";
 
@@ -24,7 +23,6 @@ const deletionAllowlistRelativePath = "tools/gate-allowlists/check-integration-t
 
 export function checkIntegrationTestShards({
   repoRoot = defaultRepoRoot,
-  explicitManifest = explicitTestTierManifest,
   weightOverrides = integrationTestFileWeightsMs,
   previousTestCount,
   baselineRef,
@@ -33,14 +31,14 @@ export function checkIntegrationTestShards({
   deletionAllowlistText
 } = {}) {
   const testFiles = discoverTestFiles(repoRoot);
-  const testTierManifest = discoverTestTierManifest(repoRoot, { explicitManifest });
+  const testTierManifest = discoverTestTierManifest(repoRoot);
   const integrationFiles = testTierManifest.integration;
   const manifestValidation = validateManifest(testFiles, testTierManifest);
   const shardValidation = validateIntegrationTestShards(integrationFiles, weightOverrides);
   const workflowValidation = validateIntegrationShardWorkflowMatrix(workflowText, integrationShardCount);
   const gateValidation = validateIntegrationShardRequiredContexts(gateManifestText, integrationShardCount);
   const baseline = previousTestCount === undefined
-    ? previousIntegrationTestState(repoRoot, explicitManifest, baselineRef)
+    ? previousIntegrationTestState(repoRoot, baselineRef)
     : { count: previousTestCount, files: null, ref: null };
   const resolvedPreviousCount = baseline.count;
   const delta = resolvedPreviousCount === null ? null : integrationFiles.length - resolvedPreviousCount;
@@ -117,7 +115,7 @@ export function validateIntegrationShardRequiredContexts(gateManifestText, shard
   return { contexts: Array.isArray(githubContexts) ? githubContexts : [], errors };
 }
 
-function previousIntegrationTestState(repoRoot, explicitManifest, requestedRef) {
+function previousIntegrationTestState(repoRoot, requestedRef) {
   try {
     const ref = requestedRef ?? resolveBaselineRef(repoRoot);
     if (ref === null) return { count: null, files: null, ref: null };
@@ -127,11 +125,59 @@ function previousIntegrationTestState(repoRoot, explicitManifest, requestedRef) 
       stdio: ["ignore", "pipe", "ignore"]
     });
     const files = output.split(/\r?\n/u).filter((file) => /\.(?:test|spec)\.(?:mjs|js|ts)$/u.test(file));
-    const integration = deriveTestTierManifest(files, explicitManifest).integration;
+    const tiers = files.map((file) => {
+      const source = execFileSync("git", ["show", `${ref}:${file}`], {
+        cwd: repoRoot,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"]
+      });
+      try {
+        return parseTestTierMarker(source, file);
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("test tier marker missing:")) return null;
+        throw error;
+      }
+    });
+    const missingMarkers = tiers.filter((tier) => tier === null).length;
+    if (missingMarkers > 0 && missingMarkers < files.length) {
+      return { count: null, files: null, ref };
+    }
+    const integration = missingMarkers === 0
+      ? files.filter((_, index) => tiers[index] === "integration")
+      : legacyIntegrationFiles(repoRoot, ref, files);
     return { count: integration.length, files: integration, ref };
   } catch {
     return { count: null, files: null, ref: null };
   }
+}
+
+function legacyIntegrationFiles(repoRoot, ref, files) {
+  try {
+    const source = execFileSync("git", ["show", `${ref}:tools/test-tier-manifest.mjs`], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    const fast = parseLegacyTierArray(source, "fast", "contract");
+    const contract = parseLegacyTierArray(source, "contract", null);
+    const explicitlyClassified = new Set([...fast, ...contract]);
+    return files.filter((file) => !explicitlyClassified.has(file));
+  } catch {
+    return files;
+  }
+}
+
+function parseLegacyTierArray(source, tier, nextTier) {
+  const label = `${tier}:`;
+  const start = source.indexOf(label);
+  if (start < 0) throw new Error(`legacy test tier array missing: ${tier}`);
+  const boundary = nextTier === null ? source.indexOf("\n};", start) : source.indexOf(`\n  ${nextTier}:`, start);
+  if (boundary < 0) throw new Error(`legacy test tier array boundary missing: ${tier}`);
+  const segment = source.slice(start + label.length, boundary);
+  const arrayStart = segment.indexOf("[");
+  const arrayEnd = segment.lastIndexOf("]");
+  if (arrayStart < 0 || arrayEnd < arrayStart) throw new Error(`legacy test tier array invalid: ${tier}`);
+  return JSON.parse(segment.slice(arrayStart, arrayEnd + 1));
 }
 
 function validateIntentionalTestDeletions({ repoRoot, testFiles, integrationFiles, baseline, delta, currentText }) {
