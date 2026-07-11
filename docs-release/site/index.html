@@ -969,11 +969,11 @@
             <span lang="zh">一个默认开放的系统信任"什么都没出错"。fail-closed 则<em>假设</em>"可能出错了"，要求你先证明没出错。承重写入从不直接落盘——它们经过唯一的写协调器（write coordinator），它给每次被接受的写入盖章并提交，于是只有一个地方执行规则，而每次被接受的写入都留下持久、可追溯的痕迹。</span>
           </p>
           <p>
-            <span lang="en">One gate is a hard floor: a task cannot enter <code>in_review</code> or <code>done</code> unless its <code>facts.md</code> holds at least one real fact. "Done" that observed nothing isn't done.</span>
-            <span lang="zh">有一道门是硬底线：一个任务无法进入 <code>in_review</code> 或 <code>done</code>，除非它的 <code>facts.md</code> 里至少有一条真实的事实。什么都没观察到的"完成"，不算完成。</span>
+            <span lang="en">Completion has concrete floors: substantive closeout content, code-doc reconciliation, and the applicable review contract; Execution-bearing tasks require an approved Review. Facts remain explicit <code>0..N</code> promotions under <code>dec_mrg3z1we/CH4</code>, not a quantity gate.</span>
+            <span lang="zh">Completion 有明确底线：closeout 必须有实质内容、code-doc reconciliation 必须通过，并满足适用的 review 契约；带 Execution 的任务必须有 approved Review。依据 <code>dec_mrg3z1we/CH4</code>，Fact 保持 <code>0..N</code> 的显式晋升，不是数量门。</span>
           </p>
           <button class="chip" type="button" data-target-tab="how" data-target-id="how-gates">
-            <span lang="en">See the three gates in the pipeline</span><span lang="zh">看流水线里的三扇门</span>
+            <span lang="en">See the completion checks in the pipeline</span><span lang="zh">看流水线里的 completion 检查</span>
             <span class="arrow" aria-hidden="true">→</span>
           </button>
         </section>
@@ -1261,8 +1261,8 @@
           </button>
           <h3><span lang="en">Gates in the pipeline</span><span lang="zh">流水线里的门</span></h3>
           <p>
-            <span lang="en">The lifecycle gates live in <code>packages/application/src/task-lifecycle-gates.ts</code>. Each collects <em>issues</em>; a non-empty list blocks the transition. The default is reject. Three fire along a task's path to "done":</span>
-            <span lang="zh">生命周期的门住在 <code>packages/application/src/task-lifecycle-gates.ts</code>。每扇门收集<em>问题（issues）</em>；一个非空列表就挡住迁移。默认是拒绝。沿着任务走向"完成"的路上，有三扇门触发：</span>
+            <span lang="en">The lifecycle gates live in <code>packages/application/src/task-lifecycle-gates.ts</code>. Each collects <em>issues</em>; a non-empty list blocks the transition. Facts are separate: under <code>dec_mrg3z1we/CH4</code> they are explicit <code>0..N</code> promotions, not a completion quantity gate.</span>
+            <span lang="zh">生命周期的门住在 <code>packages/application/src/task-lifecycle-gates.ts</code>。每扇门收集<em>问题（issues）</em>；一个非空列表就挡住迁移。Fact 与门分离：依据 <code>dec_mrg3z1we/CH4</code>，Fact 是 <code>0..N</code> 的显式晋升，不是 completion 数量门。</span>
           </p>
           <div class="table-scroll">
             <table class="grid">
@@ -1275,9 +1275,9 @@
               </thead>
               <tbody>
                 <tr>
-                  <td><span lang="en">Fact hard-gate</span><span lang="zh">Fact 硬门</span></td>
-                  <td><span lang="en">before <code>in_review</code> / <code>done</code></span><span lang="zh"><code>in_review</code> / <code>done</code> 之前</span></td>
-                  <td><span lang="en">a "done" with <code>facts.md</code> empty → <code>task_fact_required</code></span><span lang="zh"><code>facts.md</code> 为空的"完成" → <code>task_fact_required</code></span></td>
+                  <td><span lang="en">Fact promotion (not a gate)</span><span lang="zh">Fact 晋升（不是门）</span></td>
+                  <td><span lang="en">explicitly, when a load-bearing observation merits reuse</span><span lang="zh">承重观察值得复用时显式执行</span></td>
+                  <td><span lang="en"><code>0..N</code>; delivery evidence stays in Execution outputs</span><span lang="zh"><code>0..N</code>；交付证据留在 Execution outputs</span></td>
                 </tr>
                 <tr>
                   <td><span lang="en">Review gate</span><span lang="zh">Review 门</span></td>
@@ -1287,7 +1287,7 @@
                 <tr>
                   <td><span lang="en">Completion gate</span><span lang="zh">Completion 门</span></td>
                   <td><span lang="en">on move to <code>done</code></span><span lang="zh">迁到 <code>done</code> 时</span></td>
-                  <td><span lang="en">review / CI not passed, or closeout not ready</span><span lang="zh">review / CI 未过，或收尾未就绪</span></td>
+                  <td><span lang="en">placeholder closeout, failed code-doc reconciliation, review / CI not passed, or closeout not ready; Execution-bearing tasks require an approved Review</span><span lang="zh">closeout 仍是占位内容、code-doc reconciliation 失败、review / CI 未过或收尾未就绪；带 Execution 的任务还必须有 approved Review</span></td>
                 </tr>
               </tbody>
             </table>

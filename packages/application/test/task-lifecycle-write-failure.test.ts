@@ -70,7 +70,7 @@ for (const { name, error, code } of writeFailureCases) {
   });
 }
 
-test("reviewTask evaluates review and fact gates through ArtifactStore", async () => {
+test("reviewTask accepts zero Facts through ArtifactStore under dec_mrg3z1we/CH4", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "ha-task-artifact-store-"));
   try {
     writeIndexOnly(rootDir, "task-1", "Review Task", "in_review");
@@ -78,8 +78,8 @@ test("reviewTask evaluates review and fact gates through ArtifactStore", async (
       rootDir,
       taskWriter: successfulWriter(),
       artifactStore: inMemoryTaskPackageStore("task-1", {
-        "review.md": validReview(),
-        "facts.md": validFact()
+        // dec_mrg3z1we/CH4: review reads its contract without imposing a Fact quantity gate.
+        "review.md": validReview()
       }),
       now: () => "2026-06-13T00:00:00.000Z"
     });

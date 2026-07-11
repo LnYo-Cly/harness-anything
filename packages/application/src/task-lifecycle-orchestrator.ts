@@ -1,7 +1,6 @@
 import { Effect } from "effect";
 import type { ArtifactStore, DomainStatus, EngineError, TaskHolderPrincipal, TaskId, VersionControlSystem, WriteError } from "../../kernel/src/index.ts";
 import { isDomainStatus, isTerminalStatus, readTaskProjection } from "../../kernel/src/index.ts";
-import { parseFactFlowRecords } from "../../kernel/src/index.ts";
 import type { HarnessLayoutOverrides } from "../../kernel/src/index.ts";
 import { readFrontmatter, readScalar } from "../../kernel/src/index.ts";
 import { evaluateCodeDocReconciliationGate } from "./code-doc-reconciliation.ts";
@@ -124,13 +123,9 @@ export function makeTaskLifecycleOrchestrator(options: TaskLifecycleOrchestrator
     completeTask: (payload) => Effect.gen(function* () {
       const executionBearing = yield* taskHasExecutionDocuments(options.artifactStore, payload.taskId);
       let reviewContract: VerifierBackedReviewContract | undefined;
-      if (executionBearing) {
-        const factGate = yield* validateTaskFactGate(options.artifactStore, payload.taskId);
-        if (factGate) return factGate;
-      } else {
+      if (!executionBearing) {
         const review = yield* reviewTask(options.artifactStore, payload.taskId, payload.reviewerId, options.now);
         if (!review.ok) {
-          if (review.error.code === "task_fact_required") return review;
           return {
             ok: false,
             taskId: payload.taskId,
@@ -270,9 +265,12 @@ function validateCompletionDocumentPlaceholders(
   checkLegacyReview: boolean
 ): Effect.Effect<TaskLifecycleFailure | null> {
   return Effect.gen(function* () {
-    const closeout = policy ? yield* readTaskDocument(artifactStore, taskId, "closeout.md") : null;
+    const taskPackage = policy
+      ? yield* artifactStore.readTaskPackage(taskId as TaskId).pipe(Effect.catchAll(() => Effect.succeed(null)))
+      : null;
+    const closeout = taskPackage?.documents.find((document) => document.path === "closeout.md")?.body ?? null;
     if (policy && closeout !== null && isCloseoutPlaceholderMarkdown(closeout, policy.closeoutPlaceholderFingerprints)) {
-      return taskFailure(taskId, "closeout_placeholder", "Replace closeout.md template placeholders before completing the task.");
+      return taskFailure(taskId, "closeout_placeholder", `Replace closeout.md template placeholders before completing the task. Actual task directory read: ${taskPackage?.rootPath ?? "unavailable"}.`);
     }
 
     if (checkLegacyReview) {
@@ -337,9 +335,6 @@ function reviewTask(
   now: (() => string) | undefined
 ): Effect.Effect<TaskLifecycleResult> {
   return Effect.gen(function* () {
-    const factGate = yield* validateTaskFactGate(artifactStore, taskId);
-    if (factGate) return factGate;
-
     const reviewBody = yield* readTaskDocument(artifactStore, taskId, "review.md");
     if (reviewBody === null) {
       return taskFailure(taskId, "review_document_missing", "Task review requires review.md in the task package.");
@@ -378,17 +373,6 @@ function reviewTask(
     }
 
     return { ok: true, taskId, report: gate, reviewContract: gate.contract };
-  });
-}
-
-function validateTaskFactGate(artifactStore: Pick<ArtifactStore, "readTaskPackage">, taskId: string): Effect.Effect<TaskLifecycleFailure | null> {
-  const remediation = `Task review and completion require at least one real F- fact record. Add one with: ha fact record --task ${taskId} --statement "<verified result>" --source "<evidence path or command>" --confidence high`;
-  return Effect.gen(function* () {
-    const factsBody = yield* readTaskDocument(artifactStore, taskId, "facts.md");
-    if (factsBody === null) return taskFailure(taskId, "task_fact_required", remediation);
-    const records = parseFactFlowRecords(factsBody);
-    if (records.length === 0) return taskFailure(taskId, "task_fact_required", remediation);
-    return null;
   });
 }
 

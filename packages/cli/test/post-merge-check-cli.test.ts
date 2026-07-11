@@ -198,6 +198,32 @@ test("CLI check --post-merge reports done task document placeholders as hard-fai
   });
 });
 
+test("CLI check --post-merge hard-fails duplicate task ULID directory prefixes and recovers after removal", () => {
+  withTempRoot((rootDir) => {
+    const taskId = "task_01KX7WJT36SYFCP4Q3KV9KFR6A";
+    const canonicalDir = `${taskId}-canonical`;
+    const duplicateDir = `${taskId}-hand-written-slug`;
+    writeIndex(rootDir, canonicalDir, "Canonical", "planned", { taskId });
+    mkdirSync(path.join(rootDir, "harness/tasks", duplicateDir), { recursive: true });
+
+    const blocked = runJson(rootDir, ["check", "--post-merge"], false);
+
+    assert.equal(blocked.ok, false);
+    assert.equal(blocked.error?.code, "check_profile_failed");
+    const duplicate = blocked.warnings.find((warning: any) => warning.code === "duplicate_task_directory_id");
+    assert.ok(duplicate);
+    assert.equal(duplicate.source, "completion-consistency");
+    assert.equal(duplicate.severity, "hard-fail");
+    assert.match(duplicate.message, new RegExp(`harness/tasks/${canonicalDir}`, "u"));
+    assert.match(duplicate.message, new RegExp(`harness/tasks/${duplicateDir}`, "u"));
+
+    rmSync(path.join(rootDir, "harness/tasks", duplicateDir), { recursive: true, force: true });
+    const recovered = runJson(rootDir, ["check", "--post-merge"]);
+    assert.equal(recovered.ok, true);
+    assert.equal(recovered.warnings.some((warning: any) => warning.code === "duplicate_task_directory_id"), false);
+  });
+});
+
 function writeIndex(
   rootDir: string,
   directoryName: string,

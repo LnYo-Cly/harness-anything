@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { isCloseoutPlaceholderMarkdown, isReviewPlaceholderMarkdown, parseReviewMarkdown } from "../../../application/src/index.ts";
 import { findEntityRefs } from "../../../kernel/src/index.ts";
@@ -158,8 +158,9 @@ function findingsFromReport(report: Record<string, unknown>): ReadonlyArray<{
 }
 
 function validateCheckProfile(rootInput: HarnessLayoutInput, profile: CheckProfile, strict: boolean): ReadonlyArray<ProfileValidationIssue> {
-  const rootDir = resolveHarnessLayout(rootInput).rootDir;
-  const issues: ProfileValidationIssue[] = [];
+  const layout = resolveHarnessLayout(rootInput);
+  const rootDir = layout.rootDir;
+  const issues: ProfileValidationIssue[] = [...validateUniqueTaskDirectoryIds(layout.rootDir, layout.tasksRoot)];
   const settingsResult = readProjectHarnessSettings(rootInput, "check");
   const settings = settingsResult.ok ? settingsResult.settings : undefined;
   if (!settingsResult.ok) issues.push(settingsIssue(settingsResult));
@@ -178,6 +179,29 @@ function validateCheckProfile(rootInput: HarnessLayoutInput, profile: CheckProfi
   }
 
   return issues;
+}
+
+function validateUniqueTaskDirectoryIds(rootDir: string, tasksRoot: string): ReadonlyArray<ProfileValidationIssue> {
+  if (!existsSync(tasksRoot)) return [];
+  const directoriesByTaskId = new Map<string, string[]>();
+  for (const entry of readdirSync(tasksRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const match = /^(task_[0-9A-HJKMNP-TV-Z]{26})(?:-|$)/u.exec(entry.name);
+    if (!match?.[1]) continue;
+    const paths = directoriesByTaskId.get(match[1]) ?? [];
+    paths.push(relativePath(rootDir, path.join(tasksRoot, entry.name)));
+    directoriesByTaskId.set(match[1], paths);
+  }
+  return [...directoriesByTaskId.entries()]
+    .filter(([, paths]) => paths.length >= 2)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([taskId, paths]) => profileIssue(
+      "completion-consistency",
+      "duplicate_task_directory_id",
+      "hard-fail",
+      `Task id ${taskId} has multiple task directories: ${paths.sort().join(", ")}.`,
+      "Keep exactly one canonical task directory for this task id and migrate any misplaced authored content before removing duplicates."
+    ));
 }
 
 function validateTaskPackageContracts(rootInput: HarnessLayoutInput, taskDir: string, profile: CheckProfile, strict: boolean, settings?: ProjectHarnessSettings): ReadonlyArray<ProfileValidationIssue> {

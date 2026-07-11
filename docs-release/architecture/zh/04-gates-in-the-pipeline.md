@@ -12,41 +12,31 @@
 进行中的工作
     │  ha task review <id>
     ▼
-[ fact 门 ] ─ 拒绝 ─▶ (状态不变)
-    │ 通过
-    ▼
 [ review 门 ] ─ 拒绝 ─▶ (状态不变)
     │ 通过
 in_review
     │  ha task complete <id> --ci passed
     ▼
-[ fact 门 ] · [ review 门 ] · [ completion 路径 ] ─ 拒绝 ─▶ (状态不变)
+[ closeout · code-doc · 适用的 review · completion 路径 ] ─ 拒绝 ─▶ (状态不变)
     │ 通过
 done  (终态——写入经由唯一的写协调器)
 ```
 
 像 `done` 这样的终态,永远不是你可以直接设置的状态。编排器会拒绝对终态的直接写入,转而让它走完成路径,于是整个门栈无法靠"直接改字段"绕过。
 
-## fact-record 门
+## Fact 晋升不是 completion 门
 
-最具体的生命周期门,也是最严格的一个,值得直白地说清楚,因为它是纯粹的机制。
+依据 `dec_mrg3z1we/CH4`，一个 task 可以有 `0..N` 条 Fact。Fact 是对承重观察的
+显式、append-only 晋升；submit、review 和 complete 都不会自动生成 Fact。交付证据
+属于 Execution outputs 与 Submission packet，不能为了凑数量而复制进 Fact。
 
-**一个 task 不能进入 review 或 completion,除非它的 `facts.md` 里至少有一条真实的 `F-` fact 记录。**
-
-在编排器内部,`reviewTask` 和 `completeTask` 都会在做任何别的事之前先调用 fact 门。它解析出 task 本地的 `facts.md`,从中读出 fact 记录,如果文件缺失——或存在但一条记录都没有——迁移就以 `task_fact_required` 错误失败。门交回来的修复提示是字面的:
-
-```text
-Task review and completion require at least one real F- fact record.
-Add one with:
-  ha fact record --task <id> --statement "<verified result>" \
-    --source "<evidence path or command>" --confidence high
-```
-
-fact 记录是 append-only 的,带一个 `F-` id、一条 `statement`、一个 `source` 和一个 `confidence`。这道门从结构上强制的是:一项工作不能在**没有任何可验证内容**的情况下被宣布为可评审。在工作被允许推进之前,账本上必须至少有一条被记录、带来源的观察。宣布的成本很低;一条带来源的 fact 不是。
+因此，`facts.md` 缺失、为空或没有解析出任何 `F-` 记录，都不会阻止 review 或
+completion。承重观察需要供未来 decision 或跨任务推理使用时，仍可显式记录为 Fact；
+它不再是通用的 task completion 数量门。
 
 ## review 门
 
-一旦 task 至少有了一条 fact,review 门就去检查 task 的 `review.md`。评审发现记在一张 Markdown 表里,门把这张表解析成结构化的发现,每条带一个严重度(`P0`–`P3`)、一个 `open` 标记和一个 `blocksRelease` 标记。
+对于 legacy task，review 门检查 task 的 `review.md`。评审发现记在一张 Markdown 表里，门把这张表解析成结构化的发现，每条带一个严重度(`P0`–`P3`)、一个 `open` 标记和一个 `blocksRelease` 标记。
 
 规则狭窄而机械:只要有任何一条发现**既 open 又 release-blocking**,review 就失败,每一条这样的发现都会以 `release_blocking_finding` 问题回报。只有当不再有 open 的阻断性发现时,门才发出一份通过的评审契约(`verifier-backed-review/v1`),概述看到了多少条发现,并确认 open 阻断项为零。一张格式错误的发现表——列数不对、severity 非法——本身就是一次拒绝,而不是被悄悄跳过;门不会读过一张它无法校验的表。
 
@@ -54,14 +44,14 @@ fact 记录是 append-only 的,带一个 `F-` id、一条 `statement`、一个 `
 
 ## completion 门
 
-完成一个 task 是最严格的迁移，因为 `done` 是终态。`ha task complete` 路径做的不只是调用那个三轴
-completion 函数；它会重新运行 review，检查 task 文档，调和 code-doc 锚点，清扫 task tree，最后才
-写入 `done`。
+完成一个 task 是最严格的迁移，因为 `done` 是终态。`ha task complete` 会检查 task 文档、
+调和 code-doc 锚点、应用对应的 review 契约、清扫 task tree，最后才写入 `done`。legacy task
+会重新运行 `review.md` 门；带 Execution 的 task 则要求当前 Execution 已有 approved Review。
 
 | 检查 | 通过要求 | 报告的失败码或 issue |
 |---|---|
-| fact 记录 | `facts.md` 必须包含至少一条解析出的 `F-` fact 记录 | `task_fact_required` |
-| review 文档 | `review.md` 必须存在，发现表必须能解析，且不能有 open 的 release-blocking 发现 | completion 报告 `review_not_passed`；底层 review 失败可能是 `review_document_missing`、`review_schema_invalid` 或 `release_blocking_findings` |
+| legacy review 文档 | 不带 Execution 文档的 task 必须有 `review.md`，发现表必须能解析，且不能有 open 的 release-blocking 发现 | completion 报告 `review_not_passed`；底层 review 失败可能是 `review_document_missing`、`review_schema_invalid` 或 `release_blocking_findings` |
+| Execution Review | 带 Execution 的 task 必须对当前 Execution 有 approved Review | Execution completion service 报告 Review 缺失或未批准 |
 | review 占位符 | 初始 `review.md` 占位符必须被替换 | `review_placeholder` |
 | closeout 占位符 | 配置了占位符策略时，`closeout.md` 不能匹配已知模板指纹 | `closeout_placeholder` |
 | code-doc reconciliation | task 包必须包含一份手写的 `code-doc-anchors.json`，其中有合法的承重记录，且每条记录至少有一个硬 commit 或 path 锚点 | `code_doc_reconciliation_failed`，issues 里可能包含 `code_doc_anchors_missing` |

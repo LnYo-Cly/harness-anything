@@ -71,4 +71,4 @@ If this milestone is not CI/gate/governance work but requires changing CI/gate a
 
 - create-milestone checker reports green.
 - root task, map, roadmap, dossier-data, and charter decision anchor are mutually traceable.
-- E75 gate: at least one real fact exists before review / complete.
+- Per `dec_mrg3z1we/CH4`, promote load-bearing observations explicitly as `0..N` Facts; keep delivery evidence in Execution outputs and do not impose a Fact quantity gate on review or completion.

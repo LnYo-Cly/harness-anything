@@ -216,7 +216,7 @@ function taskGateHint(code: string, hint: string, taskId: string): string {
   if (code !== "closeout_not_ready" && !/closeout/i.test(hint)) return hint;
   return [
     hint,
-    `To make closeoutReadiness ready/passed, run ha task transition ${taskId} in_review, replace closeout.md placeholder content with real Summary/Verification/Residual Risk, run ha fact record --task ${taskId} --statement "..." --source "..." for evidence, run ha task review ${taskId}, then run ha task complete ${taskId} --ci passed.`
+    `To make closeoutReadiness ready/passed, run ha task transition ${taskId} in_review, replace closeout.md placeholder content with real Summary/Verification/Residual Risk, run ha task review ${taskId}, then run ha task complete ${taskId} --ci passed.`
   ].join(" ");
 }
 

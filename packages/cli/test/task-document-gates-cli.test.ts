@@ -36,6 +36,7 @@ test("CLI task-complete without Execution preserves its legacy receipt and byte-
     const blocked = runJson(rootDir, ["task-complete", "task-1", "--reviewer", "reviewer-a", "--ci", "passed"], false);
     assert.equal(blocked.ok, false);
     assert.equal(blocked.error?.code, "closeout_placeholder");
+    assert.match(blocked.error?.hint ?? "", new RegExp(path.join(rootDir, "harness/tasks/task-1").replaceAll("\\", "\\\\"), "u"));
 
     writeRealCloseout(rootDir, "task-1");
     const indexPath = path.join(rootDir, "harness/tasks/task-1/INDEX.md");
@@ -139,16 +140,17 @@ test("CLI task-complete reports the underlying completion write failure", () => 
   });
 });
 
-test("CLI task-review rejects tasks without a real fact and prints the remediation command", () => {
+test("CLI task-review accepts a task without facts under dec_mrg3z1we/CH4", () => {
   withTempRoot((rootDir) => {
     writeIndex(rootDir, "task-1", "Review Task", "in_review");
     writeReview(rootDir, "task-1");
 
-    const blocked = runJson(rootDir, ["task-review", "task-1", "--reviewer", "reviewer-a"], false);
+    // dec_mrg3z1we/CH4: Fact is an explicit 0..N promotion, never a review quantity gate.
+    const reviewed = runJson(rootDir, ["task-review", "task-1", "--reviewer", "reviewer-a"]);
 
-    assert.equal(blocked.ok, false);
-    assert.equal(blocked.error?.code, "task_fact_required");
-    assert.match(blocked.error?.hint, /ha fact record --task task-1 --statement/);
+    assert.equal(reviewed.ok, true);
+    assert.equal(reviewed.command, "task-review");
+    assert.equal(reviewed.data?.reviewContract?.schema ?? reviewed.reviewContract?.schema, "verifier-backed-review/v1");
   });
 });
 
@@ -219,30 +221,32 @@ test("CLI task-review and task-complete stage reviewed artifacts through WriteCo
   });
 });
 
-test("CLI task-review does not count facts.md placeholders as facts", () => {
+test("CLI task-review ignores facts.md quantity under dec_mrg3z1we/CH4", () => {
   withTempRoot((rootDir) => {
     writeIndex(rootDir, "task-1", "Review Task", "in_review");
     writeReview(rootDir, "task-1");
     writeFileSync(path.join(rootDir, "harness/tasks/task-1/facts.md"), "# Facts\n\n- TODO: record a fact before closeout.\n", "utf8");
 
-    const blocked = runJson(rootDir, ["task-review", "task-1", "--reviewer", "reviewer-a"], false);
+    // dec_mrg3z1we/CH4: zero parsed F- records is a valid review input.
+    const reviewed = runJson(rootDir, ["task-review", "task-1", "--reviewer", "reviewer-a"]);
 
-    assert.equal(blocked.ok, false);
-    assert.equal(blocked.error?.code, "task_fact_required");
+    assert.equal(reviewed.ok, true);
+    assert.equal(reviewed.data?.reviewContract?.schema ?? reviewed.reviewContract?.schema, "verifier-backed-review/v1");
   });
 });
 
-test("CLI task-complete preserves the fact gate failure instead of masking it as review_not_passed", () => {
+test("CLI task-complete without Execution accepts no facts under dec_mrg3z1we/CH4", () => {
   withTempRoot((rootDir) => {
     writeIndex(rootDir, "task-1", "Complete Task", "in_review");
     writeReview(rootDir, "task-1");
     writeRealCloseout(rootDir, "task-1");
 
-    const blocked = runJson(rootDir, ["task-complete", "task-1", "--reviewer", "reviewer-a", "--ci", "passed"], false);
+    // dec_mrg3z1we/CH4 removes only the Fact quantity gate; review, closeout,
+    // code-doc reconciliation, and completion gates still run on this path.
+    const completed = runJson(rootDir, ["task-complete", "task-1", "--reviewer", "reviewer-a", "--ci", "passed"]);
 
-    assert.equal(blocked.ok, false);
-    assert.equal(blocked.error?.code, "task_fact_required");
-    assert.match(blocked.error?.hint, /ha fact record --task task-1 --statement/);
+    assert.equal(completed.ok, true);
+    assert.equal(completed.data?.status ?? completed.status, "done");
   });
 });
 
@@ -261,10 +265,9 @@ test("CLI Review verdict rejects unknown values before writing", () => {
   });
 });
 
-test("CLI complete consumes an approved Execution Review without the legacy review.md gate", () => {
+test("CLI complete accepts an approved Execution Review without facts under dec_mrg3z1we/CH4", () => {
   withTempRoot((rootDir) => {
     writeIndex(rootDir, executionTaskId, "Execution Complete", "in_review");
-    writeFact(rootDir, executionTaskId);
     writeRealCloseout(rootDir, executionTaskId);
     writeExecution(rootDir, executionTaskId, executionId, "worker-agent");
 
@@ -287,6 +290,7 @@ test("CLI complete consumes an approved Execution Review without the legacy revi
     assert.match(selfComplete.error?.hint ?? "", /executor cannot complete/u);
     writeExecution(rootDir, executionTaskId, executionId, "worker-agent");
 
+    // dec_mrg3z1we/CH4: approved Review and completion gates do not imply a Fact quantity gate.
     const completed = runJson(rootDir, ["task", "complete", executionTaskId, "--reviewer", "reviewer-a", "--ci", "passed"], true, testActorEnv);
     assert.equal(completed.ok, true);
     assert.equal(completed.executionId, executionId);

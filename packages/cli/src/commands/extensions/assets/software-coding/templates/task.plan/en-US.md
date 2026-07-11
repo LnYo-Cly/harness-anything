@@ -30,11 +30,11 @@ If this task is not a CI/gate/governance task but requires modifying CI/gate aut
 
 - Inspect existing code, documents, and contracts.
 - Record key progress with `ha task progress append <task-id> --text "..." --evidence type:PATH:summary`.
-- For observations that support review, PRs, architecture judgment, or later choices, run `ha fact record --task <task-id> --statement "..." --source "..." --confidence high`.
+- Explicitly promote load-bearing observations needed for later decisions or cross-task reasoning with `ha fact record --task <task-id> --statement "..." --source "..." --confidence high`; Facts remain `0..N`, while delivery evidence belongs in Execution outputs.
 - For route choices, reversals, long-lived boundaries, or choices that derive follow-up work, run `ha decision propose ...`; when facts support decisions or decisions derive tasks, connect them with `ha decision relate ...`.
 - Verify behavior with tests and checks.
 
 ## Verification
 
 - List required local checks, CI, and review evidence.
-- E75 gate: before `ha task review` / `ha task complete`, the task must have at least one real fact; without facts, there is no output to judge.
+- Per `dec_mrg3z1we/CH4`, Facts are explicit `0..N` promotions, not a review or completion quantity gate; verify delivery through Execution outputs, review, closeout, and the applicable completion gates.
