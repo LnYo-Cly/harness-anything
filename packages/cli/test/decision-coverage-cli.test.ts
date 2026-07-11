@@ -96,7 +96,13 @@ test("CLI decision accept transitions an existing decision with evidence through
     assert.equal(result.ok, true);
     assert.equal(result.command, "decision-accept");
     assert.equal(result.decisionState, "active");
-    assert.match(readFileSync(path.join(rootDir, "harness/decisions/decision-dec_ACCEPTCLI/decision.md"), "utf8"), /^state: active$/mu);
+    const body = readFileSync(path.join(rootDir, "harness/decisions/decision-dec_ACCEPTCLI/decision.md"), "utf8");
+    assert.match(body, /^state: active$/mu);
+    assert.match(body, /^contentPins:$/mu);
+    assert.match(body, /action: "accept", state: "active"/u);
+    assert.match(body, /arbiter: \{ kind: "human", id: "ZeyuLi" \}/u);
+    assert.match(body, /canonicalization: "decision-content\/v1"/u);
+    assert.match(body, /digest: "sha256:[a-f0-9]{64}"/u);
   });
 });
 

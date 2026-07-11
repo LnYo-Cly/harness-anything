@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
 import { makeDecisionWriteService, readDecisionDocument, type DecisionWriteRejected } from "../src/index.ts";
-import { deriveRelationId, type DecisionPackage, type EntityRelationRecord, type WriteCoordinator, type WriteOp } from "../../kernel/src/index.ts";
+import { computeDecisionContentDigest, deriveRelationId, type DecisionPackage, type EntityRelationRecord, type WriteCoordinator, type WriteOp } from "../../kernel/src/index.ts";
 import { runEffect } from "./effect-test-helpers.ts";
 
 test("decision accept blocks zero-evidence decisions without judgment-only rationale", () => {
@@ -51,6 +51,104 @@ test("decision write service proposes and accepts through WriteCoordinator with 
   assert.equal(enqueued[1]?.kind, "decision_accept");
   assert.equal((enqueued[1]?.payload as { decision?: DecisionPackage }).decision?.state, "active");
   assert.equal((enqueued[1]?.payload as { decision?: DecisionPackage }).decision?.decidedAt, "2026-07-02T00:00:00Z");
+  assert.deepEqual((enqueued[1]?.payload as { decision?: DecisionPackage }).decision?.contentPins, [{
+    action: "accept",
+    state: "active",
+    decidedAt: "2026-07-02T00:00:00Z",
+    arbiter: { kind: "human", id: "ZeyuLi" },
+    canonicalization: "decision-content/v1",
+    digest: computeDecisionContentDigest(proposed)
+  }]);
+});
+
+test("every decision judgment transition appends a self-contained content pin", () => {
+  const enqueued: WriteOp[] = [];
+  const service = makeDecisionWriteService({
+    coordinator: fakeCoordinator(enqueued),
+    now: () => "2026-07-11T00:01:00.000Z"
+  });
+  const proposed = decisionPackage({ state: "proposed" });
+  const active = decisionPackage({ state: "active" });
+  const arbiter = { kind: "human", id: "ZeyuLi" } as const;
+
+  Effect.runSync(service.accept({ current: proposed, arbiter, judgmentOnlyRationale: "Human judgment." }));
+  Effect.runSync(service.reject({ current: proposed, arbiter }));
+  Effect.runSync(service.defer({ current: proposed, arbiter }));
+  Effect.runSync(service.supersede({ current: active, arbiter }));
+  Effect.runSync(service.retire({ current: active, arbiter }));
+
+  const pins = enqueued.map((op) => (op.payload as { decision: DecisionPackage }).decision.contentPins?.at(-1));
+  assert.deepEqual(pins.map((pin) => [pin?.action, pin?.state]), [
+    ["accept", "active"],
+    ["reject", "rejected"],
+    ["defer", "deferred"],
+    ["supersede", "retired"],
+    ["retire", "retired"]
+  ]);
+  for (const pin of pins) {
+    assert.equal(pin?.decidedAt, "2026-07-11T00:01:00.000Z");
+    assert.deepEqual(pin?.arbiter, arbiter);
+    assert.equal(pin?.canonicalization, "decision-content/v1");
+  }
+});
+
+test("post-sign amend changes recomputation without mutating the recorded content pin", () => {
+  const enqueued: WriteOp[] = [];
+  const service = makeDecisionWriteService({
+    coordinator: fakeCoordinator(enqueued),
+    now: () => "2026-07-11T00:01:00.000Z"
+  });
+  const proposed = decisionPackage({ state: "proposed" });
+
+  Effect.runSync(service.accept({
+    current: proposed,
+    arbiter: { kind: "human", id: "ZeyuLi" },
+    judgmentOnlyRationale: "Human judgment."
+  }));
+  const signed = (enqueued[0]?.payload as { decision: DecisionPackage }).decision;
+  const recordedPin = signed.contentPins?.[0];
+  assert.ok(recordedPin);
+  const amended = {
+    ...signed,
+    chosen: [...signed.chosen, { id: "CH2", text: "A post-sign amendment." }],
+    claims: [...signed.claims, { id: "C2", text: "This claim was added after signing." }]
+  };
+
+  assert.notEqual(computeDecisionContentDigest(amended), recordedPin.digest);
+  Effect.runSync(service.amend({ current: signed, next: amended }));
+  const persistedAmend = (enqueued[1]?.payload as { decision: DecisionPackage }).decision;
+
+  assert.deepEqual(persistedAmend.contentPins, signed.contentPins);
+  assert.equal(persistedAmend.contentPins?.[0]?.digest, recordedPin.digest);
+});
+
+test("retire preserves the accept pin and appends a distinct retirement pin", () => {
+  const enqueued: WriteOp[] = [];
+  const service = makeDecisionWriteService({ coordinator: fakeCoordinator(enqueued) });
+  const accepted = decisionPackage({
+    state: "active",
+    decidedAt: "2026-07-11T00:01:00.000Z",
+    contentPins: [{
+      action: "accept",
+      state: "active",
+      decidedAt: "2026-07-11T00:01:00.000Z",
+      arbiter: { kind: "human", id: "ZeyuLi" },
+      canonicalization: "decision-content/v1",
+      digest: computeDecisionContentDigest(decisionPackage())
+    }]
+  });
+
+  Effect.runSync(service.retire({
+    current: accepted,
+    arbiter: { kind: "human", id: "ZeyuLi" },
+    decidedAt: "2026-07-11T00:02:00.000Z"
+  }));
+  const retired = (enqueued[0]?.payload as { decision: DecisionPackage }).decision;
+
+  assert.equal(retired.contentPins?.length, 2);
+  assert.deepEqual(retired.contentPins?.[0], accepted.contentPins?.[0]);
+  assert.equal(retired.contentPins?.[1]?.action, "retire");
+  assert.equal(retired.contentPins?.[1]?.state, "retired");
 });
 
 test("decision accept emits an append-only body mutation for judgment-only rationale", () => {
@@ -102,6 +200,16 @@ test("decision write service rejects empty rejected alternatives", () => {
 
   assert.equal(result._tag, "Failure");
   assert.match(failureReason(result.cause), /rejected alternatives/u);
+});
+
+test("decision propose rejects caller-supplied lifecycle content pins", () => {
+  const service = makeDecisionWriteService({ coordinator: fakeCoordinator([]) });
+  const result = Effect.runSyncExit(service.propose({
+    decision: decisionPackage({ contentPins: [] })
+  }));
+
+  assert.equal(result._tag, "Failure");
+  assert.match(failureReason(result.cause), /cannot supply lifecycle-owned contentPins/u);
 });
 
 test("decision write service preserves supplied relation records", () => {
@@ -188,11 +296,17 @@ test("decision amend fails closed for non-amendable field changes", () => {
     current,
     next: { ...current, state: "retired" }
   }));
+  const pinChange = Effect.runSyncExit(service.amend({
+    current,
+    next: { ...current, contentPins: [] }
+  }));
 
   assert.equal(immutableChange._tag, "Failure");
   assert.match(failureReason(immutableChange.cause), /immutable field riskTier/u);
   assert.equal(lifecycleChange._tag, "Failure");
   assert.match(failureReason(lifecycleChange.cause), /lifecycle field state/u);
+  assert.equal(pinChange._tag, "Failure");
+  assert.match(failureReason(pinChange.cause), /lifecycle field contentPins/u);
 });
 
 test("decision amend accepts schema-declared amendable field changes", () => {
@@ -210,6 +324,7 @@ test("decision amend accepts schema-declared amendable field changes", () => {
   assert.equal(enqueued[0]?.kind, "decision_amend");
   const payload = enqueued[0]?.payload as { readonly decision?: DecisionPackage };
   assert.equal(payload.decision?.chosen.length, 2);
+  assert.equal(payload.decision?.contentPins, undefined);
 });
 
 test("decision document reader accepts block-list frontmatter and rejects unknown provenance runtime", async () => {
@@ -220,6 +335,7 @@ test("decision document reader accepts block-list frontmatter and rejects unknow
     const read = await runEffect(readDecisionDocument(rootDir, "dec_BLOCK"));
 
     assert.equal(read.decision.decision_id, "dec_BLOCK");
+    assert.equal(read.decision.contentPins, undefined);
     assert.deepEqual(read.decision.provenance, [{
       runtime: "codex",
       sessionId: "session-1",

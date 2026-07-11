@@ -69,6 +69,7 @@ function legacyDecisionNumber(decisionId: string): number | null {
 function parseDecisionFrontmatter(frontmatter: string): DecisionPackage {
   const decidedAt = unquote(readScalar(frontmatter, "decidedAt"));
   const watermark = readScalar(frontmatter, "_coordinatorWatermark");
+  const contentPins = parseObjectList(frontmatter, "contentPins") as DecisionPackage["contentPins"];
   return {
     schema: "decision-package/v1",
     decision_id: readScalar(frontmatter, "decision_id", { required: true }),
@@ -87,6 +88,7 @@ function parseDecisionFrontmatter(frontmatter: string): DecisionPackage {
     proposedAt: unquote(readScalar(frontmatter, "proposedAt", { required: true })),
     arbiter: parseActor(readScalar(frontmatter, "arbiter", { required: true })),
     ...(decidedAt ? { decidedAt } : {}),
+    ...(hasTopLevelKey(frontmatter, "contentPins") ? { contentPins } : {}),
     provenance: parseObjectList(frontmatter, "provenance") as DecisionPackage["provenance"],
     question: unquote(readScalar(frontmatter, "question", { required: true })),
     chosen: parseObjectList(frontmatter, "chosen") as DecisionPackage["chosen"],
@@ -94,6 +96,10 @@ function parseDecisionFrontmatter(frontmatter: string): DecisionPackage {
     claims: parseObjectList(frontmatter, "claims") as DecisionPackage["claims"],
     relations: parseObjectList(frontmatter, "relations") as DecisionPackage["relations"]
   };
+}
+
+function hasTopLevelKey(frontmatter: string, key: string): boolean {
+  return new RegExp(`^${key}:\\s*$`, "mu").test(frontmatter);
 }
 
 function readBlockScalar(frontmatter: string, blockName: string, key: string): string {

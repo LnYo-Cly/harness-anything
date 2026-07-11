@@ -1,7 +1,8 @@
 // harness-test-tier: fast
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseDecisionDocument } from "../../src/domain/decision-document.ts";
+import { parseDecisionDocument, serializeDecisionDocument } from "../../src/domain/decision-document.ts";
+import type { DecisionPackage } from "../../src/schemas/decision-package.ts";
 
 test("parses CRLF decision frontmatter blocks and strips the frontmatter body", () => {
   const body = [
@@ -48,4 +49,42 @@ test("parses CRLF decision frontmatter blocks and strips the frontmatter body", 
   assert.equal(parsed.decision.claims[0]?.id, "C1");
   assert.equal(parsed.decision.relations[0]?.relation_id, "rel_1");
   assert.equal(parsed.body, "\r\n# CRLF decision\r\n");
+});
+
+test("decision documents round-trip self-contained content pins", () => {
+  const decision: DecisionPackage = {
+    schema: "decision-package/v1",
+    decision_id: "dec_PIN",
+    title: "Pinned decision",
+    state: "active",
+    riskTier: "high",
+    urgency: "high",
+    vertical: "software/coding",
+    preset: "architecture-decision",
+    applies_to: { modules: ["kernel"], productLines: [] },
+    proposedBy: { kind: "agent", id: "codex" },
+    proposedAt: "2026-07-11T00:00:00.000Z",
+    arbiter: { kind: "human", id: "zeyuli" },
+    decidedAt: "2026-07-11T00:01:00.000Z",
+    contentPins: [{
+      action: "accept",
+      state: "active",
+      decidedAt: "2026-07-11T00:01:00.000Z",
+      arbiter: { kind: "human", id: "zeyuli" },
+      canonicalization: "decision-content/v1",
+      digest: "sha256:e216d18ccaa40138e579485bafaa107c8a3cc1a47b995b7c6bb8c9507ef5c4a2"
+    }],
+    provenance: [{ runtime: "codex", sessionId: "session-1", boundAt: "2026-07-11T00:00:00.000Z" }],
+    question: "Should this content be pinned?",
+    chosen: [{ id: "CH1", text: "Pin it." }],
+    rejected: [{ id: "RJ1", text: "Do not pin it.", why_not: "The signature would drift." }],
+    claims: [{ id: "C1", text: "Pins preserve signed meaning." }],
+    relations: []
+  };
+
+  const document = serializeDecisionDocument({ decision }, "wm-pin");
+  const parsed = parseDecisionDocument(document);
+
+  assert.deepEqual(parsed.decision.contentPins, decision.contentPins);
+  assert.match(document, /^contentPins:$/mu);
 });

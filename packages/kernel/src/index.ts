@@ -19,6 +19,10 @@ export {
 export type { SessionManifest } from "./schemas/session-manifest.ts";
 export { resolveEntityDocumentPath, writeDeclaredEntityTransaction } from "./entity/declaration.ts";
 export { sha256Text, stablePayloadHash, stableStringify } from "./integrity/stable-hash.ts";
+export {
+  computeDecisionContentDigest,
+  decisionContentCanonicalization
+} from "./integrity/decision-content-digest.ts";
 export { validateOutputEvidence } from "./local/output-evidence-validator.ts";
 export * from "./layout/index.ts";
 export * from "./markdown/frontmatter.ts";

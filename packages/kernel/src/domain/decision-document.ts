@@ -50,6 +50,10 @@ export function serializeDecisionDocument(payload: DecisionDocumentPayload, wate
     `proposedAt: ${quoteScalar(decision.proposedAt)}`,
     `arbiter: ${flowObject(decision.arbiter)}`,
     ...(decision.decidedAt ? [`decidedAt: ${quoteScalar(decision.decidedAt)}`] : []),
+    ...(decision.contentPins !== undefined ? [
+      "contentPins:",
+      ...decision.contentPins.map((entry) => `  - ${flowObject(entry)}`)
+    ] : []),
     "provenance:",
     ...decision.provenance.map((entry) => `  - ${flowObject(entry)}`),
     `question: ${quoteScalar(decision.question)}`,
@@ -85,6 +89,7 @@ export function readDecisionWatermark(documentBody: string): string | null {
 function parseDecisionFrontmatter(frontmatter: string): DecisionPackage {
   const decidedAt = unquote(readScalar(frontmatter, "decidedAt"));
   const watermark = readScalar(frontmatter, "_coordinatorWatermark");
+  const contentPins = parseObjectList(frontmatter, "contentPins") as DecisionPackage["contentPins"];
   return {
     schema: "decision-package/v1",
     decision_id: readScalar(frontmatter, "decision_id", { required: true }),
@@ -103,6 +108,7 @@ function parseDecisionFrontmatter(frontmatter: string): DecisionPackage {
     proposedAt: unquote(readScalar(frontmatter, "proposedAt", { required: true })),
     arbiter: parseFlowObject(readScalar(frontmatter, "arbiter", { required: true })) as DecisionPackage["arbiter"],
     ...(decidedAt ? { decidedAt } : {}),
+    ...(hasTopLevelKey(frontmatter, "contentPins") ? { contentPins } : {}),
     provenance: parseObjectList(frontmatter, "provenance") as DecisionPackage["provenance"],
     question: unquote(readScalar(frontmatter, "question", { required: true })),
     chosen: parseObjectList(frontmatter, "chosen") as DecisionPackage["chosen"],
@@ -110,6 +116,10 @@ function parseDecisionFrontmatter(frontmatter: string): DecisionPackage {
     claims: parseObjectList(frontmatter, "claims") as DecisionPackage["claims"],
     relations: parseObjectList(frontmatter, "relations") as DecisionPackage["relations"]
   };
+}
+
+function hasTopLevelKey(frontmatter: string, key: string): boolean {
+  return new RegExp(`^${key}:\\s*$`, "mu").test(frontmatter);
 }
 
 function flowArray(values: ReadonlyArray<string>): string {

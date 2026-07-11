@@ -9,6 +9,8 @@ const DecisionIdSchema = Schema.String.pipe(Schema.pattern(/^dec_[A-Za-z0-9_-]+$
 const AnchorIdSchema = Schema.String.pipe(Schema.pattern(/^[A-Za-z][A-Za-z0-9_-]*$/u));
 const DecisionRiskTierSchema = Schema.Literal("low", "medium", "high");
 const DecisionUrgencySchema = Schema.Literal("low", "medium", "high");
+const DecisionContentPinActionSchema = Schema.Literal("accept", "reject", "defer", "supersede", "retire");
+const DecisionContentDigestSchema = Schema.String.pipe(Schema.pattern(/^sha256:[a-f0-9]{64}$/u));
 
 export const DecisionStateSchema = Schema.Literal(
   ...decisionStates
@@ -25,6 +27,15 @@ const RejectedDecisionAnchorSchema = Schema.Struct({
   text: NonBlankStringSchema,
   why_not: NonBlankStringSchema
 });
+
+const DecisionContentPinSchema = Schema.Struct({
+  action: DecisionContentPinActionSchema,
+  state: DecisionStateSchema,
+  decidedAt: NonBlankStringSchema,
+  arbiter: ActorRefSchema,
+  canonicalization: Schema.Literal("decision-content/v1"),
+  digest: DecisionContentDigestSchema
+}).pipe(Schema.filter((pin) => pin.state === contentPinState(pin.action)));
 
 export const DecisionPackageSchema = Schema.Struct({
   schema: Schema.Literal("decision-package/v1"),
@@ -44,6 +55,7 @@ export const DecisionPackageSchema = Schema.Struct({
   proposedAt: NonBlankStringSchema,
   arbiter: ActorRefSchema,
   decidedAt: OptionalString,
+  contentPins: Schema.optional(Schema.Array(DecisionContentPinSchema)),
   provenance: Schema.Array(ProvenanceEntrySchema).pipe(Schema.minItems(1)),
   question: NonBlankStringSchema,
   chosen: Schema.Array(DecisionAnchorSchema).pipe(Schema.minItems(1)),
@@ -53,3 +65,17 @@ export const DecisionPackageSchema = Schema.Struct({
 }).pipe(Schema.filter((decision) => decision.proposedBy.kind !== decision.arbiter.kind || decision.proposedBy.id !== decision.arbiter.id));
 
 export type DecisionPackage = Schema.Schema.Type<typeof DecisionPackageSchema>;
+
+function contentPinState(action: typeof DecisionContentPinActionSchema.Type): typeof DecisionStateSchema.Type {
+  switch (action) {
+    case "accept":
+      return "active";
+    case "reject":
+      return "rejected";
+    case "defer":
+      return "deferred";
+    case "supersede":
+    case "retire":
+      return "retired";
+  }
+}
