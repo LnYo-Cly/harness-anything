@@ -44,8 +44,8 @@ npm run check
 | `npm test` | 全量 Node test suite。 |
 | `npm run test:gui` | GUI 测试 lane。 |
 
-新增 `packages/**` 或 `tools/**` 测试必须登记到 `tools/test-tier-manifest.mjs`；
-runner 设计上会拒绝未分类测试。
+新增 `packages/**` 或 `tools/**` Node 测试必须在首行放置恰好一个有效的
+`// harness-test-tier: fast|contract|integration` 声明。Runner 会拒绝缺失、重复或非法声明。
 
 ## CI lanes
 

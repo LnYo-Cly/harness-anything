@@ -1,3 +1,4 @@
+// harness-test-tier: integration
 import assert from "node:assert/strict";
 import { mkdtempSync, statSync } from "node:fs";
 import net from "node:net";

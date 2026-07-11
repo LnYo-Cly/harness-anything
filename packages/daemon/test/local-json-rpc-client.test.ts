@@ -1,3 +1,4 @@
+// harness-test-tier: fast
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import net from "node:net";

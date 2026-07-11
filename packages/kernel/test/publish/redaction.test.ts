@@ -1,3 +1,4 @@
+// harness-test-tier: contract
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildPublishableProjection } from "../../src/index.ts";

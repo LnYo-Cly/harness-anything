@@ -1,3 +1,4 @@
+// harness-test-tier: contract
 import test from "node:test";
 import assert from "node:assert/strict";
 import { entityFieldContracts } from "../packages/kernel/src/entity/field-contracts.ts";

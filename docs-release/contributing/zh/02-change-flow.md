@@ -26,8 +26,8 @@ record 的写入路径。
 CLI 改动要同时经过已注册 command、descriptor、help 文本、receipt shape、error code 和测试。
 一个命令即使能跑，如果不能通过 `--help` 被发现、不能输出结构化结果，或返回未注册错误形态，都还没完成。
 
-如果在 `packages/**` 或 `tools/**` 下新增或修改测试，同步更新 `tools/test-tier-manifest.mjs`。
-未分类测试预期会 fail closed。
+在 `packages/**` 或 `tools/**` 下新增 Node 测试时，必须在首行声明 tier，例如
+`// harness-test-tier: integration`。缺失、重复或非法声明一律 fail closed，不再更新中央文件清单。
 
 ## 文档改动
 

@@ -46,9 +46,9 @@ The repository uses tiered test lanes:
 | `npm test` | Full Node test suite. |
 | `npm run test:gui` | GUI test lane. |
 
-New `packages/**` or `tools/**` tests must be registered in
-`tools/test-tier-manifest.mjs`; the runner is designed to reject unclassified
-tests.
+New Node tests under `packages/**` or `tools/**` must put exactly one valid
+`// harness-test-tier: fast|contract|integration` declaration on their first
+line. The runner rejects missing, repeated, or invalid declarations.
 
 ## CI lanes
 

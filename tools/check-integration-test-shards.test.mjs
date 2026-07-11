@@ -1,3 +1,4 @@
+// harness-test-tier: fast
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
@@ -41,17 +42,16 @@ test("new integration tests are assigned without manifest or shard registration"
   ]);
 });
 
-test("a new test file from disk is derived and executed as integration with zero registration", () => {
+test("a new inline-declared integration test is discovered without central registration", () => {
   const root = mkdtempSync(path.join(tmpdir(), "ha-integration-discovery-"));
   try {
     const testRoot = path.join(root, "tools");
     mkdirSync(testRoot, { recursive: true });
     for (let index = 1; index <= 7; index += 1) {
-      writeFileSync(path.join(testRoot, `fixture-${index}.test.mjs`), "", "utf8");
+      writeFileSync(path.join(testRoot, `fixture-${index}.test.mjs`), "// harness-test-tier: integration\n", "utf8");
     }
     const result = checkIntegrationTestShards({
       repoRoot: root,
-      explicitManifest: { fast: [], contract: [] },
       weightOverrides: {},
       previousTestCount: 6,
       deletionAllowlistText: deletionAllowlistText()
@@ -91,7 +91,7 @@ test("integration count ratchet rejects a real deleted test file from disk", () 
     const testRoot = path.join(root, "tools");
     mkdirSync(testRoot, { recursive: true });
     for (let index = 1; index <= 7; index += 1) {
-      writeFileSync(path.join(testRoot, `fixture-${index}.test.mjs`), "", "utf8");
+      writeFileSync(path.join(testRoot, `fixture-${index}.test.mjs`), "// harness-test-tier: integration\n", "utf8");
     }
     writeDeletionAllowlist(root);
 
@@ -104,7 +104,6 @@ test("integration count ratchet rejects a real deleted test file from disk", () 
     unlinkSync(path.join(testRoot, "fixture-7.test.mjs"));
     const after = checkIntegrationTestShards({
       repoRoot: root,
-      explicitManifest: { fast: [], contract: [] },
       weightOverrides: {}
     });
     assert.equal(after.ok, false);
@@ -123,7 +122,7 @@ test("integration count ratchet accepts an intentional deletion with a new exact
     const testRoot = path.join(root, "tools");
     mkdirSync(testRoot, { recursive: true });
     for (let index = 1; index <= 7; index += 1) {
-      writeFileSync(path.join(testRoot, `fixture-${index}.test.mjs`), "", "utf8");
+      writeFileSync(path.join(testRoot, `fixture-${index}.test.mjs`), "// harness-test-tier: integration\n", "utf8");
     }
     writeDeletionAllowlist(root);
 
@@ -141,7 +140,6 @@ test("integration count ratchet accepts an intentional deletion with a new exact
     }]);
     const after = checkIntegrationTestShards({
       repoRoot: root,
-      explicitManifest: { fast: [], contract: [] },
       weightOverrides: {}
     });
 
@@ -160,7 +158,7 @@ test("an already-merged deletion confirmation does not burden an unrelated later
     const testRoot = path.join(root, "tools");
     mkdirSync(testRoot, { recursive: true });
     for (let index = 1; index <= 6; index += 1) {
-      writeFileSync(path.join(testRoot, `fixture-${index}.test.mjs`), "", "utf8");
+      writeFileSync(path.join(testRoot, `fixture-${index}.test.mjs`), "// harness-test-tier: integration\n", "utf8");
     }
     writeDeletionAllowlist(root, [{
       value: "tools/fixture-7.test.mjs",
@@ -177,7 +175,6 @@ test("an already-merged deletion confirmation does not burden an unrelated later
     writeFileSync(path.join(root, "tools/unrelated.txt"), "later change\n", "utf8");
     const result = checkIntegrationTestShards({
       repoRoot: root,
-      explicitManifest: { fast: [], contract: [] },
       weightOverrides: {}
     });
     assert.equal(result.ok, true, result.errors.join("\n"));
@@ -193,7 +190,7 @@ test("a persisted deletion confirmation is rejected if its path reappears", () =
     const testRoot = path.join(root, "tools");
     mkdirSync(testRoot, { recursive: true });
     for (let index = 1; index <= 6; index += 1) {
-      writeFileSync(path.join(testRoot, `fixture-${index}.test.mjs`), "", "utf8");
+      writeFileSync(path.join(testRoot, `fixture-${index}.test.mjs`), "// harness-test-tier: integration\n", "utf8");
     }
     writeDeletionAllowlist(root, [{
       value: "tools/fixture-7.test.mjs",
@@ -207,10 +204,9 @@ test("a persisted deletion confirmation is rejected if its path reappears", () =
     git(root, ["add", "tools"]);
     git(root, ["commit", "-qm", "baseline after intentional deletion"]);
 
-    writeFileSync(path.join(testRoot, "fixture-7.test.mjs"), "", "utf8");
+    writeFileSync(path.join(testRoot, "fixture-7.test.mjs"), "// harness-test-tier: integration\n", "utf8");
     const result = checkIntegrationTestShards({
       repoRoot: root,
-      explicitManifest: { fast: [], contract: [] },
       weightOverrides: {}
     });
     assert.equal(result.ok, false);
@@ -229,11 +225,10 @@ test("integration count ratchet fails closed when the Git baseline is unavailabl
   try {
     mkdirSync(path.join(root, "tools"), { recursive: true });
     for (let index = 1; index <= 6; index += 1) {
-      writeFileSync(path.join(root, "tools", `fixture-${index}.test.mjs`), "", "utf8");
+      writeFileSync(path.join(root, "tools", `fixture-${index}.test.mjs`), "// harness-test-tier: integration\n", "utf8");
     }
     const result = checkIntegrationTestShards({
       repoRoot: root,
-      explicitManifest: { fast: [], contract: [] },
       weightOverrides: {},
       deletionAllowlistText: deletionAllowlistText()
     });
