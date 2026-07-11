@@ -10,6 +10,9 @@ import test from "node:test";
 const cliEntry = path.resolve("packages/cli/src/index.ts");
 const executionTaskId = "task_01KX7H00000000000000000000";
 const executionId = "exe_01KX7H00000000000000000001";
+// Execution role checks compare the CLI actor's executor against the execution's
+// executor; pin the actor instead of inheriting whatever the invoking shell has.
+const testActorEnv = { HARNESS_ACTOR: "agent:test" };
 
 test("CLI task-complete without Execution preserves its legacy receipt and byte-exact INDEX transition", () => {
   withTempRoot((rootDir) => {
@@ -266,7 +269,7 @@ test("CLI complete consumes an approved Execution Review and preserves the legac
     writeRealCloseout(rootDir, executionTaskId);
     writeExecution(rootDir, executionTaskId, executionId, "worker-agent");
 
-    const missingReview = runJson(rootDir, ["task", "complete", executionTaskId, "--reviewer", "reviewer-a", "--ci", "passed"], false);
+    const missingReview = runJson(rootDir, ["task", "complete", executionTaskId, "--reviewer", "reviewer-a", "--ci", "passed"], false, testActorEnv);
     assert.equal(missingReview.ok, false);
     assert.match(missingReview.error?.hint ?? "", /approved Review/u);
 
@@ -275,17 +278,17 @@ test("CLI complete consumes an approved Execution Review and preserves the legac
       "--execution-id", executionId,
       "--verdict", "approved",
       "--findings", "All acceptance checks passed."
-    ]);
+    ], true, testActorEnv);
     assert.equal(reviewed.ok, true);
     assert.equal(reviewed.executionId, executionId);
     assert.match(String(reviewed.reviewId), /^rev_/u);
 
     writeExecution(rootDir, executionTaskId, executionId, "test");
-    const selfComplete = runJson(rootDir, ["task", "complete", executionTaskId, "--reviewer", "reviewer-a", "--ci", "passed"], false);
+    const selfComplete = runJson(rootDir, ["task", "complete", executionTaskId, "--reviewer", "reviewer-a", "--ci", "passed"], false, testActorEnv);
     assert.match(selfComplete.error?.hint ?? "", /executor cannot complete/u);
     writeExecution(rootDir, executionTaskId, executionId, "worker-agent");
 
-    const completed = runJson(rootDir, ["task", "complete", executionTaskId, "--reviewer", "reviewer-a", "--ci", "passed"]);
+    const completed = runJson(rootDir, ["task", "complete", executionTaskId, "--reviewer", "reviewer-a", "--ci", "passed"], true, testActorEnv);
     assert.equal(completed.ok, true);
     assert.equal(completed.executionId, executionId);
     assert.equal(completed.status, "done");
@@ -304,7 +307,7 @@ test("CLI rejects executor self-review and changes_requested opens a fresh claim
       "--execution-id", executionId,
       "--verdict", "approved",
       "--findings", "Self approved."
-    ], false);
+    ], false, testActorEnv);
     assert.match(selfReview.error?.hint ?? "", /executor cannot review/u);
 
     writeExecution(rootDir, executionTaskId, executionId, "worker-agent");
@@ -313,13 +316,13 @@ test("CLI rejects executor self-review and changes_requested opens a fresh claim
       "--execution-id", executionId,
       "--verdict", "changes_requested",
       "--findings", "Add the missing regression test."
-    ]);
+    ], true, testActorEnv);
     assert.equal(requested.ok, true);
     const taskRoot = path.join(rootDir, "harness/tasks", executionTaskId);
     assert.equal(JSON.parse(readFileSync(path.join(taskRoot, "executions", `${executionId}.md`), "utf8")).state, "changes_requested");
     assert.match(readFileSync(path.join(taskRoot, "INDEX.md"), "utf8"), /^  status: active$/mu);
 
-    const claimed = runJson(rootDir, ["task", "claim", executionTaskId, "--execution"]);
+    const claimed = runJson(rootDir, ["task", "claim", executionTaskId, "--execution"], true, testActorEnv);
     assert.notEqual(claimed.executionId, executionId);
     assert.equal(existsSync(path.join(taskRoot, "executions", `${claimed.executionId}.md`)), true);
   });
@@ -483,11 +486,11 @@ function runGit(rootDir: string, ...args: ReadonlyArray<string>): string {
   return execFileSync("git", ["-C", rootDir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
-function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = true): Record<string, any> {
+function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = true, env: Record<string, string> = {}): Record<string, any> {
   try {
     const stdout = execFileSync(process.execPath, [cliEntry, "--root", rootDir, "--json", ...args], {
       encoding: "utf8",
-      env: { ...process.env, HARNESS_SKIP_NPM_INSTALL: "1" },
+      env: { ...process.env, HARNESS_SKIP_NPM_INSTALL: "1", ...env },
       stdio: ["ignore", "pipe", "pipe"]
     });
     const result = JSON.parse(stdout) as Record<string, any>;
