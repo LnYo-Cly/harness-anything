@@ -71,4 +71,4 @@ Task Contract: harness-task v1
 
 - create-milestone checker 输出 green。
 - root task、map、roadmap、dossier-data 与 charter decision 锚互相可追。
-- E75 门：进入 review / complete 前必须已有至少一条真实 fact。
+- 依据 `dec_mrg3z1we/CH4`，承重观察按需显式晋升为 `0..N` 条 Fact；交付证据放在 Execution outputs，不对 review 或 completion 设置 Fact 数量门。

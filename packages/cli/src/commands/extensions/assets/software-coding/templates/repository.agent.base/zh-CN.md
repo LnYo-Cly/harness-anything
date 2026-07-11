@@ -17,7 +17,7 @@
 ## Kernel Workflow (triadic)
 
 - `task` 是工作单元和状态时间线。
-- `fact` 是 task-local、append-only、可复核观察。进入 review/complete 的 task 必须至少有一条真实 fact。
+- `fact` 是 task-local、append-only、对承重观察的 `0..N` 显式晋升。交付证据归入 Execution outputs；review 与 completion 不设 Fact 数量门。
 - `decision` 是承重 why：选路、推翻、长期边界，以及派生后续工作的判断。
 - prose 提及不能替代 fact、decision 或 relation。
 

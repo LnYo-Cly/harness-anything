@@ -30,11 +30,11 @@ Task Contract: harness-task v1
 
 - 确认现有代码、文档和契约。
 - 用 `ha task progress append <task-id> --text "..." --evidence type:PATH:summary` 记录关键进展。
-- 对会支撑 review、PR、架构判断或后续选择的观察，运行 `ha fact record --task <task-id> --statement "..." --source "..." --confidence high`。
+- 对未来 decision 或跨任务推理所需的承重观察，使用 `ha fact record --task <task-id> --statement "..." --source "..." --confidence high` 显式晋升；Fact 保持 `0..N`，交付证据归入 Execution outputs。
 - 对选路、推翻、长期边界或派生后续工作的承重选择，运行 `ha decision propose ...`；fact 支撑 decision 或 decision 派生 task 时，用 `ha decision relate ...` 建边。
 - 用测试和检查验证行为。
 
 ## Verification
 
 - 列出需要通过的本地检查、CI 和 review。
-- E75 门：进入 `ha task review` / `ha task complete` 前必须已有至少一条真实 fact；没有 fact 就没有可裁决的产出。
+- 依据 `dec_mrg3z1we/CH4`，Fact 是 `0..N` 的显式晋升，不是 review 或 completion 的数量门；交付通过 Execution outputs、review、closeout 与适用的 completion gates 验证。

@@ -26,15 +26,12 @@ way through by producing an empty issue list.
 active work
     │  ha task review <id>
     ▼
-[ fact gate ] ─ reject ─▶ (status unchanged)
-    │ pass
-    ▼
 [ review gate ] ─ reject ─▶ (status unchanged)
     │ pass
 in_review
     │  ha task complete <id> --ci passed
     ▼
-[ fact gate ] · [ review gate ] · [ completion path ] ─ reject ─▶ (status unchanged)
+[ closeout · code-doc · applicable review · completion path ] ─ reject ─▶ (status unchanged)
     │ pass
 done  (terminal — write goes through the single coordinator)
 ```
@@ -44,37 +41,22 @@ orchestrator refuses a direct write to a terminal status and routes it through
 the completion path instead, so the gate stack cannot be bypassed by "just
 setting the field."
 
-## The fact-record gate
+## Fact promotion is not a completion gate
 
-The most concrete lifecycle gate is also the strictest, and it is worth stating
-plainly because it is pure mechanism.
+Under `dec_mrg3z1we/CH4`, a task may have `0..N` Facts. A Fact is an explicit,
+append-only promotion of a load-bearing observation; submit, review, and complete
+do not synthesize one. Evidence for a delivery belongs to Execution outputs and
+the Submission packet rather than being copied into Facts to satisfy a count.
 
-**A task cannot move into review or completion unless its `facts.md` holds at
-least one real `F-` fact record.**
-
-Inside the orchestrator, both `reviewTask` and `completeTask` call a fact gate
-before anything else. It resolves the task's local `facts.md`, parses the fact
-records out of it, and if the file is missing — or present but contains zero
-records — the transition fails with a `task_fact_required` error. The remediation
-the gate hands back is literal:
-
-```text
-Task review and completion require at least one real F- fact record.
-Add one with:
-  ha fact record --task <id> --statement "<verified result>" \
-    --source "<evidence path or command>" --confidence high
-```
-
-A fact record is append-only and carries an `F-` id, a `statement`, a `source`,
-and a `confidence`. What the gate enforces, structurally, is that a body of work
-cannot be declared reviewable while claiming *nothing verifiable*. There has to be
-at least one recorded, sourced observation on the ledger before the work is
-allowed to advance. Declaration is cheap; a fact with a source is not.
+Consequently, a missing `facts.md`, an empty file, or a file with zero parsed
+`F-` records does not block review or completion. Fact recording remains
+available when an observation is worth promoting for later decisions or
+cross-task reasoning; it is not a universal task-completion quantity gate.
 
 ## The review gate
 
-Once a task has at least one fact, the review gate inspects the task's
-`review.md`. Review findings live in a Markdown table, and the gate parses that
+For a legacy task, the review gate inspects the task's `review.md`. Review
+findings live in a Markdown table, and the gate parses that
 table into structured findings, each with a severity (`P0`–`P3`), an `open`
 flag, and a `blocksRelease` flag.
 
@@ -95,14 +77,15 @@ scaffolding dressed up as a result.
 ## The completion gate
 
 Completing a task is the strictest transition, because `done` is terminal. The
-`ha task complete` path does more than call the three-axis completion function; it
-re-runs review, checks task documents, reconciles code and documentation anchors,
-sweeps the task tree, and only then writes `done`.
+`ha task complete` path checks task documents, reconciles code and documentation
+anchors, applies the relevant review contract, sweeps the task tree, and only
+then writes `done`. Legacy tasks re-run the `review.md` gate; Execution-bearing
+tasks instead require an approved Review for the current Execution.
 
 | Check | Requirement to pass | Failure code or issue reported |
 |---|---|
-| fact record | `facts.md` must contain at least one parsed `F-` fact record | `task_fact_required` |
-| review document | `review.md` must exist, its findings table must parse, and no open finding may block release | completion reports `review_not_passed`; the underlying review failure may be `review_document_missing`, `review_schema_invalid`, or `release_blocking_findings` |
+| legacy review document | for a task without Execution documents, `review.md` must exist, its findings table must parse, and no open finding may block release | completion reports `review_not_passed`; the underlying review failure may be `review_document_missing`, `review_schema_invalid`, or `release_blocking_findings` |
+| Execution Review | an Execution-bearing task must have an approved Review for its current Execution | the Execution completion service reports the missing or non-approved Review |
 | review placeholder | the initial `review.md` placeholder must be replaced | `review_placeholder` |
 | closeout placeholder | when a placeholder policy is configured, `closeout.md` must not match a known template fingerprint | `closeout_placeholder` |
 | code-doc reconciliation | the task package must contain a hand-written `code-doc-anchors.json` with valid load-bearing records and at least one hard commit or path anchor per record | `code_doc_reconciliation_failed` with issues such as `code_doc_anchors_missing` |

@@ -17,7 +17,7 @@ This entry holds stable operating rules only. Current milestone context, roadmap
 ## Kernel Workflow (triadic)
 
 - `task` is the work unit and status timeline.
-- `fact` is a task-local, append-only, verifiable observation. Every task reaching review/complete needs at least one real fact.
+- `fact` is a task-local, append-only, explicit `0..N` promotion of a load-bearing observation. Delivery evidence belongs in Execution outputs; review and completion impose no Fact quantity gate.
 - `decision` is the load-bearing why: choices, reversals, long-lived boundaries, and downstream work-spawning judgments.
 - Prose mentions do not replace facts, decisions, or relations.
 

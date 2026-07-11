@@ -33,12 +33,12 @@ npm run quickstart:demo
 ```console
 $ ha task transition task_01KWX5RBJQMEZ2T7AR6GFB8Q6K done
 error code=terminal_status_requires_task_complete
-
-$ ha task complete task_01KWX5RBJQMEZ2T7AR6GFB8Q6K --ci passed
-error code=task_fact_required
 ```
 
-Current boundary.
+`ha task complete` 仍要求 closeout 有实质内容、code-doc reconciliation 通过，并满足
+适用的 review 契约（带 Execution 的任务必须有 approved Review）。它不要求任何最低
+Fact 数量：依据 `dec_mrg3z1we/CH4`，Fact 是 `0..N` 的显式晋升，submit、review 或
+complete 都不会自动生成 Fact。
 
 等 0.1 package 发布到 npm 之后，初见入口会变成：
 

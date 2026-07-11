@@ -385,7 +385,7 @@ export const coreCommandSpecs = defineCommandSpecs([
     "usage": "task complete <id> --ci passed|failed [--reviewer <id>]",
     "options": [{"flag":"--ci","description":"Set the completion CI gate result."},{"flag":"--reviewer","description":"Set the reviewer id."}],
     "aliases": ["task-complete <id> (deprecated, use task complete; retires at E77/F6 acceptance)"],
-    "summary": "Evaluate the completion gate after CI has passed or failed. To make closeoutReadiness ready/passed, run task transition <id> in_review, replace closeout.md placeholder content, record a real fact, run task review, then run task complete --ci passed.",
+    "summary": "Evaluate the completion gate after CI has passed or failed. To make closeoutReadiness ready/passed, run task transition <id> in_review, replace closeout.md placeholder content, run task review, then run task complete --ci passed.",
     "examples": ["harness-anything task complete task_01ABC --ci passed --reviewer reviewer-id"],
     "parse": parseCoreTaskArgs,
     "run": runTaskGatesCommand,
