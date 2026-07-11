@@ -75,6 +75,13 @@ const parseCases: ReadonlyArray<ParseCase> = [
   { name: "task complete", argv: ["task", "complete", "task_1", "--ci", "passed", "--reviewer", "alice"], kind: "task-complete", fields: { taskId: "task_1", ciGate: "passed", reviewerId: "alice" } },
   { name: "task show", argv: ["task", "show", "task_1"], kind: "task-show", fields: { taskId: "task_1" } },
   { name: "task tree", argv: ["task", "tree", "task_1"], kind: "task-tree", fields: { taskId: "task_1" } },
+  { name: "task trace", argv: ["task", "trace", "task_1"], kind: "task-trace", fields: { taskId: "task_1" } },
+  { name: "session show", argv: ["session", "show", "ses_1"], kind: "session-show", fields: { sessionId: "ses_1" } },
+  { name: "session trace", argv: ["session", "trace", "ses_1"], kind: "session-trace", fields: { sessionId: "ses_1" } },
+  { name: "execution show", argv: ["execution", "show", "exe_1"], kind: "execution-show", fields: { executionId: "exe_1" } },
+  { name: "execution list", argv: ["execution", "list", "--task", "task_1"], kind: "execution-list", fields: { taskId: "task_1" } },
+  { name: "review show", argv: ["review", "show", "rev_1"], kind: "review-show", fields: { reviewId: "rev_1" } },
+  { name: "audit provenance", argv: ["audit", "provenance", "--task", "task_1"], kind: "audit-provenance", fields: { taskId: "task_1" } },
   { name: "task relate depends-on", argv: ["task", "relate", "task_1", "depends-on", "task_2", "--rationale", "needs output"], kind: "task-relate", fields: { sourceTaskId: "task_1", relationType: "depends-on", targetTaskId: "task_2", rationale: "needs output", dryRun: false } },
   { name: "relation list", argv: ["relation", "list", "--entity", "task/task_1", "--source", "task/task_1", "--target", "task/task_2", "--type", "depends-on", "--state", "active"], kind: "relation-list", fields: { filters: { entity: "task/task_1", source: "task/task_1", target: "task/task_2", type: "depends-on", state: "active" } } },
   {

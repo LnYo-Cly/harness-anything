@@ -60,7 +60,11 @@ export const reviewDeclaration = decodeEntityDeclaration({
       { name: "task_ref", field: "task_ref", type: "text" },
       { name: "execution_ref", field: "execution_ref", type: "text" },
       { name: "verdict", field: "verdict", type: "text" },
-      { name: "reviewer_actor", field: "reviewer_actor", type: "json" }
+      { name: "reviewer_actor", field: "reviewer_actor", type: "json" },
+      { name: "reviewer_session_ref", field: "reviewer_session_ref", type: "text" },
+      { name: "findings", field: "findings", type: "text" },
+      { name: "archive_warnings_acknowledged", field: "archive_warnings_acknowledged", type: "boolean" },
+      { name: "reviewed_at", field: "reviewed_at", type: "text" }
     ]
   }
 });

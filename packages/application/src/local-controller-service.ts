@@ -4,6 +4,9 @@ import type { ArtifactStore, EngineError, FactRecord, WriteError } from "../../k
 import {
   parseFactFlowRecords,
   queryDecisionProjection,
+  queryExecutionProjection,
+  queryExecutionsByTask,
+  queryReviewProjection,
   queryTaskProjection,
   readRelationGraphProjection,
   readTaskProjection,
@@ -77,6 +80,20 @@ export function makeLocalControllerService(options: LocalControllerServiceOption
       if (!decision) return decisionNotFound(payload.decisionId);
       return { ok: true, decision, warnings: result.warnings };
     },
+    getTaskExecutions: (payload) => {
+      validateLocalControllerTaskId(payload.taskId);
+      return { ok: true, taskId: payload.taskId, executions: queryExecutionsByTask({ rootDir, layoutOverrides: options.layoutOverrides, taskId: payload.taskId }) };
+    },
+    getExecutionDetail: (payload) => {
+      validateLocalControllerDecisionId(payload.executionId);
+      const execution = queryExecutionProjection({ rootDir, layoutOverrides: options.layoutOverrides, executionId: payload.executionId });
+      return execution ? { ok: true, execution } : entityNotFound("execution", payload.executionId);
+    },
+    getReviewDetail: (payload) => {
+      validateLocalControllerDecisionId(payload.reviewId);
+      const review = queryReviewProjection({ rootDir, layoutOverrides: options.layoutOverrides, reviewId: payload.reviewId });
+      return review ? { ok: true, review } : entityNotFound("review", payload.reviewId);
+    },
     getTaskFacts: async (payload) => {
       validateLocalControllerTaskId(payload.taskId);
       const layout = resolveHarnessLayout({ rootDir, layoutOverrides: options.layoutOverrides });
@@ -148,6 +165,10 @@ function taskNotFound(taskId: string): LocalControllerFailure {
 
 function decisionNotFound(decisionId: string): LocalControllerFailure {
   return { ok: false, error: { code: "decision_not_found", hint: `decision not found: ${decisionId}` } };
+}
+
+function entityNotFound(kind: string, id: string): LocalControllerFailure {
+  return { ok: false, error: { code: `${kind}_not_found`, hint: `${kind} not found: ${id}` } };
 }
 
 function toFactProjectionRow(taskId: string, fact: FactRecord): FactProjectionRow {

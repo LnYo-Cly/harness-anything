@@ -1,4 +1,5 @@
 import { coreCommandSpecs } from "./command-spec-core.ts";
+import { projectionReaderCommandSpecs } from "./command-spec-projection-readers.ts";
 import { decisionsCommandSpecs } from "./command-spec-decisions.ts";
 import { extensionsCommandSpecs } from "./command-spec-extensions.ts";
 import { migrationDiagnosticsCommandSpecs } from "./command-spec-migration-diagnostics.ts";
@@ -6,6 +7,7 @@ import { runtimeDocsCommandSpecs } from "./command-spec-runtime-docs.ts";
 import type { CommandSpecDefinition, ParsedCommandKind } from "./types.ts";
 
 export const commandSpecs = [
+  ...projectionReaderCommandSpecs,
   ...coreCommandSpecs,
   ...decisionsCommandSpecs,
   ...runtimeDocsCommandSpecs,

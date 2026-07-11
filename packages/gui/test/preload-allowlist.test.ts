@@ -24,6 +24,9 @@ test("preload exposes only the approved API methods", () => {
     "getDecisions",
     "getDecisionDetail",
     "getTaskFacts",
+    "getTaskExecutions",
+    "getExecutionDetail",
+    "getReviewDetail",
     "archiveTask",
     "openShell"
   ]);
@@ -45,7 +48,10 @@ test("preload capabilities distinguish shipped methods from deferred placeholder
     "getRelationGraph",
     "getDecisions",
     "getDecisionDetail",
-    "getTaskFacts"
+    "getTaskFacts",
+    "getTaskExecutions",
+    "getExecutionDetail",
+    "getReviewDetail"
   ]);
   assert.deepEqual(deferredPreloadMethods, ["archiveTask", "openShell"]);
   assert.equal(getPreloadApiCapability("getTasks").status, "shipped");

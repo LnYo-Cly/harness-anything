@@ -64,7 +64,14 @@ export const executionDeclaration = decodeEntityDeclaration({
       { name: "execution_id", field: "execution_id", type: "text", primaryKey: true },
       { name: "task_ref", field: "task_ref", type: "text" },
       { name: "state", field: "state", type: "text" },
-      { name: "executor", field: "primary_actor.executor", type: "json" }
+      { name: "executor", field: "primary_actor.executor", type: "json" },
+      { name: "primary_actor_json", field: "primary_actor", type: "json" },
+      { name: "claimed_at", field: "claimed_at", type: "text" },
+      { name: "submitted_at", field: "submitted_at", type: "text" },
+      { name: "closed_at", field: "closed_at", type: "text" },
+      { name: "session_bindings_json", field: "session_bindings", type: "json" },
+      { name: "outputs_json", field: "outputs", type: "json" },
+      { name: "submission_json", field: "submission", type: "json" }
     ]
   }
 });

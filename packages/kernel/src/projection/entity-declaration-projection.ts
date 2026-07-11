@@ -49,7 +49,7 @@ export function readDeclaredProjectionRows(
   }));
 }
 
-function discoverDeclaredEntityRows(
+export function discoverDeclaredEntityRows(
   rootInput: HarnessLayoutInput,
   declaration: EntityDeclaration
 ): ReadonlyArray<DeclaredProjectionRow> {
@@ -134,6 +134,7 @@ function templateMatcher(template: string): { readonly pattern: RegExp; readonly
 }
 
 function listFiles(rootPath: string): ReadonlyArray<string> {
+  if (!localLayoutFileSystem.exists(rootPath)) return [];
   const files: string[] = [];
   function visit(directory: string): void {
     for (const entry of localLayoutFileSystem.readDirents(directory)) {

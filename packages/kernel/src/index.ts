@@ -22,6 +22,15 @@ export * from "./ports/index.ts";
 export * from "./projection/post-merge-checks.ts";
 export * from "./projection/relation-flow-frontmatter.ts";
 export * from "./projection/relation-graph-projection.ts";
+export {
+  auditTaskProvenance,
+  queryExecutionProjection,
+  queryExecutionsByTask,
+  queryReviewProjection,
+  querySessionExecutionTrace,
+  querySessionProjection,
+  queryTaskExecutionTrace
+} from "./projection/entity-projection-readers.ts";
 export * from "./publish/index.ts";
 export * from "./projection/sqlite-task-projection.ts";
 export * from "./schemas/registry.ts";

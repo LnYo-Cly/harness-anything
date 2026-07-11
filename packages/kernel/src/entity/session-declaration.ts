@@ -56,11 +56,17 @@ export const sessionEntityRegistration = {
       { name: "archive_status", field: "archiveStatus", type: "text" },
       { name: "runtime", field: "runtime", type: "text" },
       { name: "exported_at", field: "exportedAt", type: "text" },
-      { name: "body_sha256", field: "bodyRef.sha256", type: "text" }
+      { name: "body_sha256", field: "bodyRef.sha256", type: "text" },
+      { name: "body_ref_json", field: "bodyRef", type: "json" },
+      { name: "snapshot_json", field: "snapshot", type: "json" }
     ]
   },
   documentCodec: {
-    decode: (body: string) => /^schema:\s*provenance-session\/v1\s*$/mu.test(body) ? undefined : JSON.parse(body) as unknown,
+    decode: (body: string) => {
+      if (/^schema:\s*provenance-session\/v1\s*$/mu.test(body)) return undefined;
+      if (!body.trimStart().startsWith("{")) return undefined;
+      return JSON.parse(body) as unknown;
+    },
     encode: (value: unknown) => `${JSON.stringify(value, null, 2)}\n`
   },
   blob: { referenceField: "bodyRef", store: "content-addressed" }

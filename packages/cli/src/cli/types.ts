@@ -102,6 +102,7 @@ export interface CliResult {
   readonly decisionId?: string;
   readonly executionId?: string;
   readonly reviewId?: string;
+  readonly sessionId?: string;
   readonly factId?: string;
   readonly factRef?: string;
   readonly decisionState?: string;
@@ -204,6 +205,13 @@ export interface ParsedCommand {
     | { readonly kind: "task-complete"; readonly taskId: string; readonly ciGate: "passed" | "failed"; readonly reviewerId: string }
     | { readonly kind: "task-show"; readonly taskId: string }
     | { readonly kind: "task-tree"; readonly taskId: string }
+    | { readonly kind: "task-trace"; readonly taskId: string }
+    | { readonly kind: "session-show"; readonly sessionId: string }
+    | { readonly kind: "session-trace"; readonly sessionId: string }
+    | { readonly kind: "execution-show"; readonly executionId: string }
+    | { readonly kind: "execution-list"; readonly taskId: string }
+    | { readonly kind: "review-show"; readonly reviewId: string }
+    | { readonly kind: "audit-provenance"; readonly taskId: string }
     | { readonly kind: "task-relate"; readonly sourceTaskId: string; readonly relationType: "depends-on"; readonly targetTaskId: string; readonly rationale: string; readonly dryRun: boolean }
     | { readonly kind: "relation-list"; readonly filters: RelationListFilters }
     | { readonly kind: "decision-list"; readonly search?: string; readonly legacyId?: string; readonly legacyRange?: string; readonly state?: string; readonly moduleKey?: string; readonly productLine?: string; readonly compact?: boolean }
