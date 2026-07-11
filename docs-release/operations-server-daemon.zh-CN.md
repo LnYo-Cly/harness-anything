@@ -1,8 +1,8 @@
 # 服务器 Daemon 运维
 
-Harness Anything 可以在本机运行一个 daemon，为同一台机器上的一份或多份
-canonical 仓库协调读写。CLI 不会自动切到 daemon：默认仍是进程内 direct 模式。需要
-让命令走本地 daemon 时，显式设置 `HARNESS_DAEMON_MODE=local`。
+Harness Anything 使用本地 daemon，为同一台机器上的一份或多份已初始化 canonical
+仓库协调读写。CLI 默认连接并按需自动启动本地 daemon。`HARNESS_DAEMON_MODE=direct`
+只保留为显式 bootstrap / 测试边界，不是已初始化 ledger 的日常写路径。
 
 remote 路径仍属实验性能力。远端 CLI 命令会通过 SSH stdio relay 连接到已经运行的 daemon，
 不会通过 SSH 再启动一个 daemon。团队远程接入必须为每位成员配置一条 SSH
@@ -10,8 +10,8 @@ remote 路径仍属实验性能力。远端 CLI 命令会通过 SSH stdio relay 
 
 ## 支持的拓扑
 
-- 本地 daemon，单仓：在 canonical 仓库旁启动 daemon，再用
-  `HARNESS_DAEMON_MODE=local` 让 CLI 命令显式走 daemon。
+- 本地 daemon，单仓：在 canonical 仓库旁直接运行普通 `ha` 命令；CLI 会按需注册并
+  自动启动本地 daemon。
 - 本地 daemon，单机多仓：把每个仓库注册进用户 daemon registry，启动一个 daemon，
   再用 `--repo <id>` 路由命令。
 - Remote SSH relay：用 `HARNESS_DAEMON_MODE=remote` 执行单次 CLI 命令。客户端会运行
@@ -68,11 +68,14 @@ ha daemon start --service
 ha daemon start --foreground
 ```
 
-CLI 命令默认仍走 direct 模式，必须显式 opt in：
+CLI 命令默认走本地 daemon，并在需要时自动启动：
 
 ```bash
-HARNESS_DAEMON_MODE=local ha task list
+ha task list
 ```
+
+只有初始化、恢复或无法启动 daemon 的测试 fixture 才显式使用
+`HARNESS_DAEMON_MODE=direct`；不要把它写成锁冲突的绕行方案。
 
 ## 多仓 Registry
 
@@ -87,11 +90,30 @@ ha daemon start --service
 用 `--repo` 把 CLI 命令路由到已注册仓库：
 
 ```bash
-HARNESS_DAEMON_MODE=local ha --repo A task list
+ha --repo A task list
 ```
 
 运行中的 daemon 每秒 reconcile 一次 registry。新注册的仓库可以热挂，不需要重启
 daemon。
+
+## 提交手改 task prose
+
+机器读字段和 typed records 继续使用各自的 CLI/RPC 命令。手改已登记的人读 task prose
+后，先检查，再只提交自己拥有的路径：
+
+```bash
+ha doc status --json
+ha doc sync --dry-run --json
+ha doc sync --submit --path tasks/task_01ABC/task_plan.md --json
+```
+
+需要提交多个文件时重复 `--path`。daemon 会重新派生允许区域，拒绝结构化或无法解析的
+触碰，检查 Git base，并创建带真实归因的 commit。doc sync 已接受的文件不要再补一次
+raw Git commit。
+
+顶层 ADR、standard、template 与 repository-agent prose 尚未进入已登记的 doc-sync 面；在
+write-road registry 明确分类这些路径前，继续使用其既有治理仓库流程。`doc sync` 会对未知
+Markdown fail closed，不会因为扩展名像 prose 就擅自放行。
 
 ## Remote SSH Relay
 

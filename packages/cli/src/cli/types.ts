@@ -247,6 +247,7 @@ export interface ParsedCommand {
     | { readonly kind: "doc-generate"; readonly filters: DocmapFilters; readonly write: boolean }
     | { readonly kind: "doc-status" }
     | { readonly kind: "doc-sync-dry-run" }
+    | { readonly kind: "doc-sync-submit"; readonly paths: ReadonlyArray<string> }
     | { readonly kind: "task-list"; readonly filters: TaskListFilters }
     | { readonly kind: "status" }
     | { readonly kind: "version" }

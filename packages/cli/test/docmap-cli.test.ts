@@ -116,6 +116,14 @@ test("CLI doc status reports prose candidates and forbidden structured touches",
     const taskRoot = path.join(harnessRoot, "tasks", "task_01KX3W4V1EDPHPTGWYYBQQ2J75");
     mkdirSync(taskRoot, { recursive: true });
     seedWriteRoadRegistry(rootDir);
+    writeFileSync(path.join(harnessRoot, "harness.yaml"), [
+      "schema: harness-anything/v1",
+      "settings:",
+      "  identity:",
+      "    personId: person_doc_sync",
+      "    displayName: Doc Sync User",
+      ""
+    ].join("\n"));
     writeFileSync(path.join(taskRoot, "task_plan.md"), "# Plan\n\nOriginal prose.\n");
     writeFileSync(path.join(taskRoot, "facts.md"), "# Facts\n\n- fact: original\n");
     initHarnessGit(harnessRoot);
@@ -135,6 +143,12 @@ test("CLI doc status reports prose candidates and forbidden structured touches",
     assert.equal(dryRun.command, "doc-sync-dry-run");
     assert.equal(dryRun.report.writeIntentPreview.submitImplemented, true);
     assert.equal(dryRun.report.writeIntentPreview.changes.length, 1);
+
+    const rejected = runJson(rootDir, ["doc", "sync", "--submit"], false);
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.error.code, "write_rejected");
+    assert.match(rejected.error.hint, /preview is not ready/u);
+    assert.notEqual(gitStatus(harnessRoot), "");
   });
 });
 
@@ -144,6 +158,14 @@ test("CLI doc status marks deletion as an explicit Phase 2 gap", () => {
     const taskRoot = path.join(harnessRoot, "tasks", "task_01KX3W4V1EDPHPTGWYYBQQ2J75");
     mkdirSync(taskRoot, { recursive: true });
     seedWriteRoadRegistry(rootDir);
+    writeFileSync(path.join(harnessRoot, "harness.yaml"), [
+      "schema: harness-anything/v1",
+      "settings:",
+      "  identity:",
+      "    personId: person_doc_sync",
+      "    displayName: Doc Sync User",
+      ""
+    ].join("\n"));
     const planPath = path.join(taskRoot, "task_plan.md");
     writeFileSync(planPath, "# Plan\n\nOriginal prose.\n");
     initHarnessGit(harnessRoot);
@@ -153,6 +175,42 @@ test("CLI doc status marks deletion as an explicit Phase 2 gap", () => {
     assert.equal(status.report.deletionPolicy, "undefined-pending-phase-2");
     assert.equal(status.report.deletions.length, 1);
     assert.equal(status.report.readyToSubmitPreview, false);
+    const rejected = runJson(rootDir, ["doc", "sync", "--submit"], false);
+    assert.equal(rejected.error.code, "write_rejected");
+    assert.match(rejected.error.hint, /1 deletion/u);
+  });
+});
+
+test("CLI doc sync submit commits eligible prose through the daemon", () => {
+  withTempRoot((rootDir) => {
+    const harnessRoot = path.join(rootDir, "harness");
+    const taskRoot = path.join(harnessRoot, "tasks", "task_01KX3W4V1EDPHPTGWYYBQQ2J75");
+    mkdirSync(taskRoot, { recursive: true });
+    writeFileSync(path.join(harnessRoot, "harness.yaml"), [
+      "schema: harness-anything/v1",
+      "settings:",
+      "  identity:",
+      "    personId: person_doc_sync",
+      "    displayName: Doc Sync User",
+      ""
+    ].join("\n"));
+    writeFileSync(path.join(taskRoot, "task_plan.md"), "# Plan\n\nOriginal prose.\n");
+    writeFileSync(path.join(taskRoot, "facts.md"), "# Facts\n\n- fact: original\n");
+    initHarnessGit(harnessRoot);
+    writeFileSync(path.join(taskRoot, "task_plan.md"), "# Plan\n\nUpdated through daemon.\n");
+    writeFileSync(path.join(taskRoot, "facts.md"), "# Facts\n\n- fact: unrelated structured mutation\n");
+
+    const submitted = runJson(rootDir, [
+      "doc", "sync", "--submit",
+      "--path", "tasks/task_01KX3W4V1EDPHPTGWYYBQQ2J75/task_plan.md"
+    ]);
+
+    assert.equal(submitted.ok, true);
+    assert.equal(submitted.command, "doc-sync-submit");
+    assert.equal(submitted.report.status, "accepted");
+    assert.equal(submitted.report.appliedChanges[0].path, "tasks/task_01KX3W4V1EDPHPTGWYYBQQ2J75/task_plan.md");
+    assert.match(gitStatus(harnessRoot), /facts\.md/u);
+    assert.equal(execFileSync("git", ["-C", harnessRoot, "log", "-1", "--format=%an <%ae>"], { encoding: "utf8" }).trim(), "Doc Sync User <harness@example.test>");
   });
 });
 
@@ -240,10 +298,20 @@ function gitStatus(harnessRoot: string): string {
 }
 
 function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = true): Record<string, any> {
+  const daemonMode = args[0] === "doc" && args[1] === "sync" && args.includes("--submit") ? "local" : "direct";
   try {
     const stdout = execFileSync(process.execPath, [cliEntry, "--root", rootDir, "--json", ...args], {
       encoding: "utf8",
-      env: { ...process.env, HARNESS_ACTOR: "agent:docmap-cli-test", GIT_CONFIG_GLOBAL: "/dev/null" }
+      env: {
+        ...process.env,
+        HARNESS_ACTOR: "agent:docmap-cli-test",
+        HARNESS_GIT_AUTHOR_NAME: "Harness Test",
+        HARNESS_GIT_AUTHOR_EMAIL: "harness@example.test",
+        HARNESS_DAEMON_MODE: daemonMode,
+        HARNESS_DAEMON_USER_ROOT: path.join(rootDir, ".daemon-user"),
+        HARNESS_DAEMON_IDLE_MS: "250",
+        GIT_CONFIG_GLOBAL: "/dev/null"
+      }
     });
     return unwrapCommandReceipt(JSON.parse(stdout) as Record<string, any>);
   } catch (error) {

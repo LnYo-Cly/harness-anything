@@ -464,7 +464,7 @@ async function appendWriteEventIfNeeded(
   actor: AuthenticatedActor | undefined,
   repo: DaemonRepoNamespace | undefined
 ): Promise<void> {
-  if (contract.commandClass === "repo-read") return;
+  if (contract.commandClass === "repo-read" || contract.method === "repo.command.run") return;
   await appendCommandEvent(options, params, contract, status, summary, errorCode, actor, repo);
 }
 

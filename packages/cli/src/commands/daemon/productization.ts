@@ -11,18 +11,16 @@ import {
 } from "../../../../kernel/src/index.ts";
 import {
   currentDaemonProtocolVersion,
-  loadPeopleRoster,
-  makeTransportDerivedIdentityProvider,
   type JsonObject,
   type JsonValue
 } from "../../../../daemon/src/index.ts";
-import { makeRuntimeEventAppendPromise, makeRuntimeEventLedgerService } from "../../../../application/src/index.ts";
 import { initializeHarness } from "../init.ts";
 import { resolveCliVersion } from "../core/version.ts";
 import { cliError, CliErrorCode } from "../../cli/error-codes.ts";
 import { readOption } from "../../cli/parse-options.ts";
 import { resolveLocalDaemonTarget, requestLocalDaemonJsonRpc, type LocalDaemonTarget } from "../../daemon/client.ts";
 import { renderDaemonHelp } from "./help.ts";
+import { loadDaemonIdentityWithEmail } from "./identity.ts";
 import { runDaemonRepoCommand } from "./repo-registry.ts";
 
 export interface DaemonCommandInput {
@@ -66,6 +64,27 @@ export interface DaemonStatusRuntimeRepo {
 }
 
 const emptyDaemonQueue = { interactive: 0, normal: 0, background: 0, maintenance: 0, running: false } as const;
+
+export function loadDaemonIdentity(rootDir: string, layoutOverrides: { readonly authoredRoot?: string } | undefined, endpoint?: string) {
+  const runtimeContext = createHarnessRuntimeContext(rootDir, layoutOverrides);
+  const authoredRoot = resolveHarnessLayout(runtimeContext).authoredRoot;
+  const primaryEmail = process.env.HARNESS_GIT_AUTHOR_EMAIL?.trim()
+    || process.env.GIT_AUTHOR_EMAIL?.trim()
+    || readGitConfigEmail(authoredRoot);
+  return loadDaemonIdentityWithEmail(rootDir, layoutOverrides, primaryEmail, endpoint);
+}
+
+function readGitConfigEmail(authoredRoot: string): string | undefined {
+  try {
+    const configured = execFileSync("git", ["-C", authoredRoot, "config", "user.email"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+    return configured || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export async function runDaemonProductCommand(input: DaemonCommandInput): Promise<number> {
   const action = input.args[1] ?? "status";
@@ -153,27 +172,6 @@ export function daemonStatusPayload(input: {
         lastMaterializerError: repo.lastMaterializerError ?? null
       }))
     } : {})
-  };
-}
-
-export function loadDaemonIdentity(rootDir: string, layoutOverrides: { readonly authoredRoot?: string } | undefined): {
-  readonly peopleRoster?: ReturnType<typeof loadPeopleRoster>;
-  readonly identityProvider?: ReturnType<typeof makeTransportDerivedIdentityProvider>;
-  readonly appendRuntimeEvent?: ReturnType<typeof makeRuntimeEventAppendPromise>;
-} {
-  const runtimeContext = createHarnessRuntimeContext(rootDir, layoutOverrides);
-  const layout = resolveHarnessLayout(runtimeContext);
-  const peoplePath = path.join(layout.authoredRoot, "people.yaml");
-  if (!existsSync(peoplePath)) return {};
-  const peopleRoster = loadPeopleRoster(runtimeContext);
-  return {
-    peopleRoster,
-    identityProvider: makeTransportDerivedIdentityProvider(peopleRoster, {
-      localUnixIssuer: `host:${os.hostname()}`,
-      sshExecIssuer: `host:${os.hostname()}`,
-      namedPipeIssuer: `host:${os.hostname()}:named-pipe`
-    }),
-    appendRuntimeEvent: makeRuntimeEventAppendPromise(makeRuntimeEventLedgerService({ rootInput: runtimeContext }))
   };
 }
 

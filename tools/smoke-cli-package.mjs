@@ -123,6 +123,9 @@ function runJson(command, args, cwd) {
 function smokeCliWriteEnv() {
   return {
     ...process.env,
+    // Package smoke exercises the packaged in-process boundary; daemon
+    // transport is covered by the dedicated daemon integration suite.
+    HARNESS_DAEMON_MODE: "direct",
     // Test-only actor attribution for package smoke writes; real env wins.
     HARNESS_ACTOR: process.env.HARNESS_ACTOR || "agent:harness-smoke",
     HARNESS_GIT_AUTHOR_NAME: process.env.HARNESS_GIT_AUTHOR_NAME || "Harness Smoke",

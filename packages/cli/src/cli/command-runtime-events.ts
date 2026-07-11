@@ -1,7 +1,6 @@
 import { Effect } from "effect";
 import { runtimeEventActorFromTaskHolderPrincipal } from "../../../application/src/index.ts";
 import { runtimeEventPolicyForAction } from "./command-event-policy.ts";
-import { cliError, CliErrorCode } from "./error-codes.ts";
 import { actionTaskId } from "./parse-args.ts";
 import type { CommandRunnerContext, CommandRunnerEffect } from "./runner-registry.ts";
 import type { CliResult, ParsedCommand } from "./types.ts";
@@ -38,14 +37,15 @@ export function appendCommandRuntimeEvent(
     Effect.match({
       onFailure: (error): CliResult => ({
         ...result,
-        ...(result.ok
-          ? {
-            ok: false,
-            command: command.action.kind,
-            ...entityRefs,
-            error: cliError(CliErrorCode.RuntimeEventLedgerRejected, `${error.sessionId}: ${error.reason}`)
+        warnings: [
+          ...(result.warnings ?? []),
+          {
+            severity: "warning",
+            code: "runtime_event_append_failed",
+            sessionId: error.sessionId,
+            message: `Runtime event append failed after the command result was determined: ${error.reason}`
           }
-          : {})
+        ]
       }),
       onSuccess: (): CliResult => result
     })

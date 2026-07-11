@@ -122,6 +122,7 @@ const parseCases: ReadonlyArray<ParseCase> = [
   { name: "doc generate", argv: ["doc", "generate", "--module", "m5-circulation", "--write"], kind: "doc-generate", fields: { filters: { moduleKey: "m5-circulation", productLine: undefined }, write: true } },
   { name: "doc status", argv: ["doc", "status"], kind: "doc-status" },
   { name: "doc sync dry-run", argv: ["doc", "sync", "--dry-run"], kind: "doc-sync-dry-run" },
+  { name: "doc sync submit", argv: ["doc", "sync", "--submit"], kind: "doc-sync-submit" },
   { name: "task list", argv: ["task", "list"], kind: "task-list", fields: { filters: { missingMaterials: false, includeArchived: false } } },
   {
     name: "task list filters",

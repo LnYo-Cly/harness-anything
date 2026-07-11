@@ -61,7 +61,10 @@ test("daemon method registry classifies every non-hello method exactly once", ()
 test("repo.command.run classification covers every parsed CLI action kind", () => {
   assert.deepEqual(
     repoCommandRunClassifiedActionKinds,
-    commandSpecs.map((spec) => spec.kind).sort()
+    commandSpecs
+      .map((spec) => spec.kind)
+      .filter((kind) => kind !== "doc-sync-submit") // Uses the dedicated repo.doc.sync.submit method.
+      .sort()
   );
 });
 
@@ -465,22 +468,35 @@ test("runtime event append receives the validated repo namespace", async () => {
     services: {
       LocalControllerService: emptyLocalController(),
       TerminalSessionService: createInMemoryTerminalSessionService({ createId: () => "term-1" }),
-      CliCommandService: {
-        runCommand: async (_payload, context) => ({
+      DocSyncService: {
+        submit: async () => ({
           ok: true,
-          schema: "command-receipt/v2",
-          command: context?.repo?.repoId ?? "missing",
-          action: "new-task",
-          summary: "created task",
-          details: {},
-          meta: { generatedAt: "2026-07-07T00:00:00.000Z", compatibility: { legacyReceipt: "CommandReceipt/v1" } }
+          schema: "daemon.doc-sync-submit-result/v1",
+          status: "accepted",
+          intentId: "intent-event-repo",
+          baseLedgerSha: "base",
+          appliedLedgerSha: "applied",
+          appliedChanges: []
         })
       }
     }
   });
   await server.handle(readFixture("hello-compatible.json"));
 
-  const response = await server.handle(commandRunRequest("new-task", "repo-event"));
+  const response = await server.handle({
+    jsonrpc: "2.0",
+    id: "repo-event",
+    method: "repo.doc.sync.submit",
+    params: {
+      repo: { repoId: "canonical" },
+      payload: {
+        baseLedgerSha: "base",
+        intentId: "intent-event-repo",
+        declaredIntent: "prose-edit",
+        changes: []
+      }
+    }
+  });
   const receipt = resultReceipt(response);
 
   assert.equal(receipt.ok, true);

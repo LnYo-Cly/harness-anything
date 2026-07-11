@@ -373,7 +373,7 @@ function createRepoServiceBinding(
   readonly appendRuntimeEvent: ReturnType<typeof makeRuntimeEventAppendPromise>;
 } {
   const rootDir = repo.canonicalRoot;
-  const identity = loadDaemonIdentity(rootDir, layoutOverrides);
+  const identity = loadDaemonIdentity(rootDir, layoutOverrides, statusOptions?.endpoint);
   const taskWriter = selectCliAdapterProvider("task.lifecycle").createLifecycleEngine({
     rootDir,
     layoutOverrides,
@@ -387,7 +387,6 @@ function createRepoServiceBinding(
   });
   const taskHolderService = makeTaskHolderService({ rootInput: { rootDir, layoutOverrides } });
   const cliCommandService = createCliCommandService(runtime, commandOptions);
-  const docSyncService = makeDocSyncService({ rootDir, layoutOverrides });
   const appendRuntimeEvent = makeRuntimeEventAppendPromise(makeRuntimeEventLedgerService({
     rootInput: { rootDir, layoutOverrides },
     coordinator: makeDaemonQueuedWriteCoordinator(runtime, "runtime-event-protocol")
@@ -414,11 +413,21 @@ function createRepoServiceBinding(
       },
       CliCommandService: cliCommandService,
       DocSyncService: {
-        submit: (request) => runtime.enqueueBackgroundBatch({
-          source: "doc-sync-submit",
-          priority: "normal",
-          run: () => docSyncService.submit(request)
-        })
+        submit: (request, context) => {
+          const actor = context?.actor;
+          const docSyncService = makeDocSyncService({
+            rootDir,
+            layoutOverrides,
+            ...(actor?.primaryEmail ? {
+              commitAuthor: { name: actor.displayName, email: actor.primaryEmail }
+            } : {})
+          });
+          return runtime.enqueueBackgroundBatch({
+            source: "doc-sync-submit",
+            priority: "normal",
+            run: () => docSyncService.submit(request)
+          });
+        }
       }
     },
     appendRuntimeEvent

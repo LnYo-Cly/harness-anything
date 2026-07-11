@@ -208,6 +208,23 @@ export const runtimeDocsCommandSpecs = defineCommandSpecs([
     }
   },
   {
+    "kind": "doc-sync-submit",
+    "usage": "doc sync --submit [--path <authored-relative-path>]... [--json]",
+    "options": [{"flag":"--submit","description":"Submit eligible authored prose through the daemon doc-sync validator and committer."},{"flag":"--path","description":"Submit only this authored-root-relative dirty path; repeat to select multiple owned files."},{"flag":"--json","description":"Emit command-receipt/v2 JSON."}],
+    "summary": "Submit eligible authored prose through the daemon single-writer path.",
+    "examples": ["harness-anything doc sync --submit --path tasks/task_01ABC/task_plan.md --json"],
+    "parse": parseDocArgs,
+    "run": runDocCommand,
+    "receiptContract": {
+      "data": ["report"],
+      "paths": []
+    },
+    "eventPolicy": {
+      "conflictMarkerPreflight": true,
+      "runtimeEvent": "none"
+    }
+  },
+  {
     "kind": "template-list",
     "usage": "template list [--catalog <path>] [--json]",
     "options": [{"flag":"--catalog","description":"Use a template catalog file."},{"flag":"--json","description":"Emit command-receipt/v2 JSON."}],
