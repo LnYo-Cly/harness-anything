@@ -12,6 +12,7 @@ import { taskIdForWriteOp } from "./write-journal-entity.ts";
 import { appendJsonLineDurably, writeFileDurably } from "./write-journal-durable.ts";
 import { rejectTaskWrite, rejectWrite } from "./write-journal-rejection.ts";
 import { resolveContentAddressedBlobPath } from "./content-addressed-blob-store.ts";
+import { assertReservedCodeDocWrite } from "./write-journal-code-doc-policy.ts";
 import { writeDocument } from "./markdown-artifact-store.ts";
 import {
   applyDocumentAppendRecord,
@@ -264,7 +265,9 @@ export function writeTransactionPlan(op: WriteOp): WriteTransactionPlan {
 }
 
 export function validateWriteTransaction(rootInput: HarnessLayoutInput, op: WriteOp): void {
-  writeTransactionPlan(op).validate(rootInput);
+  const plan = writeTransactionPlan(op);
+  assertReservedCodeDocWrite(op, plan.documentWrites());
+  plan.validate(rootInput);
 }
 
 export function applyWriteOp(rootInput: HarnessLayoutInput, op: WriteOp): DocumentWrite | null {

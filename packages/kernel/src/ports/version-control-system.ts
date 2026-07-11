@@ -10,6 +10,7 @@ export interface VersionControlSystem {
   readonly topLevel: (inputPath: string) => string | null;
   readonly isIgnored: (repoRoot: string, relativePath: string) => boolean;
   readonly add: (repoRoot: string, input: { readonly paths: ReadonlyArray<string>; readonly force?: boolean }) => void;
+  readonly workingTreeFiles: (repoRoot: string, paths: ReadonlyArray<string>) => string;
   readonly stagedFiles: (repoRoot: string, paths: ReadonlyArray<string>) => string;
   readonly commit: (repoRoot: string, message: string, author?: VcsCommitAuthor) => void;
   readonly currentHead: (repoRoot: string) => string;

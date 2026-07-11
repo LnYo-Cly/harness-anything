@@ -106,6 +106,7 @@ export function makeLocalLifecycleEngine(options: LocalLifecycleOptions): LocalL
     stageTaskTree: (input) => stageTaskPackageTree(runtimeContext, coordinator, input),
     taskTreeStatus: (input) => taskTreeStatus(runtimeContext, input),
     replaceTaskDocument: (input) => replaceTaskDocument(runtimeContext, coordinator, input),
+    writeCodeDocReconciliation: (input) => writeCodeDocReconciliation(runtimeContext, coordinator, input),
     archiveTask: (input) => archiveTask(runtimeContext, coordinator, input),
     supersedeTask: (input) => supersedeTask(runtimeContext, coordinator, clock, input, options.bindCreateProvenance),
     deleteTask: (input) => deleteTask(runtimeContext, coordinator, input),
@@ -267,6 +268,18 @@ function replaceTaskDocument(
     yield* readIndexEffect(rootInput, input.taskId);
     yield* writeTaskDocument(coordinator, stablePayloadHash, input.taskId, input.path, input.body, { kind: "doc_write" });
     return { taskId: input.taskId, path: input.path } satisfies LocalProgressResult;
+  });
+}
+
+function writeCodeDocReconciliation(
+  rootInput: HarnessLayoutInput,
+  coordinator: WriteCoordinator,
+  input: { readonly taskId: string; readonly body: string }
+): Effect.Effect<LocalProgressResult, EngineError | WriteError> {
+  return Effect.gen(function* () {
+    yield* readIndexEffect(rootInput, input.taskId);
+    yield* writeTaskDocument(coordinator, stablePayloadHash, input.taskId, "code-doc-anchors.json", input.body, { kind: "code_doc_reconcile" });
+    return { taskId: input.taskId, path: "code-doc-anchors.json" } satisfies LocalProgressResult;
   });
 }
 

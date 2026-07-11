@@ -181,16 +181,11 @@ function writeReview(rootDir: string, taskPath: string): void {
 }
 
 function writeCodeDocAnchors(rootDir: string, taskPath: string, taskId: string, sha = ensureAnchorCommit(rootDir)): void {
-  writeFileSync(path.join(rootDir, taskPath, "code-doc-anchors.json"), `${JSON.stringify({
-    schema: "code-doc-reconciliation/v1",
-    taskId,
-    records: [{
-      id: "A4-001",
-      ledgerPath: "closeout.md",
-      kind: "closeout",
-      anchors: [{ kind: "path", sha, path: "evidence/code-doc-anchor.txt" }]
-    }]
-  }, null, 2)}\n`, "utf8");
+  runJson(rootDir, [
+    "task", "code-doc", "reconcile", taskId,
+    "--commit", sha,
+    "--path", "evidence/code-doc-anchor.txt"
+  ]);
 }
 
 function ensureAnchorCommit(rootDir: string): string {
