@@ -85,6 +85,11 @@ export interface WriteTaskDocumentInput extends StageTaskDocumentInput {
   readonly body: string;
 }
 
+export interface WriteCodeDocReconciliationInput {
+  readonly taskId: TaskId;
+  readonly body: string;
+}
+
 export interface TaskReasonInput {
   readonly taskId: TaskId;
   readonly reason: string;
@@ -140,6 +145,7 @@ export interface LocalLifecycleEngine {
   readonly stageTaskTree: (input: StageTaskTreeInput) => Effect.Effect<LocalProgressResult, EngineError | WriteError>;
   readonly taskTreeStatus: (input: StageTaskTreeInput) => Effect.Effect<LocalTaskTreeStatusResult, EngineError | WriteError>;
   readonly replaceTaskDocument: (input: WriteTaskDocumentInput) => Effect.Effect<LocalProgressResult, EngineError | WriteError>;
+  readonly writeCodeDocReconciliation: (input: WriteCodeDocReconciliationInput) => Effect.Effect<LocalProgressResult, EngineError | WriteError>;
   readonly archiveTask: (input: TaskReasonInput) => Effect.Effect<LocalTaskResult, EngineError | WriteError>;
   readonly supersedeTask: (input: SupersedeTaskInput) => Effect.Effect<LocalSupersedeResult, EngineError | WriteError>;
   readonly deleteTask: (input: DeleteTaskInput) => Effect.Effect<LocalDeleteResult, EngineError | WriteError>;

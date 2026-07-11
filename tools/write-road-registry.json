@@ -87,7 +87,7 @@
       "bearing": "task-document",
       "channel": { "pathClass": "doc-sync-allowed", "zoneClass": "task-authored-prose-or-stage" },
       "entry": ["cli", "daemon-rpc", "internal", "gui-review"],
-      "writeKinds": ["doc_write", "doc_stage", "task_tree_stage"],
+      "writeKinds": ["doc_write", "doc_stage", "task_tree_stage", "code_doc_reconcile"],
       "cliActions": ["task-amend", "task-code-doc-reconcile", "task-relate"],
       "callsiteFiles": ["packages/adapters/local/src/task-writes.ts"],
       "directWrites": [

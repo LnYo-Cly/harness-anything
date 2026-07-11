@@ -10,6 +10,7 @@ import { taskEntityId, type WriteError } from "../../src/domain/index.ts";
 import { sha256Text } from "../../src/integrity/stable-hash.ts";
 import type { VersionControlSystem } from "../../src/ports/index.ts";
 import { makeJournaledWriteCoordinator } from "../../src/store/index.ts";
+import { makeLocalVersionControlSystem } from "../../src/store/local-version-control-system.ts";
 import { docWrite, withTempStore, withTempStoreAsync } from "./helpers.ts";
 
 const execFileAsync = promisify(execFile);
@@ -397,6 +398,100 @@ test("double stale lock takeover race keeps a single committer", async () => {
   });
 });
 
+test("WriteCoordinator reserves code-doc-anchors.json for the dedicated operation", () => {
+  withTempStore((rootDir) => {
+    const coordinator = makeJournaledWriteCoordinator({ rootDir });
+    const genericFailure = runWriteFailure(coordinator.enqueue(docWrite("raw-code-doc", "task-1", "code-doc-anchors.json", "{}")));
+    assert.equal(genericFailure._tag, "WriteRejected");
+    assert.match(genericFailure.reason, /reserved machine document/u);
+    assert.match(genericFailure.reason, /ha task code-doc reconcile task-1/u);
+
+    const invalidDedicated = runWriteFailure(coordinator.enqueue({
+      opId: "bad-code-doc",
+      entityId: taskEntityId("task-1"),
+      kind: "code_doc_reconcile",
+      payload: { path: "code-doc-anchors.json", body: "{}" }
+    }));
+    assert.equal(invalidDedicated._tag, "WriteRejected");
+    assert.match(invalidDedicated.reason, /schema code-doc-reconciliation\/v1/u);
+  });
+});
+
+test("WriteCoordinator accepts validated dedicated code-doc writes", () => {
+  withTempStore((rootDir) => {
+    seedCodeDocTaskLedgers(rootDir);
+    const local = makeLocalVersionControlSystem();
+    const harnessRoot = path.join(rootDir, "harness");
+    const coordinator = makeJournaledWriteCoordinator({
+      rootDir,
+      versionControlSystem: {
+        ...local,
+        normalizePath: (inputPath) => path.resolve(inputPath),
+        topLevel: (inputPath) => path.resolve(inputPath).startsWith(harnessRoot) ? harnessRoot : rootDir,
+        isIgnored: () => false,
+        commitExists: () => true,
+        pathExistsAtCommit: () => true
+      }
+    });
+
+    const ack = Effect.runSync(coordinator.enqueue({
+      opId: "valid-code-doc",
+      entityId: taskEntityId("task-1"),
+      kind: "code_doc_reconcile",
+      payload: { path: "code-doc-anchors.json", body: validCodeDocDocument() }
+    }));
+
+    assert.equal(ack.accepted, true);
+  });
+});
+
+test("WriteCoordinator rejects task-tree staging with a hand-written code-doc file", () => {
+  withTempStore((rootDir) => {
+    seedCodeDocTaskLedgers(rootDir);
+    const local = makeLocalVersionControlSystem();
+    const harnessRoot = path.join(rootDir, "harness");
+    const coordinator = makeJournaledWriteCoordinator({
+      rootDir,
+      versionControlSystem: {
+        ...local,
+        normalizePath: (inputPath) => path.resolve(inputPath),
+        topLevel: (inputPath) => path.resolve(inputPath).startsWith(harnessRoot) ? harnessRoot : rootDir,
+        isIgnored: () => false,
+        workingTreeFiles: () => "?? tasks/task-1/code-doc-anchors.json\n"
+      }
+    });
+
+    const failure = runWriteFailure(coordinator.enqueue({
+      opId: "stage-raw-code-doc",
+      entityId: taskEntityId("task-1"),
+      kind: "task_tree_stage",
+      payload: { scope: "task-package" }
+    }));
+
+    assert.equal(failure._tag, "WriteRejected");
+    assert.match(failure.reason, /do not write or stage it directly/u);
+  });
+});
+
+function seedCodeDocTaskLedgers(rootDir: string): void {
+  const taskRoot = path.join(rootDir, "harness/tasks/task-1");
+  mkdirSync(taskRoot, { recursive: true });
+  writeFileSync(path.join(taskRoot, "closeout.md"), "# Closeout\n", "utf8");
+}
+
+function validCodeDocDocument(): string {
+  return `${JSON.stringify({
+    schema: "code-doc-reconciliation/v1",
+    taskId: "task-1",
+    records: [{
+      id: "closeout",
+      ledgerPath: "closeout.md",
+      kind: "closeout",
+      anchors: [{ kind: "path", sha: "0123456789abcdef0123456789abcdef01234567", path: "packages/kernel/src/index.ts" }]
+    }]
+  }, null, 2)}\n`;
+}
+
 function runWriteFailure<A>(effect: Effect.Effect<A, WriteError>): WriteError {
   const result = Effect.runSync(Effect.either(effect));
   assert.equal(result._tag, "Left");
@@ -414,6 +509,7 @@ function fakeVersionControlSystem(repoRoot: string): VersionControlSystem {
     topLevel: (inputPath) => path.resolve(inputPath).startsWith(`${harnessRoot}${path.sep}`) || path.resolve(inputPath) === harnessRoot ? harnessRoot : repoRoot,
     isIgnored: () => false,
     add: () => undefined,
+    workingTreeFiles: () => "",
     stagedFiles: () => "tasks/task-1/notes.md\n",
     commit: () => {
       commitCount += 1;

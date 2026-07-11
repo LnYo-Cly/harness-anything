@@ -24,6 +24,8 @@ import { hashTaskProjectionRows } from "../projection/sqlite-task-projection.ts"
 import { readMarkdownSource } from "../projection/sqlite-task-source.ts";
 import { appendJsonLineDurably, readDurableState, readPayloadRef, writePayloadRef, writeWatermarkDurably, writeFileDurably } from "./write-journal-durable.ts";
 import { assertCommitPlanAddable, commitTouchedPaths } from "./write-journal-git.ts";
+import { makeLocalVersionControlSystem } from "./local-version-control-system.ts";
+import { assertCodeDocGitEvidence, assertNoUncoordinatedCodeDocChange } from "./write-journal-code-doc-policy.ts";
 import { runLedgerMaterializer } from "./ledger-materializer.ts";
 import { assertDirectWriteAllowed, withRepoLocks, WriteLockHeldError } from "./write-journal-locks.ts";
 import { NonTaskWriteEntityError, taskIdForJournalRecord } from "./write-journal-entity.ts";
@@ -292,7 +294,12 @@ function createJournalRecord(rootDir: string, journalPath: string, op: {
 }
 
 function preflightWriteOp(rootDir: string, rootInput: HarnessLayoutInput, op: WriteOp, versionControlSystem?: VersionControlSystem): void {
-  assertCommitPlanAddable(rootDir, writeOpTouchedPaths(rootInput, op), rootInput, { versionControlSystem });
+  const vcs = versionControlSystem ?? makeLocalVersionControlSystem();
+  const plan = assertCommitPlanAddable(rootDir, writeOpTouchedPaths(rootInput, op), rootInput, { versionControlSystem: vcs });
+  assertCodeDocGitEvidence(rootDir, op, vcs);
+  if (op.kind === "task_tree_stage" && plan) {
+    assertNoUncoordinatedCodeDocChange(op, vcs.workingTreeFiles(plan.repoRoot, plan.relativePaths));
+  }
   try {
     assertDocumentWritePathsDoNotCollide(rootInput, documentWritesForWriteOp(op));
   } catch (error) {
@@ -365,7 +372,7 @@ function recordCommitDetail(kind: JournalRecordKind, payload: Record<string, unk
   if (kind === "transition_local" && typeof payload.to === "string") return `-> ${payload.to}`;
   if (kind === "progress_append") return "progress.md";
   if ((kind === "machine_artifact_write" || kind === "machine_artifact_append_jsonl") && typeof payload.path === "string") return payload.path;
-  if ((kind === "doc_write" || kind === "doc_stage") && typeof payload.path === "string") return payload.path;
+  if ((kind === "doc_write" || kind === "doc_stage" || kind === "code_doc_reconcile") && typeof payload.path === "string") return payload.path;
   if (kind === "task_tree_stage") return "task package";
   if (kind === "module_registry_write" && typeof payload.operation === "string") return payload.operation;
   if (kind === "module_scaffold_write") return "scaffold";

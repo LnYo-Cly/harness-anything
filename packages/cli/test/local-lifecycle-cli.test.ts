@@ -622,9 +622,11 @@ function writeFact(rootDir: string, directoryName: string): void {
 }
 
 function writeCodeDocAnchors(rootDir: string, directoryName: string, sha = ensureAnchorCommit(rootDir)): void {
-  const anchors = [{ id: "A4-001", ledgerPath: "closeout.md", kind: "closeout", anchors: [{ kind: "path", sha, path: "evidence/code-doc-anchor.txt" }] }];
-  const body = JSON.stringify({ schema: "code-doc-reconciliation/v1", taskId: directoryName, records: anchors }, null, 2);
-  writeFileSync(path.join(rootDir, "harness/tasks", directoryName, "code-doc-anchors.json"), `${body}\n`, "utf8");
+  runJson(rootDir, [
+    "task", "code-doc", "reconcile", directoryName,
+    "--commit", sha,
+    "--path", "evidence/code-doc-anchor.txt"
+  ]);
 }
 
 function ensureAnchorCommit(rootDir: string): string {

@@ -71,6 +71,10 @@ export interface CommandRunnerEngine {
     readonly path: string;
     readonly body: string;
   }) => EngineEffect<{ readonly taskId: string; readonly path: string }>;
+  readonly writeCodeDocReconciliation: (input: {
+    readonly taskId: string;
+    readonly body: string;
+  }) => EngineEffect<{ readonly taskId: string; readonly path: string }>;
   readonly archiveTask: (input: {
     readonly taskId: string;
     readonly reason: string;

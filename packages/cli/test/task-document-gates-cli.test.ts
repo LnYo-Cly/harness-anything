@@ -103,7 +103,7 @@ test("CLI task-complete rejects fabricated code-doc shas", () => {
     writeReview(rootDir, "task-1");
     writeFact(rootDir, "task-1");
     writeRealCloseout(rootDir, "task-1");
-    writeCodeDocAnchors(rootDir, "task-1", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    writeCodeDocAnchorsRaw(rootDir, "task-1", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
 
     const blocked = runJson(rootDir, ["task-complete", "task-1", "--reviewer", "reviewer-a", "--ci", "passed"], false);
 
@@ -119,7 +119,7 @@ test("CLI task-complete reports the underlying completion write failure", () => 
     writeIndex(rootDir, "task-1", "Complete Task", "in_review", { provenance: false });
     writeReview(rootDir, "task-1");
     writeFact(rootDir, "task-1");
-    writeRealCloseout(rootDir, "task-1");
+    writeRealCloseout(rootDir, "task-1", { coordinatedAnchors: false });
 
     const blocked = runJson(rootDir, ["task-complete", "task-1", "--reviewer", "reviewer-a", "--ci", "passed"], false);
 
@@ -286,7 +286,11 @@ function writeReview(rootDir: string, directoryName: string): void {
   ].join("\n"), "utf8");
 }
 
-function writeRealCloseout(rootDir: string, directoryName: string): void {
+function writeRealCloseout(
+  rootDir: string,
+  directoryName: string,
+  options: { readonly coordinatedAnchors?: boolean } = {}
+): void {
   writeCloseout(rootDir, directoryName, [
     "## Summary",
     "",
@@ -300,7 +304,8 @@ function writeRealCloseout(rootDir: string, directoryName: string): void {
     "",
     "No residual risk accepted."
   ]);
-  writeCodeDocAnchors(rootDir, directoryName);
+  if (options.coordinatedAnchors ?? true) writeCodeDocAnchors(rootDir, directoryName);
+  else writeCodeDocAnchorsRaw(rootDir, directoryName, ensureAnchorCommit(rootDir));
 }
 
 function writeFact(rootDir: string, directoryName: string): void {
@@ -317,6 +322,14 @@ function writeCloseout(rootDir: string, directoryName: string, lines: ReadonlyAr
 }
 
 function writeCodeDocAnchors(rootDir: string, directoryName: string, sha = ensureAnchorCommit(rootDir)): void {
+  runJson(rootDir, [
+    "task", "code-doc", "reconcile", directoryName,
+    "--commit", sha,
+    "--path", "evidence/code-doc-anchor.txt"
+  ]);
+}
+
+function writeCodeDocAnchorsRaw(rootDir: string, directoryName: string, sha: string): void {
   writeFileSync(path.join(rootDir, "harness/tasks", directoryName, "code-doc-anchors.json"), `${JSON.stringify({
     schema: "code-doc-reconciliation/v1",
     taskId: directoryName,

@@ -9,6 +9,7 @@ export type TaskWriteOpKind =
   | "doc_stage"
   | "task_tree_stage"
   | "doc_write"
+  | "code_doc_reconcile"
   | "package_archive"
   | "package_tombstone"
   | "package_reopen"

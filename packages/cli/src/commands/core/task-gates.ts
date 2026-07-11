@@ -90,9 +90,8 @@ function runTaskCodeDocReconcile(
       } satisfies CliResult;
     }
 
-    const write = yield* context.engine.replaceTaskDocument({
+    const write = yield* context.engine.writeCodeDocReconciliation({
       taskId: action.taskId,
-      path: CODE_DOC_RECONCILIATION_DOCUMENT,
       body: draft.body
     });
     return {
