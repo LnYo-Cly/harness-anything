@@ -1,6 +1,8 @@
 import { Effect, Schema } from "effect";
 import {
   DecisionPackageSchema,
+  computeDecisionContentDigest,
+  decisionContentCanonicalization,
   decisionFieldContracts,
   decisionEntityId,
   evaluateEntityDisposition,
@@ -33,7 +35,7 @@ export interface DecisionWriteRequest {
   readonly opIdPrefix?: string;
 }
 
-export type DecisionCreateInput = Omit<DecisionPackage, "provenance"> & {
+export type DecisionCreateInput = Omit<DecisionPackage, "provenance" | "contentPins"> & {
   readonly provenance?: DecisionPackage["provenance"];
 };
 
@@ -104,6 +106,9 @@ export function makeDecisionWriteService(options: DecisionWriteServiceOptions): 
     propose: (request) => {
       if (request.decision.state !== "proposed") {
         return Effect.fail(rejection(request.decision.decision_id, "decision_propose requires state proposed"));
+      }
+      if ("contentPins" in request.decision) {
+        return Effect.fail(rejection(request.decision.decision_id, "decision_propose cannot supply lifecycle-owned contentPins"));
       }
       return bindDecisionCreateProvenance(options, request.decision, timestamp()).pipe(
         Effect.catchAll((error) => Effect.fail(rejection(request.decision.decision_id, error.reason))),
@@ -217,11 +222,23 @@ function transitionDecision(
     const disposition = assertDispositionAllowed(options, `decision/${request.current.decision_id}`, "retire", request.current.decision_id);
     if (disposition) return Effect.fail(disposition);
   }
+  const decidedAt = request.decidedAt ?? fallbackDecidedAt;
   const next: DecisionPackage = {
     ...request.current,
     state: to,
     arbiter: request.arbiter,
-    decidedAt: request.decidedAt ?? fallbackDecidedAt
+    decidedAt,
+    contentPins: [
+      ...(request.current.contentPins ?? []),
+      {
+        action: contentPinAction(kind),
+        state: to,
+        decidedAt,
+        arbiter: request.arbiter,
+        canonicalization: decisionContentCanonicalization,
+        digest: computeDecisionContentDigest(request.current)
+      }
+    ]
   };
   const judgmentOnlySection = kind === "decision_accept" ? judgmentOnlyBodySection(request) : undefined;
   const explicitBody = request.body !== undefined && judgmentOnlySection
@@ -235,6 +252,23 @@ function transitionDecision(
     expectedWatermark: request.current._coordinatorWatermark ?? null,
     ...(request.body === undefined && judgmentOnlySection ? { appendBody: judgmentOnlySection } : {})
   });
+}
+
+function contentPinAction(kind: WriteOpKind): "accept" | "reject" | "defer" | "supersede" | "retire" {
+  switch (kind) {
+    case "decision_accept":
+      return "accept";
+    case "decision_reject":
+      return "reject";
+    case "decision_defer":
+      return "defer";
+    case "decision_supersede":
+      return "supersede";
+    case "decision_retire":
+      return "retire";
+    default:
+      throw new Error(`unsupported decision content pin operation: ${kind}`);
+  }
 }
 
 function acceptEvidenceFloor(decision: DecisionPackage, judgmentOnlyRationale?: string): DecisionWriteRejected | null {

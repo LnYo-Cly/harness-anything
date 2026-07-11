@@ -99,6 +99,30 @@ test("decision package schema rejects contract-critical invalid fixtures", async
   }));
 });
 
+test("decision package content pins are optional for legacy records and validated when present", async () => {
+  const legacy = await readJson(validDecisionFixtureUrl) as Record<string, any>;
+  const decodedLegacy = Schema.decodeUnknownSync(DecisionPackageSchema)(legacy);
+  assert.equal(decodedLegacy.contentPins, undefined);
+
+  const pin = {
+    action: "accept",
+    state: "active",
+    decidedAt: "2026-07-11T00:01:00.000Z",
+    arbiter: { kind: "human", id: "zeyuli" },
+    canonicalization: "decision-content/v1",
+    digest: "sha256:e216d18ccaa40138e579485bafaa107c8a3cc1a47b995b7c6bb8c9507ef5c4a2"
+  };
+  assert.doesNotThrow(() => Schema.decodeUnknownSync(DecisionPackageSchema)({ ...legacy, contentPins: [pin] }));
+  assert.throws(() => Schema.decodeUnknownSync(DecisionPackageSchema)({
+    ...legacy,
+    contentPins: [{ ...pin, digest: "sha256:not-a-digest" }]
+  }));
+  assert.throws(() => Schema.decodeUnknownSync(DecisionPackageSchema)({
+    ...legacy,
+    contentPins: [{ ...pin, state: "retired" }]
+  }));
+});
+
 test("entity relations schema rejects contract-critical invalid fixtures", async () => {
   const invalidEndpoint = await readJson(invalidEntityRelationsFixtureUrl);
   const base = await readJson(validEntityRelationsFixtureUrl) as Record<string, any>;

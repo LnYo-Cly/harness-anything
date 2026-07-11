@@ -40,6 +40,7 @@ export const decisionFieldContracts = {
   proposedAt: immutable("proposal timestamp is provenance and cannot be amended", show("decision.proposedAt")),
   arbiter: lifecycle("decision lifecycle transitions own arbiter", [lifecycleWrite("decision-accept/reject/defer/supersede/retire")], show("decision.arbiter")),
   decidedAt: lifecycle("decision lifecycle transitions own decidedAt", [lifecycleWrite("decision-accept/reject/defer/supersede/retire")], projection("decidedAt", true), show("decision.decidedAt")),
+  contentPins: lifecycle("decision lifecycle transitions append immutable signed-content pins", [lifecycleWrite("decision-accept/reject/defer/supersede/retire")], show("decision.contentPins")),
   provenance: immutable("provenance is bound by create/write services, not amended as content", show("decision.provenance")),
   question: immutable("changing the core question changes the decision identity; use supersede", projection("question", true), show("decision.question")),
   chosen: amendable([amendWrite("append")], projection("chosen", false), show("decision.chosen")),
