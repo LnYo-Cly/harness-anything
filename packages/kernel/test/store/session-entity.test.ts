@@ -82,7 +82,7 @@ test("session manifests coordinate compact state, immutable transcript bodies, a
   });
 });
 
-test("session reader marks existing transcript markdown as legacy without rewriting it", () => {
+test("session reader rejects legacy transcript markdown after cutover", () => {
   withTempStore((rootDir) => {
     const legacyBody = [
       "---",
@@ -105,19 +105,7 @@ test("session reader marks existing transcript markdown as legacy without rewrit
     mkdirSync(path.dirname(sessionPath), { recursive: true });
     writeFileSync(sessionPath, legacyBody, "utf8");
 
-    assert.deepEqual(readSessionEntityDocument(rootDir, "legacy-session"), {
-      format: "legacy",
-      legacy: true,
-      metadata: {
-        schema: "provenance-session/v1",
-        sessionId: "legacy-session",
-        runtime: "claude-code",
-        source: "runtime",
-        detectedAt: "2026-07-10T01:00:00.000Z",
-        exportedAt: "2026-07-10T01:05:00.000Z"
-      },
-      body: legacyBody
-    });
+    assert.throws(() => readSessionEntityDocument(rootDir, "legacy-session"));
     assert.equal(readFileSync(sessionPath, "utf8"), legacyBody);
     const projectionPath = path.join(rootDir, ".harness/cache/legacy-session-projection.sqlite");
     assert.deepEqual(projectDeclaredEntities(rootDir, sessionEntityDeclaration, projectionPath).rows, []);

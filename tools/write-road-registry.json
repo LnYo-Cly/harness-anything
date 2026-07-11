@@ -281,8 +281,8 @@
       "writeKinds": ["doc_write", "machine_artifact_write"],
       "machineArtifactBoundaries": ["provenance-session"],
       "cliActions": ["session-backfill", "session-export", "session-sync"],
-      "callsiteFiles": ["packages/cli/src/commands/core/session.ts"],
-      "evidence": ["packages/application/src/provenance-session-exporter.ts:135", "packages/kernel/src/entity/declaration.ts:103", "packages/cli/src/commands/core/session.ts:114"],
+      "callsiteFiles": ["packages/kernel/src/entity/declaration.ts"],
+      "evidence": ["packages/application/src/provenance-session-exporter.ts:134", "packages/kernel/src/entity/declaration.ts:53", "packages/cli/src/commands/core/session.ts:16", "packages/cli/src/commands/core/session.ts:91", "packages/cli/src/commands/core/session-cutover.ts:38"],
       "freshness": "coordinated-manifest-plus-content-addressed-blob-ref"
     },
     {

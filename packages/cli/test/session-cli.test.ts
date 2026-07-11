@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -75,7 +75,7 @@ test("CLI session export fails closed without writing when a runtime transcript 
   });
 });
 
-test("CLI session sync writes existing untracked session exports through the journal", () => {
+test("CLI session sync dry-runs and idempotently converts legacy exports to Session Entity manifests", () => {
   withTempRoot((rootDir) => {
     const harnessRoot = path.join(rootDir, "harness");
     mkdirSync(path.join(harnessRoot, "sessions"), { recursive: true });
@@ -94,20 +94,32 @@ test("CLI session sync writes existing untracked session exports through the jou
       ""
     ].join("\n"));
 
-    const synced = runJson(rootDir, ["session", "sync"]);
+    const planned = runJson(rootDir, ["session", "sync"]);
+    assert.equal(planned.ok, true);
+    assert.equal(planned.report.mode, "dry-run");
+    assert.equal(planned.report.sessions.needsBackfill, 1);
+    assert.match(readFileSync(path.join(harnessRoot, "sessions", "manual-session.md"), "utf8"), /provenance-session\/v1/u);
 
+    const synced = runJson(rootDir, ["session", "sync", "--apply"]);
     assert.equal(synced.ok, true);
     assert.equal(synced.command, "session-sync");
     assert.equal(synced.rows, 1);
-    assert.equal(synced.report.git.committed, true);
-    assert.equal(synced.report.git.coordinator, "write-journal");
+    assert.equal(synced.report.mode, "apply");
+    assert.equal(synced.report.sessions.applied, 1);
+    const firstManifest = readFileSync(path.join(harnessRoot, "sessions", "manual-session.md"), "utf8");
+    assert.doesNotMatch(firstManifest, /provenance-session\/v1/u);
+    assert.equal(readSessionEntity(rootDir, "manual-session").body.includes("# Session manual-session"), true);
     assert.match(writeWatermarkBody(rootDir), /"schema":"write-watermark\/v1"/u);
     assert.match(writeWatermarkBody(rootDir), /session-sync-0/u);
+
+    const repeated = runJson(rootDir, ["session", "sync", "--apply"]);
+    assert.equal(repeated.report.sessions.applied, 0);
+    assert.equal(readFileSync(path.join(harnessRoot, "sessions", "manual-session.md"), "utf8"), firstManifest);
     assert.equal(gitStatus(harnessRoot), "");
   });
 });
 
-test("CLI session sync routes structured manifests through declared entity writes", () => {
+test("CLI session sync leaves existing Session Entity manifests untouched", () => {
   withTempRoot((rootDir) => {
     const harnessRoot = path.join(rootDir, "harness");
     mkdirSync(path.join(harnessRoot, "sessions"), { recursive: true });
@@ -134,16 +146,89 @@ test("CLI session sync routes structured manifests through declared entity write
       }
     }, null, 2)}\n`);
 
-    const synced = runJson(rootDir, ["session", "sync"]);
+    const before = readFileSync(path.join(harnessRoot, "sessions", "synced-manifest.md"), "utf8");
+    const synced = runJson(rootDir, ["session", "sync", "--apply"]);
 
     assert.equal(synced.ok, true);
-    const payloadRoot = path.join(rootDir, ".harness", "write-journal", "payloads");
-    const payloadFile = readdirSync(payloadRoot).find((entry) => entry.endsWith(".json"));
-    assert.ok(payloadFile);
-    const payload = JSON.parse(readFileSync(path.join(payloadRoot, payloadFile), "utf8"));
-    assert.equal(payload.entityDocument.declaration.kind, "session");
-    assert.equal("boundary" in payload, false);
-    assert.equal(gitStatus(harnessRoot), "");
+    assert.equal(synced.report.sessions.needsBackfill, 0);
+    assert.equal(synced.report.sessions.alreadyPresent, 1);
+    assert.equal(synced.report.sessions.applied, 0);
+    assert.equal(readFileSync(path.join(harnessRoot, "sessions", "synced-manifest.md"), "utf8"), before);
+    assert.match(gitStatus(harnessRoot), /\?\? (?:objects|sessions)\//u);
+  });
+});
+
+test("CLI session sync keeps uncertain Runtime Event associations as candidates", () => {
+  withTempRoot((rootDir) => {
+    const eventsRoot = path.join(rootDir, ".harness", "generated", "runtime-events");
+    mkdirSync(eventsRoot, { recursive: true });
+    writeFileSync(path.join(eventsRoot, "runtime-session.jsonl"), [
+      JSON.stringify(runtimeEvent("evt-task", { taskId: "task_01KX7H00000000000000000000" })),
+      JSON.stringify(runtimeEvent("evt-unknown", {})),
+      ""
+    ].join("\n"));
+
+    const planned = runJson(rootDir, ["session", "sync"]);
+
+    assert.equal(planned.report.executionCandidates.length, 2);
+    assert.deepEqual(planned.report.executionCandidates.map((candidate: Record<string, unknown>) => ({
+      taskId: candidate.taskId,
+      confidence: candidate.confidence,
+      disposition: candidate.disposition
+    })), [
+      { taskId: "task_01KX7H00000000000000000000", confidence: "medium", disposition: "candidate" },
+      { taskId: null, confidence: "low", disposition: "candidate" }
+    ]);
+    assert.equal(existsSync(path.join(rootDir, "harness", "tasks", "task_01KX7H00000000000000000000", "executions")), false);
+  });
+});
+
+test("CLI session sync seeds only active Holder v1 evidence and keeps released history unknown", () => {
+  withTempRoot((rootDir) => {
+    const activeTask = "task_01KX7H00000000000000000000";
+    const releasedTask = "task_01KX7H00000000000000000002";
+    writeActiveTask(rootDir, activeTask);
+    writeActiveTask(rootDir, releasedTask);
+    const holdersRoot = path.join(rootDir, ".harness", "task-holders");
+    mkdirSync(holdersRoot, { recursive: true });
+    writeFileSync(path.join(holdersRoot, `${activeTask}.json`), JSON.stringify({
+      schema: "task-holder/v1",
+      taskId: activeTask,
+      holder: {
+        principal: { personId: "person_zeyu" },
+        executor: { kind: "agent", id: "codex" },
+        responsibleHuman: "person:person_zeyu"
+      },
+      acquiredVia: "claim",
+      acquiredAt: "2026-07-04T00:00:00.000Z",
+      leaseExpiresAt: "2099-07-04T01:00:00.000Z",
+      releasedAt: null,
+      updatedAt: "2026-07-04T00:00:00.000Z",
+      version: "v1"
+    }));
+    writeFileSync(path.join(holdersRoot, `${releasedTask}.json`), JSON.stringify({
+      schema: "task-holder/v1",
+      taskId: releasedTask,
+      holder: null,
+      acquiredVia: null,
+      acquiredAt: null,
+      leaseExpiresAt: null,
+      releasedAt: "2026-07-04T02:00:00.000Z",
+      updatedAt: "2026-07-04T02:00:00.000Z",
+      version: "v2"
+    }));
+
+    const planned = runJson(rootDir, ["session", "sync"]);
+
+    assert.deepEqual(planned.report.holderBackfill.map((entry: Record<string, unknown>) => ({
+      taskId: entry.taskId,
+      disposition: entry.disposition,
+      confidence: entry.confidence,
+      worker: entry.worker
+    })), [
+      { taskId: activeTask, disposition: "seed_active_execution", confidence: "high", worker: "codex" },
+      { taskId: releasedTask, disposition: "unknown", confidence: "low", worker: null }
+    ]);
   });
 });
 
@@ -254,4 +339,42 @@ function gitStatus(harnessRoot: string): string {
 
 function writeWatermarkBody(rootDir: string): string {
   return readFileSync(path.join(rootDir, ".harness", "write-journal", "watermark.json"), "utf8");
+}
+
+function runtimeEvent(eventId: string, linkage: { readonly taskId?: string }): Record<string, unknown> {
+  return {
+    schema: "runtime-event/v1",
+    eventId,
+    recordedAt: "2026-07-04T00:00:00.000Z",
+    kind: "result",
+    session: {
+      sessionId: "runtime-session",
+      runtime: "codex",
+      ...linkage,
+      executionId: null,
+      reviewId: null
+    },
+    turn: null,
+    step: null,
+    tool: null,
+    approval: null,
+    interrupt: null,
+    result: { status: "succeeded" },
+    cost: null
+  };
+}
+
+function writeActiveTask(rootDir: string, taskId: string): void {
+  const taskRoot = path.join(rootDir, "harness", "tasks", taskId);
+  mkdirSync(taskRoot, { recursive: true });
+  writeFileSync(path.join(taskRoot, "INDEX.md"), [
+    "---",
+    "schema: task-package/v2",
+    `task_id: ${taskId}`,
+    "lifecycle:",
+    "  engine: local",
+    "  status: active",
+    "---",
+    ""
+  ].join("\n"));
 }

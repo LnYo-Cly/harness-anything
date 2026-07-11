@@ -502,7 +502,7 @@ test("provenance session exporter fails visibly for missing or unsafe session id
   }
 });
 
-test("provenance session exporter rejects an existing runtime session without conversation text", async () => {
+test("provenance session exporter rejects legacy session markdown after cutover", async () => {
   const rootDir = createHarnessRoot();
   try {
     const sessionsRoot = path.join(rootDir, "harness", "sessions");
@@ -530,7 +530,7 @@ test("provenance session exporter rejects an existing runtime session without co
 
     const result = await runEffectExit(exporter.readById("empty-runtime-session"));
     assert.equal(result._tag, "Failure");
-    assert.match(String(result.cause), /session transcript unavailable: empty-runtime-session/u);
+    assert.match(String(result.cause), /session-entity\/v1/u);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

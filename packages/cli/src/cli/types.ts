@@ -234,7 +234,7 @@ export interface ParsedCommand {
     | { readonly kind: "materializer-run"; readonly dryRun: boolean }
     | { readonly kind: "session-export"; readonly sessionId?: string; readonly runtime?: SessionExportRuntime; readonly source?: SessionExportSource; readonly detectedAt?: string; readonly user?: string; readonly transcriptFile?: string }
     | { readonly kind: "session-backfill"; readonly runtime?: SessionExportRuntime; readonly limit?: number }
-    | { readonly kind: "session-sync" }
+    | { readonly kind: "session-sync"; readonly mode: "dry-run" | "apply" }
     | { readonly kind: "doc-list"; readonly filters: DocmapFilters }
     | { readonly kind: "doc-map"; readonly filters: DocmapFilters }
     | { readonly kind: "doc-generate"; readonly filters: DocmapFilters; readonly write: boolean }

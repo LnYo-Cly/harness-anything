@@ -28,13 +28,20 @@ test("CLI exposes the projection-backed session execution task review and audit 
   });
 });
 
-test("projection-backed task readers return empty results for tasks without execution entities", () => {
+test("projection-backed task readers report missing coverage for tasks without execution entities", () => {
   withTempRoot((rootDir) => {
     writeTask(rootDir, taskId, "active");
 
     assert.deepEqual(runJson(rootDir, ["task", "trace", taskId]).report.trace.executions, []);
     assert.equal(runJson(rootDir, ["execution", "list", "--task", taskId]).rows, 0);
-    assert.equal(runJson(rootDir, ["audit", "provenance", "--task", taskId]).report.audit.coverage, "complete");
+    const audit = runJson(rootDir, ["audit", "provenance", "--task", taskId]).report.audit;
+    assert.equal(audit.coverage, "incomplete");
+    assert.deepEqual(audit.findings, [{
+      coverage: "missing",
+      kind: "task_execution_missing",
+      taskId,
+      detail: `Task ${taskId} has no Execution provenance.`
+    }]);
   });
 });
 

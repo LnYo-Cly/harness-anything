@@ -152,7 +152,7 @@ function readSessionDocument(
     try: () => {
       const target = resolveSessionPath(rootInput, sessionId);
       const result = readSessionEntity(rootInput, sessionId);
-      const metadata = result.format === "manifest" ? result.manifest : result.metadata;
+      const metadata = result.manifest;
       assertRuntime(metadata.runtime);
       assertSource(metadata.source);
       return {

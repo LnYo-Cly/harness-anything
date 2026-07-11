@@ -104,15 +104,18 @@ export const runtimeDocsCommandSpecs = defineCommandSpecs([
   },
   {
     "kind": "session-sync",
-    "usage": "session sync [--json]",
-    "options": [{"flag":"--json","description":"Emit command-receipt/v2 JSON."}],
-    "summary": "Synchronize existing managed session markdown files under harness/sessions through the write journal.",
-    "examples": ["harness-anything session sync --json"],
+    "usage": "session sync [--apply] [--json]",
+    "options": [{"flag":"--apply","description":"Apply the one-time conversion; omission performs a dry-run."},{"flag":"--json","description":"Emit command-receipt/v2 JSON."}],
+    "summary": "Dry-run or apply the one-time conversion of legacy session markdown into compact Session Entity manifests.",
+    "examples": ["harness-anything session sync --json", "harness-anything session sync --apply --json"],
     "parse": parseSessionArgs,
     "run": runSessionCommand,
     "receiptContract": {
       "data": ["rows", "report"],
-      "paths": ["primary"]
+      "paths": [],
+      "optionalPaths": {
+        "primary": "Present when at least one legacy Session requires conversion."
+      }
     },
     "eventPolicy": {
       "conflictMarkerPreflight": true,

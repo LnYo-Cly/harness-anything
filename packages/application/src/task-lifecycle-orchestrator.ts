@@ -122,26 +122,39 @@ export function makeTaskLifecycleOrchestrator(options: TaskLifecycleOrchestrator
       return { ok: true, taskId: payload.taskId, path: staged.path, report: review.report, reviewContract: review.reviewContract };
     }),
     completeTask: (payload) => Effect.gen(function* () {
-      const review = yield* reviewTask(options.artifactStore, payload.taskId, payload.reviewerId, options.now);
-      if (!review.ok) {
-        if (review.error.code === "task_fact_required") return review;
-        return {
-          ok: false,
-          taskId: payload.taskId,
-          report: review.report,
-          issues: review.issues,
-          error: {
-            code: "review_not_passed",
-            hint: "Task completion requires a passed task-review gate."
-          }
-        } satisfies TaskLifecycleResult;
+      const executionBearing = yield* taskHasExecutionDocuments(options.artifactStore, payload.taskId);
+      let reviewContract: VerifierBackedReviewContract | undefined;
+      if (executionBearing) {
+        const factGate = yield* validateTaskFactGate(options.artifactStore, payload.taskId);
+        if (factGate) return factGate;
+      } else {
+        const review = yield* reviewTask(options.artifactStore, payload.taskId, payload.reviewerId, options.now);
+        if (!review.ok) {
+          if (review.error.code === "task_fact_required") return review;
+          return {
+            ok: false,
+            taskId: payload.taskId,
+            report: review.report,
+            issues: review.issues,
+            error: {
+              code: "review_not_passed",
+              hint: "Task completion requires a passed task-review gate."
+            }
+          } satisfies TaskLifecycleResult;
+        }
+        reviewContract = review.reviewContract;
       }
 
       const projection = readTaskProjection({ rootDir: options.rootDir, layoutOverrides: options.layoutOverrides });
       const row = projection.rows.find((item) => item.taskId === payload.taskId);
       if (!row) return taskFailure(payload.taskId, "task_not_found", `task not found: ${payload.taskId}`);
 
-      const documentPlaceholder = yield* validateCompletionDocumentPlaceholders(options.artifactStore, payload.taskId, options.documentPlaceholderPolicy);
+      const documentPlaceholder = yield* validateCompletionDocumentPlaceholders(
+        options.artifactStore,
+        payload.taskId,
+        options.documentPlaceholderPolicy,
+        !executionBearing
+      );
       if (documentPlaceholder) return documentPlaceholder;
 
       const codeDocReconciliation = yield* validateCodeDocReconciliation(options.artifactStore, options.rootDir, payload.taskId, options.codeDocVersionControlSystem);
@@ -199,7 +212,7 @@ export function makeTaskLifecycleOrchestrator(options: TaskLifecycleOrchestrator
             executionId: completion.result.executionId,
             status: "done",
             completionGate,
-            reviewContract: review.reviewContract
+            ...(reviewContract ? { reviewContract } : {})
           } satisfies TaskLifecycleResult;
         }
       } else if (yield* taskHasExecutionDocuments(options.artifactStore, payload.taskId)) {
@@ -221,7 +234,7 @@ export function makeTaskLifecycleOrchestrator(options: TaskLifecycleOrchestrator
         taskId: payload.taskId,
         status: status.status,
         completionGate,
-        reviewContract: review.reviewContract
+        ...(reviewContract ? { reviewContract } : {})
       } satisfies TaskLifecycleResult;
     })
   };
@@ -253,7 +266,8 @@ function stageTaskTree(
 function validateCompletionDocumentPlaceholders(
   artifactStore: Pick<ArtifactStore, "readTaskPackage">,
   taskId: string,
-  policy: TaskDocumentPlaceholderPolicy | undefined
+  policy: TaskDocumentPlaceholderPolicy | undefined,
+  checkLegacyReview: boolean
 ): Effect.Effect<TaskLifecycleFailure | null> {
   return Effect.gen(function* () {
     const closeout = policy ? yield* readTaskDocument(artifactStore, taskId, "closeout.md") : null;
@@ -261,9 +275,11 @@ function validateCompletionDocumentPlaceholders(
       return taskFailure(taskId, "closeout_placeholder", "Replace closeout.md template placeholders before completing the task.");
     }
 
-    const review = yield* readTaskDocument(artifactStore, taskId, "review.md");
-    if (review !== null && isReviewPlaceholderMarkdown(review)) {
-      return taskFailure(taskId, "review_placeholder", "Replace the initial review.md placeholder with an actual review result before completing the task.");
+    if (checkLegacyReview) {
+      const review = yield* readTaskDocument(artifactStore, taskId, "review.md");
+      if (review !== null && isReviewPlaceholderMarkdown(review)) {
+        return taskFailure(taskId, "review_placeholder", "Replace the initial review.md placeholder with an actual review result before completing the task.");
+      }
     }
 
     return null;
