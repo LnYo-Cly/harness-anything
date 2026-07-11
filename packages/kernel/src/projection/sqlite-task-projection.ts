@@ -2,6 +2,11 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { createHarnessRuntimeContext } from "../layout/index.ts";
 import { resolveHarnessLayout } from "../layout/index.ts";
+import { executionDeclaration } from "../entity/execution-declaration.ts";
+import { reviewDeclaration } from "../entity/review-declaration.ts";
+import { sessionEntityDeclaration } from "../entity/session.ts";
+import { sha256Text } from "../integrity/stable-hash.ts";
+import { discoverDeclaredEntityRows, projectDeclaredEntities, readDeclaredProjectionRows } from "./entity-declaration-projection.ts";
 import { buildCheckReport, hardFail, runPostMergeChecks, warning } from "./post-merge-checks.ts";
 import type { FactAnchorRow, RelationCoverageRow, RelationGraphEdgeRow } from "./relation-graph-projection.ts";
 import { buildRelationGraphProjection } from "./relation-graph-projection.ts";
@@ -51,9 +56,10 @@ export function rebuildTaskProjection(options: TaskProjectionOptions): Projectio
   const decisionRows = readDecisionProjectionRows(runtimeContext);
   const rowsHash = hashExactRows(rows);
   const decisionRowsHash = hashDecisionProjectionRows(decisionRows);
+  const sourceHash = projectionSourceHash(source.hash, runtimeContext);
   const relationGraph = buildRelationGraphProjection(runtimeContext);
   writeProjectionDatabase(projectionPath, rows, decisionRows, {
-    sourceHash: source.hash,
+    sourceHash,
     rowsHash,
     decisionRowsHash
   }, {
@@ -61,6 +67,9 @@ export function rebuildTaskProjection(options: TaskProjectionOptions): Projectio
     coverageRows: relationGraph.coverageRows,
     factAnchors: relationGraph.factAnchors
   }, options.taskFieldExtensions);
+  projectDeclaredEntities(runtimeContext, sessionEntityDeclaration, projectionPath);
+  projectDeclaredEntities(runtimeContext, executionDeclaration, projectionPath);
+  projectDeclaredEntities(runtimeContext, reviewDeclaration, projectionPath);
   return {
     rows,
     warnings: source.warnings
@@ -108,12 +117,23 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
     return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
   }
 
-  if (existing.meta.sourceHash !== source.hash) {
+  if (existing.meta.sourceHash !== projectionSourceHash(source.hash, runtimeContext)) {
     warnings.push(warning(
       "generated-cache",
       "projection_stale",
       "Projection cache was stale and has been rebuilt from markdown.",
       "Run harness-anything governance rebuild after authored task changes or merges."
+    ));
+    const rebuilt = rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions });
+    return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
+  }
+
+  if (!declaredProjectionMatches(runtimeContext, projectionPath)) {
+    warnings.push(hardFail(
+      "generated-cache",
+      "projection_tampered",
+      "Declared entity projection rows no longer match authored entity state.",
+      "Discard the generated cache and rebuild it from authored entities; do not merge generated projection edits."
     ));
     const rebuilt = rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions });
     return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
@@ -148,6 +168,25 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
     rows: [...existing.rows].sort(compareRows),
     warnings
   };
+}
+
+function projectionSourceHash(taskSourceHash: string, rootInput: ReturnType<typeof createHarnessRuntimeContext>): string {
+  const entityRows = [sessionEntityDeclaration, executionDeclaration, reviewDeclaration].map((declaration) => ({
+    table: declaration.projection.table,
+    rows: discoverDeclaredEntityRows(rootInput, declaration)
+  }));
+  return sha256Text(JSON.stringify({ taskSourceHash, entityRows }));
+}
+
+function declaredProjectionMatches(rootInput: ReturnType<typeof createHarnessRuntimeContext>, projectionPath: string): boolean {
+  try {
+    return [sessionEntityDeclaration, executionDeclaration, reviewDeclaration].every((declaration) =>
+      JSON.stringify(readDeclaredProjectionRows(projectionPath, declaration)) ===
+      JSON.stringify(discoverDeclaredEntityRows(rootInput, declaration))
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function queryTaskProjection(options: TaskProjectionOptions & { readonly filters: TaskProjectionQueryFilters }): ProjectionReadResult {

@@ -66,6 +66,7 @@ test("session manifests coordinate compact state, immutable transcript bodies, a
     assert.equal(readFileSync(path.join(rootDir, bodyRef.ref), "utf8"), body);
 
     const projectionPath = path.join(rootDir, ".harness/cache/session-projection.sqlite");
+    writeFileSync(path.join(rootDir, "harness/sessions/README.md"), "# Sessions\n");
     const projected = projectDeclaredEntities(rootDir, sessionEntityDeclaration, projectionPath);
     assert.deepEqual(projected.rows, [{
       session_id: "ses_1",
@@ -73,7 +74,9 @@ test("session manifests coordinate compact state, immutable transcript bodies, a
       archive_status: "complete",
       runtime: "codex",
       exported_at: "2026-07-11T01:05:00.000Z",
-      body_sha256: bodyRef.sha256
+      body_sha256: bodyRef.sha256,
+      body_ref_json: JSON.stringify(manifest.bodyRef),
+      snapshot_json: JSON.stringify(manifest.snapshot)
     }]);
     assert.deepEqual(readDeclaredProjectionRows(projectionPath, sessionEntityDeclaration), projected.rows);
   });

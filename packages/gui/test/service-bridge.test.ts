@@ -117,6 +117,19 @@ test("GUI daemon bridge rejects malformed payload contracts before request dispa
   assert.equal(requests, 0);
 });
 
+test("GUI daemon bridge exposes execution and review projection readers", async () => {
+  const routeIds: string[] = [];
+  const bridge = createGuiServiceBridgeForDaemon(async (route) => {
+    routeIds.push(route.id);
+    return { ok: true, details: { data: { ok: true, routeId: route.id } } };
+  });
+
+  assert.equal((await bridge.invoke("getTaskExecutions", { taskId: "task-1" }) as { readonly routeId?: string }).routeId, "executions.taskList");
+  assert.equal((await bridge.invoke("getExecutionDetail", { executionId: "exe-1" }) as { readonly routeId?: string }).routeId, "executions.detail");
+  assert.equal((await bridge.invoke("getReviewDetail", { reviewId: "rev-1" }) as { readonly routeId?: string }).routeId, "reviews.detail");
+  assert.deepEqual(routeIds, ["executions.taskList", "executions.detail", "reviews.detail"]);
+});
+
 test("GUI service bridge reaches application service through the daemon client", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "ha-gui-daemon-"));
   try {

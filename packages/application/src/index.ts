@@ -325,6 +325,65 @@ export interface DecisionIdPayload {
   readonly decisionId: string;
 }
 
+export interface ExecutionIdPayload {
+  readonly executionId: string;
+}
+
+export interface ProjectionJsonObject { readonly [key: string]: ProjectionJsonValue }
+export type ProjectionJsonValue = string | number | boolean | null | ReadonlyArray<ProjectionJsonValue> | ProjectionJsonObject;
+
+export interface ExecutionProjectionRow {
+  readonly executionId: string;
+  readonly taskRef: string;
+  readonly taskId: string;
+  readonly state: string;
+  readonly executor: ProjectionJsonValue;
+  readonly primaryActor: ProjectionJsonValue;
+  readonly claimedAt: string;
+  readonly submittedAt: string | null;
+  readonly closedAt: string | null;
+  readonly sessionBindings: ReadonlyArray<ProjectionJsonObject>;
+  readonly outputs: ReadonlyArray<ProjectionJsonValue>;
+  readonly submission: ProjectionJsonValue;
+}
+
+export interface ReviewProjectionRow {
+  readonly reviewId: string;
+  readonly taskRef: string;
+  readonly taskId: string;
+  readonly executionRef: string;
+  readonly executionId: string;
+  readonly verdict: string;
+  readonly reviewerActor: ProjectionJsonValue;
+  readonly reviewerSessionRef: string;
+  readonly findings: string;
+  readonly archiveWarningsAcknowledged: boolean;
+  readonly reviewedAt: string;
+}
+
+export interface ReviewIdPayload {
+  readonly reviewId: string;
+}
+
+export interface TaskExecutionListSuccess extends LocalControllerSuccess {
+  readonly taskId: string;
+  readonly executions: ReadonlyArray<ExecutionProjectionRow>;
+}
+
+export type TaskExecutionListResult = TaskExecutionListSuccess | LocalControllerFailure;
+
+export interface ExecutionDetailSuccess extends LocalControllerSuccess {
+  readonly execution: ExecutionProjectionRow;
+}
+
+export type ExecutionDetailResult = ExecutionDetailSuccess | LocalControllerFailure;
+
+export interface ReviewDetailSuccess extends LocalControllerSuccess {
+  readonly review: ReviewProjectionRow;
+}
+
+export type ReviewDetailResult = ReviewDetailSuccess | LocalControllerFailure;
+
 export interface FactProjectionRow {
   readonly schema: "task-fact-row/v1";
   readonly ref: string;
@@ -405,6 +464,9 @@ export interface LocalControllerService {
   readonly getRelationGraph: () => RelationGraphReadResult;
   readonly getDecisions: () => DecisionListResult;
   readonly getDecisionDetail: (payload: DecisionIdPayload) => DecisionDetailResult;
+  readonly getTaskExecutions: (payload: TaskIdPayload) => TaskExecutionListResult;
+  readonly getExecutionDetail: (payload: ExecutionIdPayload) => ExecutionDetailResult;
+  readonly getReviewDetail: (payload: ReviewIdPayload) => ReviewDetailResult;
   readonly getTaskFacts: (payload: TaskIdPayload) => Promise<TaskFactListResult>;
   readonly setTaskStatus: (payload: SetTaskStatusPayload) => Promise<LocalControllerResult>;
   readonly reviewTask: (payload: TaskIdPayload) => Promise<LocalControllerResult>;

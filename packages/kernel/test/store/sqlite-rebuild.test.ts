@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Effect, Option } from "effect";
-import { checkTaskProjection, hashTaskProjectionRows, queryDecisionProjection, readTaskProjection, rebuildTaskProjection } from "../../src/index.ts";
+import { auditTaskProvenance, checkTaskProjection, hashTaskProjectionRows, queryDecisionProjection, queryTaskExecutionTrace, readTaskProjection, rebuildTaskProjection } from "../../src/index.ts";
 import { makeJournaledWriteCoordinator, makeMarkdownArtifactStore } from "../../src/store/index.ts";
 import { docWrite, withTempStore } from "./helpers.ts";
 
@@ -87,6 +87,112 @@ test("SQLite task projection rebuild is deterministic after cache deletion", () 
     assert.equal(second[0]?.sourcePath, "harness/tasks/task-1/INDEX.md");
     assert.equal(second[0]?.source, "local-document");
     assert.equal(second[1]?.closeoutReadiness, "ready");
+  });
+});
+
+test("SQLite projection rebuild treats a missing authored root as an empty source", () => {
+  withTempStore((rootDir) => {
+    assert.deepEqual(rebuildTaskProjection({ rootDir }).rows, []);
+    assert.deepEqual(readTaskProjection({ rootDir }).rows, []);
+  });
+});
+
+test("SQLite projection rebuild materializes declared session execution and review tables deterministically", () => {
+  withTempStore((rootDir) => {
+    writeIndex(rootDir, "task_01J00000000000000000000000", "Projected entities", "in_review");
+    writeProjectionEntities(rootDir);
+
+    rebuildTaskProjection({ rootDir });
+    const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
+    const first = readEntityProjectionTables(projectionPath);
+
+    rmSync(projectionPath, { force: true });
+    rebuildTaskProjection({ rootDir });
+
+    assert.deepEqual(readEntityProjectionTables(projectionPath), first);
+    assert.equal(first.sessions[0]?.session_id, "ses_projection_1");
+    assert.equal(first.executions[0]?.execution_id, "exe_01J00000000000000000000000");
+    assert.equal(first.reviews[0]?.review_id, "rev_01J00000000000000000000000");
+  });
+});
+
+test("SQLite projection reads rebuild when an authored entity changes", () => {
+  withTempStore((rootDir) => {
+    writeIndex(rootDir, "task_01J00000000000000000000000", "Projected entities", "in_review");
+    writeProjectionEntities(rootDir);
+    rebuildTaskProjection({ rootDir });
+
+    const executionPath = path.join(rootDir, "harness/tasks/task_01J00000000000000000000000/executions/exe_01J00000000000000000000000.md");
+    const execution = JSON.parse(readFileSync(executionPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(executionPath, `${JSON.stringify({ ...execution, state: "accepted" }, null, 2)}\n`);
+
+    const result = readTaskProjection({ rootDir });
+    const rows = readEntityProjectionTables(path.join(rootDir, ".harness/cache/projections.sqlite"));
+    assert.equal(rows.executions[0]?.state, "accepted");
+    assert.equal(result.warnings.some((warning) => warning.code === "projection_stale"), true);
+  });
+});
+
+test("SQLite projection reads discard tampered declared entity rows", () => {
+  withTempStore((rootDir) => {
+    writeIndex(rootDir, "task_01J00000000000000000000000", "Projected entities", "in_review");
+    writeProjectionEntities(rootDir);
+    rebuildTaskProjection({ rootDir });
+    const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
+    const db = new DatabaseSync(projectionPath);
+    try {
+      db.prepare("UPDATE execution_projection SET state = 'accepted'").run();
+    } finally {
+      db.close();
+    }
+
+    const result = readTaskProjection({ rootDir });
+
+    assert.equal(readEntityProjectionTables(projectionPath).executions[0]?.state, "submitted");
+    assert.equal(result.warnings.some((warning) => warning.code === "projection_tampered"), true);
+  });
+});
+
+test("task execution trace reads the complete task execution session review and output chain from projection", () => {
+  withTempStore((rootDir) => {
+    const taskId = "task_01J00000000000000000000000";
+    writeIndex(rootDir, taskId, "Projected entities", "in_review");
+    writeProjectionEntities(rootDir);
+
+    const trace = queryTaskExecutionTrace({ rootDir, taskId });
+
+    assert.equal(trace.taskId, taskId);
+    assert.equal(trace.executions.length, 1);
+    assert.equal(trace.executions[0]?.sessions[0]?.sessionId, "ses_projection_1");
+    assert.equal(trace.executions[0]?.sessionBindings[0]?.first_event_id, "evt_1");
+    assert.equal(trace.executions[0]?.reviews[0]?.reviewId, "rev_01J00000000000000000000000");
+    assert.deepEqual(trace.executions[0]?.outputs, [{ kind: "commit", ref: "abc123" }]);
+  });
+});
+
+test("provenance audit reports missing partial and dangling execution coverage", () => {
+  withTempStore((rootDir) => {
+    const taskId = "task_01J00000000000000000000000";
+    writeIndex(rootDir, taskId, "Projected entities", "in_review");
+    writeProjectionEntities(rootDir);
+    const taskRoot = path.join(rootDir, `harness/tasks/${taskId}`);
+    const executionPath = path.join(taskRoot, "executions/exe_01J00000000000000000000000.md");
+    const execution = JSON.parse(readFileSync(executionPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(executionPath, `${JSON.stringify({ ...execution, session_bindings: [] }, null, 2)}\n`);
+    const reviewPath = path.join(taskRoot, "reviews/rev_01J00000000000000000000000.md");
+    const review = JSON.parse(readFileSync(reviewPath, "utf8")) as Record<string, unknown>;
+    writeFileSync(reviewPath, `${JSON.stringify({
+      ...review,
+      execution_ref: "execution/task_01J00000000000000000000000/exe_01J00000000000000000000099"
+    }, null, 2)}\n`);
+
+    const audit = auditTaskProvenance({ rootDir, taskId });
+
+    assert.deepEqual(audit.findings.map((finding) => [finding.coverage, finding.kind]), [
+      ["dangling", "review_execution_missing"],
+      ["missing", "execution_session_binding_missing"],
+      ["partial", "submitted_execution_review_missing"]
+    ]);
   });
 });
 
@@ -369,4 +475,93 @@ function writeDecision(rootDir: string, decisionId: string, watermark: string): 
   const decisionRoot = path.join(rootDir, "harness/decisions", `decision-${decisionId}`);
   mkdirSync(decisionRoot, { recursive: true });
   writeFileSync(path.join(decisionRoot, "decision.md"), lines.join("\n"));
+}
+
+function writeProjectionEntities(rootDir: string): void {
+  mkdirSync(path.join(rootDir, "harness/sessions"), { recursive: true });
+  writeFileSync(path.join(rootDir, "harness/sessions/ses_projection_1.md"), `${JSON.stringify({
+    schema: "session-entity/v1",
+    sessionId: "ses_projection_1",
+    lifecycle: "sealed",
+    archiveStatus: "complete",
+    runtime: "codex",
+    source: "runtime",
+    detectedAt: "2026-07-11T01:00:00.000Z",
+    exportedAt: "2026-07-11T01:05:00.000Z",
+    bodyRef: {
+      store: "authored-cas/v1",
+      ref: `objects/${"a".repeat(64).slice(0, 2)}/${"a".repeat(64)}`,
+      sha256: "a".repeat(64),
+      mediaType: "text/markdown",
+      size: 10
+    },
+    snapshot: {
+      capturedAt: "2026-07-11T01:05:00.000Z",
+      completeness: "complete",
+      captureRange: { messageCount: 1 },
+      privacyScan: { scannerVersion: "publish-redaction/v1", passed: true, findings: [] }
+    }
+  }, null, 2)}\n`);
+  const taskRoot = path.join(rootDir, "harness/tasks/task_01J00000000000000000000000");
+  mkdirSync(path.join(taskRoot, "executions"), { recursive: true });
+  mkdirSync(path.join(taskRoot, "reviews"), { recursive: true });
+  writeFileSync(path.join(taskRoot, "executions/exe_01J00000000000000000000000.md"), `${JSON.stringify({
+    schema: "execution/v1",
+    execution_id: "exe_01J00000000000000000000000",
+    task_ref: "task/task_01J00000000000000000000000",
+    state: "submitted",
+    primary_actor: {
+      principal: { personId: "person:test" },
+      executor: { kind: "agent", id: "agent:test" },
+      responsibleHuman: "person:test"
+    },
+    claimed_at: "2026-07-11T01:00:00.000Z",
+    submitted_at: "2026-07-11T01:10:00.000Z",
+    closed_at: null,
+    session_bindings: [{
+      binding_id: "primary:ses_projection_1",
+      session_ref: "session/ses_projection_1",
+      role: "primary",
+      archive_status: "complete",
+      attached_at: "2026-07-11T01:00:00.000Z",
+      first_event_id: "evt_1",
+      last_event_id: "evt_9",
+      session: null
+    }],
+    outputs: [{ kind: "commit", ref: "abc123" }],
+    submission: { summary: "ready", verification: [], residual_risks: [] }
+  }, null, 2)}\n`);
+  writeFileSync(path.join(taskRoot, "reviews/rev_01J00000000000000000000000.md"), `${JSON.stringify({
+    schema: "review/v1",
+    review_id: "rev_01J00000000000000000000000",
+    task_ref: "task/task_01J00000000000000000000000",
+    execution_ref: "execution/task_01J00000000000000000000000/exe_01J00000000000000000000000",
+    reviewer_actor: {
+      principal: { personId: "person:reviewer" },
+      executor: null,
+      responsibleHuman: "person:reviewer"
+    },
+    reviewer_session_ref: "session/ses_projection_1",
+    findings: "ready",
+    verdict: "approved",
+    archive_warnings_acknowledged: false,
+    reviewed_at: "2026-07-11T01:15:00.000Z"
+  }, null, 2)}\n`);
+}
+
+function readEntityProjectionTables(projectionPath: string): {
+  readonly sessions: ReadonlyArray<Record<string, unknown>>;
+  readonly executions: ReadonlyArray<Record<string, unknown>>;
+  readonly reviews: ReadonlyArray<Record<string, unknown>>;
+} {
+  const db = new DatabaseSync(projectionPath, { readOnly: true });
+  try {
+    return {
+      sessions: db.prepare("SELECT * FROM session_projection ORDER BY session_id").all() as Record<string, unknown>[],
+      executions: db.prepare("SELECT * FROM execution_projection ORDER BY execution_id").all() as Record<string, unknown>[],
+      reviews: db.prepare("SELECT * FROM review_projection ORDER BY review_id").all() as Record<string, unknown>[]
+    };
+  } finally {
+    db.close();
+  }
 }

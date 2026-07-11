@@ -20,6 +20,9 @@ type LocalControllerGuiMethod =
   | "getDecisions"
   | "getDecisionDetail"
   | "getTaskFacts"
+  | "getTaskExecutions"
+  | "getExecutionDetail"
+  | "getReviewDetail"
   | "setTaskStatus"
   | "reviewTask"
   | "appendTaskProgress"
@@ -33,6 +36,9 @@ interface GuiBridgeServiceProxy {
   readonly getDecisions: () => Promise<unknown> | unknown;
   readonly getDecisionDetail: (payload: unknown) => Promise<unknown> | unknown;
   readonly getTaskFacts: (payload: unknown) => Promise<unknown> | unknown;
+  readonly getTaskExecutions: (payload: unknown) => Promise<unknown> | unknown;
+  readonly getExecutionDetail: (payload: unknown) => Promise<unknown> | unknown;
+  readonly getReviewDetail: (payload: unknown) => Promise<unknown> | unknown;
   readonly setTaskStatus: (payload: unknown) => Promise<unknown> | unknown;
   readonly reviewTask: (payload: unknown) => Promise<unknown> | unknown;
   readonly appendTaskProgress: (payload: unknown) => Promise<unknown> | unknown;
@@ -77,6 +83,18 @@ export const guiBridgeHandlerImplementations = {
   getTaskFacts: {
     serviceMethod: "getTaskFacts",
     invoke: ({ service, payload }) => service.getTaskFacts(payload)
+  },
+  getTaskExecutions: {
+    serviceMethod: "getTaskExecutions",
+    invoke: ({ service, payload }) => service.getTaskExecutions(payload)
+  },
+  getExecutionDetail: {
+    serviceMethod: "getExecutionDetail",
+    invoke: ({ service, payload }) => service.getExecutionDetail(payload)
+  },
+  getReviewDetail: {
+    serviceMethod: "getReviewDetail",
+    invoke: ({ service, payload }) => service.getReviewDetail(payload)
   },
   setTaskStatus: {
     serviceMethod: "setTaskStatus",
@@ -154,6 +172,9 @@ function createDaemonServiceProxy(request: GuiDaemonRequester): GuiBridgeService
     getDecisions: () => invokeDaemonGuiRoute(request, "getDecisions", undefined),
     getDecisionDetail: (payload) => invokeDaemonGuiRoute(request, "getDecisionDetail", payload),
     getTaskFacts: (payload) => invokeDaemonGuiRoute(request, "getTaskFacts", payload),
+    getTaskExecutions: (payload) => invokeDaemonGuiRoute(request, "getTaskExecutions", payload),
+    getExecutionDetail: (payload) => invokeDaemonGuiRoute(request, "getExecutionDetail", payload),
+    getReviewDetail: (payload) => invokeDaemonGuiRoute(request, "getReviewDetail", payload),
     setTaskStatus: (payload) => invokeDaemonGuiRoute(request, "setTaskStatus", payload),
     reviewTask: (payload) => invokeDaemonGuiRoute(request, "reviewTask", payload),
     appendTaskProgress: (payload) => invokeDaemonGuiRoute(request, "appendTaskProgress", payload),
@@ -195,6 +216,10 @@ export function validateGuiRoutePayload(route: ApiRouteContract, payload: unknow
       return validateTaskIdPayload(payload);
     case "application.decision-id-payload/v1":
       return validateDecisionIdPayload(payload);
+    case "application.execution-id-payload/v1":
+      return validateEntityIdPayload(payload, "executionId");
+    case "application.review-id-payload/v1":
+      return validateEntityIdPayload(payload, "reviewId");
     case "application.task-document-payload/v1":
       return validateTaskDocumentPayload(payload);
     case "application.set-task-status-payload/v1":
@@ -215,6 +240,12 @@ function validateTaskIdPayload(payload: unknown): PayloadValidation {
 function validateDecisionIdPayload(payload: unknown): PayloadValidation {
   if (!isServicePayloadRecord(payload) || typeof payload.decisionId !== "string") return invalidPayload("decisionId is required.");
   if (!isValidEntityId(payload.decisionId)) return invalidPayload("decisionId is invalid.");
+  return { ok: true, payload };
+}
+
+function validateEntityIdPayload(payload: unknown, field: "executionId" | "reviewId"): PayloadValidation {
+  if (!isServicePayloadRecord(payload) || typeof payload[field] !== "string") return invalidPayload(`${field} is required.`);
+  if (!isValidEntityId(payload[field])) return invalidPayload(`${field} is invalid.`);
   return { ok: true, payload };
 }
 
