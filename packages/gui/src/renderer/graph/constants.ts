@@ -60,7 +60,7 @@ export function axisForKind(kind: RelationKind): SemanticAxis {
   return KIND_AXIS[kind] ?? "assoc";
 }
 
-/** 每轴一个 CSS color token;亮 / 暗主题都能区分。 */
+/** 每轴一个 CSS 颜色变量;亮 / 暗主题都能区分。 */
 export const AXIS_COLOR_VAR: Record<SemanticAxis, string> = {
   authority: "var(--color-axis-authority)",
   evidence: "var(--color-axis-evidence)",
