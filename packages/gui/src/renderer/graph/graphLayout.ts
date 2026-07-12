@@ -637,7 +637,7 @@ function layoutThreeLane(input: ThreeLaneInput): LayoutOutput {
   }
 
   // Evidence facts — 折叠为 claim 徽章 (默认);展开后画 fact 节点
-  claimRows.forEach((row, claimIdx) => {
+  claimRows.forEach((row) => {
     if (row.info.claimId === "·") return;
     const claimRef = `decision/${focus.decisionId}/${row.info.claimId}`;
     const cov = (input.coverageRows ?? []).filter((c) => c.claimRef === claimRef);
@@ -771,7 +771,7 @@ function layoutSimpleEgo(input: SimpleEgoInput): LayoutOutput {
     const x = cx + Math.cos(angle) * radius;
     const y = cy + Math.sin(angle) * radius;
     let data: Record<string, unknown> = {};
-    let type = entity;
+    const type = entity;
     if (entity === "task") {
       const t = input.tasks.find((x) => x.taskId === id);
       if (t) data = { label: t.title, taskId: t.taskId, coordinationStatus: t.coordinationStatus, color: statusColor(t), raw: t };
