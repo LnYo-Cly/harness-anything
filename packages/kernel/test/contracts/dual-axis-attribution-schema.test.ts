@@ -83,7 +83,6 @@ test("immutable attribution event reuses actor axes and enforces source correspo
     },
     executorSource: "client-asserted",
     at: "2026-07-13T00:00:00.000Z",
-    mutationCommitSha: "commit-schema",
     payloadHash: "payload-schema",
     payloadRef: { path: ".harness/write-journal/payloads/op-schema.json", sha256: "sha256:payload" }
   } as const;

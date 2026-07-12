@@ -15,7 +15,6 @@ export interface AttributionProjectionRow {
   readonly operation: string;
   readonly actor: ActorAxes;
   readonly occurredAt: string;
-  readonly commitSha: string;
   readonly principalSource: PrincipalSource;
   readonly executorSource: ExecutorSource;
   readonly payloadHash: string;
@@ -45,7 +44,7 @@ export function readAttributionProjection(
     const sql = yield* SqlClient.SqlClient;
     const records = yield* sql<AttributionRecord>`
       SELECT event_id, op_id, subject_ref, operation, principal_person_id,
-             executor_agent_id, occurred_at, commit_sha, source_json
+             executor_agent_id, occurred_at, source_json
       FROM attribution_events
       ORDER BY occurred_at, event_id
     `;
@@ -64,7 +63,6 @@ function createAttributionTable(sql: SqlClient.SqlClient): Effect.Effect<unknown
         principal_person_id TEXT NOT NULL,
         executor_agent_id TEXT,
         occurred_at TEXT NOT NULL,
-        commit_sha TEXT NOT NULL,
         source_json TEXT NOT NULL
       )
     `;
@@ -76,11 +74,11 @@ function insertAttributionEvent(sql: SqlClient.SqlClient, event: AttributionEven
   return sql`
     INSERT INTO attribution_events (
       event_id, op_id, subject_ref, operation, principal_person_id,
-      executor_agent_id, occurred_at, commit_sha, source_json
+      executor_agent_id, occurred_at, source_json
     ) VALUES (
       ${event.eventId}, ${event.opId}, ${event.entityId}, ${event.kind},
       ${event.actor.principal.personId}, ${event.actor.executor?.id ?? null},
-      ${event.at}, ${event.mutationCommitSha}, ${JSON.stringify(eventSource(event))}
+      ${event.at}, ${JSON.stringify(eventSource(event))}
     )
   `;
 }
@@ -93,7 +91,6 @@ function eventToProjectionRow(event: AttributionEvent): AttributionProjectionRow
     operation: event.kind,
     actor: event.actor,
     occurredAt: event.at,
-    commitSha: event.mutationCommitSha,
     principalSource: event.principalSource,
     executorSource: event.executorSource,
     payloadHash: event.payloadHash,
@@ -113,7 +110,6 @@ function recordToProjectionRow(record: AttributionRecord): AttributionProjection
       executor: record.executor_agent_id === null ? null : { kind: "agent", id: String(record.executor_agent_id) }
     },
     occurredAt: String(record.occurred_at),
-    commitSha: String(record.commit_sha),
     principalSource: source.principalSource,
     executorSource: source.executorSource,
     payloadHash: source.payloadHash,
@@ -145,6 +141,5 @@ interface AttributionRecord {
   readonly principal_person_id: unknown;
   readonly executor_agent_id: unknown;
   readonly occurred_at: unknown;
-  readonly commit_sha: unknown;
   readonly source_json: unknown;
 }

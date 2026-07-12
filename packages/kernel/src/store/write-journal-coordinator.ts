@@ -27,7 +27,7 @@ import { assertCommitPlanAddable, commitTouchedPaths } from "./write-journal-git
 import { makeLocalVersionControlSystem } from "./local-version-control-system.ts";
 import { assertCodeDocGitEvidence, assertNoUncoordinatedCodeDocChange } from "./write-journal-code-doc-policy.ts";
 import { runLedgerMaterializer } from "./ledger-materializer.ts";
-import { makeLocalGitAttributionEventStore, type AttributionEventStore } from "./write-journal-attribution-events.ts";
+import { createAttributionEvent, makeLocalGitAttributionEventStore, planAttributionEventCommit, type AttributionEventStore } from "./write-journal-attribution-events.ts";
 import { assertDirectWriteAllowed, withRepoLocks, WriteLockHeldError } from "./write-journal-locks.ts";
 import { NonTaskWriteEntityError, taskIdForJournalRecord } from "./write-journal-entity.ts";
 import { rejectWrite, WriteRejectedError } from "./write-journal-rejection.ts";
@@ -303,9 +303,25 @@ function flushRecords(
     committedOpIds.push(record.opId);
   }
 
+  const eventVcs = versionControlSystem ?? makeLocalVersionControlSystem();
+  const attributedRecords = plannedRecords
+    .map((entry) => entry.record)
+    .filter((record): record is Extract<ReadableJournalRecord, { readonly schema: "write-journal/v2" }> => record.schema === "write-journal/v2");
+  const eventCommitPlan = planAttributionEventCommit(rootDir, rootInput, touchedPaths, eventVcs);
+  const mutationWillCommit = eventCommitPlan.willCommit;
+  const eventWrites = mutationWillCommit
+    ? attributedRecords
+    .map((record) => attributionEventStore.ensure(record, {
+      rootDir,
+      rootInput,
+      commitSha: eventCommitPlan.preCommitSha,
+      versionControlSystem: eventVcs
+    }))
+    : [];
+  const eventPaths = eventWrites.flatMap((write) => write.touchedPaths);
   const mutationCommitSha = commitTouchedPaths(
     rootDir,
-    touchedPaths,
+    [...touchedPaths, ...eventPaths],
     committedOpIds,
     rootInput,
     semanticCommitMessage(rootDir, plannedRecords.map((entry) => entry.record)),
@@ -315,36 +331,18 @@ function flushRecords(
       versionControlSystem
     }
   );
-  const eventVcs = versionControlSystem ?? makeLocalVersionControlSystem();
-  const eventWrites = plannedRecords
-    .filter((entry): entry is typeof entry & { readonly record: Extract<ReadableJournalRecord, { readonly schema: "write-journal/v2" }> } => entry.record.schema === "write-journal/v2")
-    .map(({ record }) => attributionEventStore.ensure(record, {
+  const attributionEvents = mutationWillCommit
+    ? eventWrites.map((write) => write.event)
+    : attributedRecords.map(createAttributionEvent);
+  const confirmedAttributionOpIds = new Set(attributionEvents
+    .filter((event) => attributionEventStore.confirms(event, {
       rootDir,
       rootInput,
       commitSha: mutationCommitSha,
       versionControlSystem: eventVcs
-    }));
-  const eventPaths = eventWrites.flatMap((write) => write.touchedPaths);
-  const attributionCommitSha = eventPaths.length > 0
-    ? commitTouchedPaths(
-      rootDir,
-      eventPaths,
-      eventWrites.map((write) => write.event.opId),
-      rootInput,
-      `attribution trail: ${eventWrites.map((write) => write.event.opId).join(",")}`,
-      sessionId,
-      { author: commitAuthor, versionControlSystem }
-    )
-    : mutationCommitSha;
-  const confirmedAttributionOpIds = new Set(eventWrites
-    .filter((write) => attributionEventStore.confirms(write.event, {
-      rootDir,
-      rootInput,
-      commitSha: attributionCommitSha,
-      versionControlSystem: eventVcs
     }))
-    .map((write) => write.event.opId));
-  if (confirmedAttributionOpIds.size !== eventWrites.length) {
+    .map((event) => event.opId));
+  if (mutationWillCommit && confirmedAttributionOpIds.size !== eventWrites.length) {
     throw new Error("attribution event durability confirmation failed");
   }
   const projectionHash = committedOpIds.length > 0
@@ -358,7 +356,7 @@ function flushRecords(
     const fullWatermark = {
       schema: "write-watermark/v1",
       lastCommittedOpIds: allCommitted,
-      lastCommitSha: attributionCommitSha,
+      lastCommitSha: mutationCommitSha,
       projectionHash,
       updatedAt: new Date().toISOString()
     } satisfies WriteWatermark;

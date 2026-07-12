@@ -28,6 +28,26 @@ export interface AttributionEventWrite {
   readonly touchedPaths: ReadonlyArray<string>;
 }
 
+export function planAttributionEventCommit(
+  rootDir: string,
+  rootInput: HarnessLayoutInput,
+  touchedPaths: ReadonlyArray<string>,
+  versionControlSystem: VersionControlSystem
+): { readonly willCommit: boolean; readonly preCommitSha: string } {
+  const plan = resolveCommitPlan(rootDir, touchedPaths, rootInput, versionControlSystem);
+  if (plan) {
+    return {
+      willCommit: versionControlSystem.workingTreeFiles(plan.repoRoot, plan.relativePaths).trim().length > 0,
+      preCommitSha: versionControlSystem.currentHead(plan.repoRoot)
+    };
+  }
+  const localRoot = resolveHarnessLayout(rootInput).localRoot;
+  return {
+    willCommit: touchedPaths.some((filePath) => !isLocalRuntimePath(localRoot, filePath)),
+    preCommitSha: "no-git-change"
+  };
+}
+
 export function makeLocalGitAttributionEventStore(): AttributionEventStore {
   return {
     ensure: ensureLocalAttributionEvent,
@@ -36,7 +56,7 @@ export function makeLocalGitAttributionEventStore(): AttributionEventStore {
   };
 }
 
-export function createAttributionEvent(record: JournalRecordV2, mutationCommitSha: string): AttributionEvent {
+export function createAttributionEvent(record: JournalRecordV2): AttributionEvent {
   if (!record.payloadRef || typeof record.payload?.payloadHash !== "string") {
     throw new Error(`attributed journal record ${record.opId} lacks immutable payload evidence`);
   }
@@ -51,14 +71,13 @@ export function createAttributionEvent(record: JournalRecordV2, mutationCommitSh
     principalSource: record.principalSource,
     executorSource: record.executorSource,
     at: record.at,
-    mutationCommitSha,
     payloadHash: record.payload.payloadHash,
     payloadRef: record.payloadRef
   });
 }
 
 function ensureLocalAttributionEvent(record: JournalRecordV2, context: AttributionEventStoreContext): AttributionEventWrite {
-  const event = createAttributionEvent(record, context.commitSha);
+  const event = createAttributionEvent(record);
   const eventPath = localEventPath(context.rootInput, event.opId);
   if (eventExistsAtCommit(eventPath, context)) return { event, touchedPaths: [] };
   if (durableFileExists(eventPath)) {
@@ -101,16 +120,16 @@ function decodeEvent(body: string): AttributionEvent {
 }
 
 function assertSameEvent(existing: AttributionEvent, candidate: AttributionEvent): void {
-  if (existing.opId !== candidate.opId || stableStringify(eventIdentity(existing)) !== stableStringify(eventIdentity(candidate))) {
+  if (existing.opId !== candidate.opId || stableStringify(existing) !== stableStringify(candidate)) {
     throw new Error(`attribution event collision for op ${candidate.opId}`);
   }
 }
 
-function eventIdentity(event: AttributionEvent): Omit<AttributionEvent, "mutationCommitSha"> {
-  const { mutationCommitSha: _mutationCommitSha, ...identity } = event;
-  return identity;
-}
-
 function readAttributionEventText(filePath: string): string {
   return Buffer.from(readFileBytes(filePath)).toString("utf8");
+}
+
+function isLocalRuntimePath(rootPath: string, filePath: string): boolean {
+  const relativePath = path.relative(rootPath, filePath);
+  return relativePath.length === 0 || (relativePath !== ".." && !relativePath.startsWith(`..${path.sep}`) && !path.isAbsolute(relativePath));
 }

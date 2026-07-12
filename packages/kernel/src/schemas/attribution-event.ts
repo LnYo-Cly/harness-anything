@@ -18,7 +18,6 @@ export const AttributionEventSchema = Schema.Struct({
   principalSource: PrincipalSourceSchema,
   executorSource: ExecutorSourceSchema,
   at: NonBlankStringSchema,
-  mutationCommitSha: NonBlankStringSchema,
   payloadHash: NonBlankStringSchema,
   payloadRef: JournalPayloadRefSchema
 }).pipe(Schema.filter((event) => (

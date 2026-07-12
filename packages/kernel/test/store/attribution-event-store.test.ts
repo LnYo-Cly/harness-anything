@@ -63,6 +63,7 @@ test("attribution event is idempotent by opId and preserves every WAL attributio
 test("crash before event append retains WAL until recovery confirms the immutable event", () => {
   withTempStore((rootDir) => {
     initializeAttributionGit(rootDir);
+    const seedHead = attributionGit(rootDir, "rev-parse", "HEAD");
     const failingStore = failEventStore("before");
     const crashed = makeJournaledWriteCoordinator({ rootDir, attribution: testWriteAttribution(), attributionEventStore: failingStore });
     Effect.runSync(crashed.enqueue(docWrite("op-crash-before-event", "task-crash-before", "progress.md", "before\n")));
@@ -71,16 +72,20 @@ test("crash before event append retains WAL until recovery confirms the immutabl
     assert.equal(result._tag, "Left");
     assert.match(readFileSync(path.join(rootDir, ".harness/write-journal/writes.jsonl"), "utf8"), /op-crash-before-event/u);
     assert.equal(readAttributionEvents(rootDir).length, 0);
+    assert.equal(attributionGit(rootDir, "rev-parse", "HEAD"), seedHead);
 
     Effect.runSync(makeJournaledWriteCoordinator({ rootDir, attribution: testWriteAttribution() }).recover);
     assert.equal(readFileSync(path.join(rootDir, ".harness/write-journal/writes.jsonl"), "utf8"), "");
     assert.equal(readAttributionEvents(rootDir)[0]?.opId, "op-crash-before-event");
+    assert.match(attributionGit(rootDir, "log", "--oneline", "-1"), /task\(doc\): task-crash-before progress\.md \[op-crash-before-event\]/u);
+    assert.equal(attributionGit(rootDir, "rev-list", "--count", "HEAD"), "2");
   });
 });
 
-test("crash after event append retains WAL, then recovery commits the event and compacts", () => {
+test("crash after event append retains WAL, then recovery commits mutation and event together", () => {
   withTempStore((rootDir) => {
     initializeAttributionGit(rootDir);
+    const seedHead = attributionGit(rootDir, "rev-parse", "HEAD");
     const failingStore = failEventStore("after");
     const crashed = makeJournaledWriteCoordinator({ rootDir, attribution: testWriteAttribution(), attributionEventStore: failingStore });
     Effect.runSync(crashed.enqueue(docWrite("op-crash-after-event", "task-crash-after", "progress.md", "after\n")));
@@ -89,10 +94,12 @@ test("crash after event append retains WAL, then recovery commits the event and 
     assert.equal(result._tag, "Left");
     assert.match(readFileSync(path.join(rootDir, ".harness/write-journal/writes.jsonl"), "utf8"), /op-crash-after-event/u);
     assert.equal(readAttributionEvents(rootDir)[0]?.opId, "op-crash-after-event");
+    assert.equal(attributionGit(rootDir, "rev-parse", "HEAD"), seedHead);
 
     Effect.runSync(makeJournaledWriteCoordinator({ rootDir, attribution: testWriteAttribution() }).recover);
     assert.equal(readFileSync(path.join(rootDir, ".harness/write-journal/writes.jsonl"), "utf8"), "");
-    assert.match(attributionGit(rootDir, "log", "--oneline", "--", "attribution-events"), /attribution trail/u);
+    assert.match(attributionGit(rootDir, "log", "--oneline", "-1"), /task\(doc\): task-crash-after progress\.md \[op-crash-after-event\]/u);
+    assert.equal(attributionGit(rootDir, "rev-list", "--count", "HEAD"), "2");
     assert.equal(readAttributionEvents(rootDir).length, 1);
   });
 });
