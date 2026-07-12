@@ -34,6 +34,7 @@
     "urgency": { "enum": ["low", "medium", "high"] },
     "vertical": { "$ref": "#/$defs/nonBlankString" },
     "preset": { "$ref": "#/$defs/nonBlankString" },
+    "decisionClass": { "const": "standing-policy" },
     "applies_to": {
       "type": "object",
       "additionalProperties": false,

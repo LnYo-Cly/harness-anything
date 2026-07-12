@@ -73,6 +73,7 @@ export function parseDecisionArgs(
       kind: "decision-amend",
       decisionId: args[2],
       title: readOption(args, "--title"),
+      ...(args.includes("--standing-policy") ? { standingPolicy: true } : {}),
       body: body.value,
       patches: patches.value,
       dryRun: args.includes("--dry-run")

@@ -50,13 +50,22 @@ for (const decision of decisions) {
     );
   }
 
-  if (decision.state === "active" && !isPreRuleLegacyDecision(decision) && !hasTaskOrDeferEdge(decisionRef)) {
-    finding(
-      "accepted-decision-missing-task-or-defer",
-      decisionRef,
-      "Accepted decision has no active task/defer edge.",
-      "Add an active decision->task derives edge, add an active task->decision implements edge, or defer the decision explicitly."
-    );
+  if ((decision.state === "active" || decision.state === "deferred") && !isPreRuleLegacyDecision(decision)) {
+    if (decision.state !== "deferred" && decision.decisionClass === "standing-policy" && !hasStandingPolicyFulfillment(decision, decisionRef)) {
+      finding(
+        "standing-policy-missing-fulfillment",
+        decisionRef,
+        "Standing-policy decision has no declared fulfillment surface.",
+        "Add an active refines/relates decision-network edge or declare a non-empty applies_to module/product line."
+      );
+    } else if (decision.decisionClass !== "standing-policy" && !hasTaskOrDeferEdge(decision, decisionRef)) {
+      finding(
+        "accepted-decision-missing-task-or-defer",
+        decisionRef,
+        "Accepted decision has no active task/defer edge.",
+        "Add an active decision->task derives edge, add an active task->decision implements edge, or defer the decision explicitly."
+      );
+    }
   }
 
   if (decision.state === "active" && !isPreRuleLegacyDecision(decision)) {
@@ -144,8 +153,8 @@ writeFileSync(resultPath, JSON.stringify({
   produced: []
 }, null, 2), "utf8");
 
-function hasTaskOrDeferEdge(decisionRef) {
-  if (decisions.some((decision) => decision.state === "deferred" && `decision/${decision.decisionId}` === decisionRef)) return true;
+function hasTaskOrDeferEdge(decision, decisionRef) {
+  if (decision.state === "deferred") return true;
   return activeEdges.some((edge) => (
     isSameDecisionOrAnchor(edge.sourceRef, decisionRef) &&
     edge.targetRef.startsWith("task/") &&
@@ -154,6 +163,15 @@ function hasTaskOrDeferEdge(decisionRef) {
     isSameDecisionOrAnchor(edge.targetRef, decisionRef) &&
     edge.sourceRef.startsWith("task/") &&
     edge.relationType === "implements"
+  ));
+}
+
+function hasStandingPolicyFulfillment(decision, decisionRef) {
+  if (decision.moduleKeys.length > 0 || decision.productLineKeys.length > 0) return true;
+  return activeEdges.some((edge) => (
+    (edge.relationType === "refines" || edge.relationType === "relates") &&
+    ((isSameDecisionOrAnchor(edge.sourceRef, decisionRef) && edge.targetRef.startsWith("decision/")) ||
+      (isSameDecisionOrAnchor(edge.targetRef, decisionRef) && edge.sourceRef.startsWith("decision/")))
   ));
 }
 

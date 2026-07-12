@@ -35,6 +35,7 @@ export const decisionFieldContracts = {
   urgency: immutable("urgency is creation-time governance metadata", show("decision.urgency")),
   vertical: immutable("vertical routing is creation-time governance metadata", show("decision.vertical")),
   preset: immutable("preset routing is creation-time governance metadata", show("decision.preset")),
+  decisionClass: amendable([amendWrite("metadata"), lifecycleWrite("decision-accept")], projection("decisionClass", true), show("decision.decisionClass")),
   applies_to: immutable("module/product-line scope changes require a superseding decision", projection("moduleKeys/productLineKeys", true), show("decision.applies_to")),
   proposedBy: immutable("proposal actor is provenance and cannot be amended", show("decision.proposedBy")),
   proposedAt: immutable("proposal timestamp is provenance and cannot be amended", show("decision.proposedAt")),
@@ -98,7 +99,7 @@ export const entityFieldContracts = {
   session: sessionFieldContracts
 } as const;
 
-export const decisionAmendableFields = ["title", "chosen", "rejected", "claims"] as const satisfies ReadonlyArray<DecisionFieldKey>;
+export const decisionAmendableFields = ["title", "decisionClass", "chosen", "rejected", "claims"] as const satisfies ReadonlyArray<DecisionFieldKey>;
 export type DecisionAmendField = (typeof decisionAmendableFields)[number];
 export type DecisionAmendOperation = Extract<EntityFieldWriteSurface, { readonly kind: "amend" }>["operation"];
 

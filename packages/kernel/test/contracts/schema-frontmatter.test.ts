@@ -97,6 +97,14 @@ test("decision package schema rejects contract-critical invalid fixtures", async
     ...base,
     provenance: [{ runtime: "shell", sessionId: "session", boundAt: "2026-07-03T00:00:00.000Z" }]
   }));
+  assert.equal(Schema.decodeUnknownSync(DecisionPackageSchema)({
+    ...base,
+    decisionClass: "standing-policy"
+  }).decisionClass, "standing-policy");
+  assert.throws(() => Schema.decodeUnknownSync(DecisionPackageSchema)({
+    ...base,
+    decisionClass: "policy"
+  }));
 });
 
 test("decision package content pins are optional for legacy records and validated when present", async () => {

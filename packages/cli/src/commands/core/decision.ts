@@ -56,7 +56,14 @@ function runTransition(
     Effect.flatMap((document) => {
       const current = document.decision;
       const arbiter = parseActor(action.arbiter) ?? current.arbiter;
-      const request = { current, arbiter, decidedAt: action.decidedAt, judgmentOnlyRationale: action.judgmentOnlyRationale, body: action.body };
+      const request = {
+        current,
+        arbiter,
+        decidedAt: action.decidedAt,
+        judgmentOnlyRationale: action.judgmentOnlyRationale,
+        ...(action.kind === "decision-accept" && action.standingPolicy ? { decisionClass: "standing-policy" as const } : {}),
+        body: action.body
+      };
       const withBodyWarning = (result: CliResult): CliResult => withDecisionBodyEmptyWarning(
         result,
         action.judgmentOnlyRationale?.trim() ? action.judgmentOnlyRationale : action.body ?? document.body,
@@ -106,6 +113,7 @@ function runAmend(
     Effect.flatMap((current) => {
       const patchResult = applyDecisionAmendPatches(current, [
         ...(action.title ? [{ field: "title", operation: "replace", value: action.title } satisfies DecisionAmendPatchInput] : []),
+        ...(action.standingPolicy ? [{ field: "decisionClass", operation: "metadata", value: "standing-policy" } satisfies DecisionAmendPatchInput] : []),
         ...action.patches
       ]);
       if (!patchResult.ok) return Effect.succeed(patchResult.result);

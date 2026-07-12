@@ -53,6 +53,35 @@ test("CLI decision propose writes a decision package through the coordinator", (
   });
 });
 
+test("CLI decision accept and amend declare standing-policy decisions", () => {
+  withTempRoot((rootDir) => {
+    for (const decisionId of ["dec_POLICY_ACCEPT", "dec_POLICY_AMEND"]) {
+      runJson(rootDir, [
+        "decision", "propose",
+        "--id", decisionId,
+        "--title", `${decisionId} declaration`,
+        "--question", "Should this decision be a standing policy?",
+        "--chosen", "Declare the classification explicitly",
+        "--rejected", "Infer policy status from prose",
+        "--why-not", "Inference would change default behavior"
+      ]);
+    }
+
+    runJson(rootDir, [
+      "decision", "accept", "dec_POLICY_ACCEPT",
+      "--arbiter", "human:ZeyuLi",
+      "--judgment-only", "Policy judgment is explicitly authorized.",
+      "--standing-policy"
+    ]);
+    runJson(rootDir, ["decision", "amend", "dec_POLICY_AMEND", "--standing-policy"]);
+
+    const accepted = readFileSync(path.join(rootDir, "harness/decisions/decision-dec_POLICY_ACCEPT/decision.md"), "utf8");
+    const amended = readFileSync(path.join(rootDir, "harness/decisions/decision-dec_POLICY_AMEND/decision.md"), "utf8");
+    assert.match(accepted, /^decisionClass: standing-policy$/mu);
+    assert.match(amended, /^decisionClass: standing-policy$/mu);
+  });
+});
+
 test("CLI decision propose generates distinct high-entropy ids in the same millisecond", () => {
   withTempRoot((rootDir) => {
     const clockPath = path.join(rootDir, "fixed-clock.mjs");

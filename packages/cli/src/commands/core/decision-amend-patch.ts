@@ -36,6 +36,9 @@ function applyDecisionAmendPatch(
   }
   if (patch.operation === "metadata") {
     if (patch.field === "claims") return replaceClaimLoadBearing(current, patch.value);
+    if (patch.field === "decisionClass" && patch.value === "standing-policy") {
+      return { ok: true, next: { ...current, decisionClass: "standing-policy" } };
+    }
     return { ok: false, reason: `metadata is not supported for decision field: ${patch.field}` };
   }
   if (patch.field === "chosen") {

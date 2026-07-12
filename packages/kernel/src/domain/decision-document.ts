@@ -43,6 +43,7 @@ export function serializeDecisionDocument(payload: DecisionDocumentPayload, wate
     `urgency: ${decision.urgency}`,
     `vertical: ${quoteScalar(decision.vertical)}`,
     `preset: ${quoteScalar(decision.preset)}`,
+    ...(decision.decisionClass ? [`decisionClass: ${decision.decisionClass}`] : []),
     "applies_to:",
     `  modules: ${flowArray(decision.applies_to.modules)}`,
     `  productLines: ${flowArray(decision.applies_to.productLines)}`,
@@ -100,6 +101,9 @@ function parseDecisionFrontmatter(frontmatter: string): DecisionPackage {
     urgency: readScalar(frontmatter, "urgency", { required: true }) as DecisionPackage["urgency"],
     vertical: unquote(readScalar(frontmatter, "vertical", { required: true })),
     preset: unquote(readScalar(frontmatter, "preset", { required: true })),
+    ...(readScalar(frontmatter, "decisionClass") ? {
+      decisionClass: readScalar(frontmatter, "decisionClass") as DecisionPackage["decisionClass"]
+    } : {}),
     applies_to: {
       modules: parseStringArray(readBlockScalar(frontmatter, "applies_to", "modules")),
       productLines: parseStringArray(readBlockScalar(frontmatter, "applies_to", "productLines"))
