@@ -9,7 +9,7 @@ import { parseRelationFlowRecords } from "../../../../kernel/src/index.ts";
 import { cliError, CliErrorCode } from "../../cli/error-codes.ts";
 import type { CliResult, ParsedCommand } from "../../cli/types.ts";
 import type { CommandRunnerContext } from "../../cli/runner-registry.ts";
-import { activeTaskLeaseFailure } from "./task-holder.ts";
+import { activeTaskLeaseFailure } from "./task-lease-guard.ts";
 
 type TaskRelateAction = Extract<ParsedCommand["action"], { readonly kind: "task-relate" }>;
 

@@ -8,7 +8,7 @@ import { readFrontmatter, readScalar } from "../../../../kernel/src/index.ts";
 import { cliError, CliErrorCode } from "../../cli/error-codes.ts";
 import type { CommandRunnerContext } from "../../cli/runner-registry.ts";
 import type { CliResult, ParsedCommand } from "../../cli/types.ts";
-import { activeTaskLeaseFailure } from "./task-holder.ts";
+import { activeTaskLeaseFailure } from "./task-lease-guard.ts";
 
 type DecisionRelateAction = Extract<ParsedCommand["action"], { readonly kind: "decision-relate" }>;
 type DecisionRelationRetireAction = Extract<ParsedCommand["action"], { readonly kind: "decision-relation-retire" }>;
