@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Effect } from "effect";
-import { hashTaskProjectionRows, rebuildTaskProjection } from "../../src/index.ts";
+import { hashTaskProjectionRows, rebuildTaskProjection, sha256Text } from "../../src/index.ts";
 import { makeJournaledWriteCoordinator } from "../../src/store/index.ts";
 import { resolveCommitPlan } from "../../src/store/write-journal-git.ts";
 import { moduleEntityId, taskEntityId } from "../../src/domain/index.ts";
@@ -373,7 +373,10 @@ test("WriteCoordinator commits self-host authored writes inside ignored nested h
     assert.equal(report.watermark, "op-nested");
     assert.equal(readFileSync(path.join(rootDir, "harness/tasks/task-1/notes.md"), "utf8"), "nested");
     assert.match(runGit(path.join(rootDir, "harness"), "log", "--oneline", "-1"), /task\(doc\): task-1 notes\.md \[op-nested\]/);
-    assert.equal(runGit(path.join(rootDir, "harness"), "show", "--name-only", "--format=", "HEAD"), "tasks/task-1/notes.md");
+    assert.equal(runGit(path.join(rootDir, "harness"), "show", "--name-only", "--format=", "HEAD"), [
+      `attribution-events/${sha256Text("op-nested")}.jsonl`,
+      "tasks/task-1/notes.md"
+    ].join("\n"));
     assert.equal(runGit(path.join(rootDir, "harness"), "status", "--short"), "M notes/unrelated.md");
     assert.equal(runGit(rootDir, "status", "--short"), "");
     assert.equal(existsSync(path.join(rootDir, ".harness/write-journal/watermark.json")), true);
@@ -450,6 +453,8 @@ test("WriteCoordinator records nested harness HEAD when self-host flush has no s
     };
 
     assert.equal(watermark.lastCommitSha, nestedHead);
+    assert.equal(runGit(harnessRoot, "rev-parse", "HEAD"), nestedHead);
+    assert.equal(existsSync(path.join(harnessRoot, "attribution-events")), false);
   });
 });
 

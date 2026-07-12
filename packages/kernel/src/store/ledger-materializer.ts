@@ -3,11 +3,14 @@ import type { HarnessLayoutInput } from "../layout/index.ts";
 import { resolveHarnessLayout } from "../layout/index.ts";
 import type { VersionControlSystem } from "../ports/version-control-system.ts";
 import { updateTaskProjectionIncrementally } from "../projection/sqlite-task-incremental-projection.ts";
+import { materializeAttributionProjection } from "../projection/sqlite-attribution-projection.ts";
+import { rebuildTaskProjection } from "../projection/sqlite-task-projection.ts";
 import { readMarkdownSource } from "../projection/sqlite-task-source.ts";
 import { makeLocalVersionControlSystem } from "./local-version-control-system.ts";
 import { resolveTrunkBranch } from "./write-journal-git.ts";
 import { withRepoLocks } from "./write-journal-locks.ts";
 import type { OwnedLock } from "./write-journal-types.ts";
+import { durableFileExists } from "./write-journal-durable.ts";
 
 export interface LedgerMaterializerBranchReport {
   readonly branch: string;
@@ -24,6 +27,7 @@ export interface LedgerMaterializerReport {
   readonly branches: ReadonlyArray<LedgerMaterializerBranchReport>;
   readonly warnings: ReadonlyArray<string>;
   readonly projectionRebuilt: boolean;
+  readonly attributionEventsProjected: number;
 }
 
 export interface LedgerMaterializerOptions {
@@ -46,7 +50,8 @@ export function runLedgerMaterializer(rootInput: HarnessLayoutInput, options: Le
       considered: 0,
       branches: [],
       warnings: ["authored root is not a Git repository"],
-      projectionRebuilt: false
+      projectionRebuilt: false,
+      attributionEventsProjected: 0
     };
   }
 
@@ -71,7 +76,8 @@ function materializeBranches(repoRoot: string, rootInput: HarnessLayoutInput, dr
       considered: 0,
       branches: [],
       warnings: [`trunk branch ${trunkBranch} does not exist`],
-      projectionRebuilt: false
+      projectionRebuilt: false,
+      attributionEventsProjected: 0
     };
   }
 
@@ -124,13 +130,24 @@ function materializeBranches(repoRoot: string, rootInput: HarnessLayoutInput, dr
     });
   }
 
+  const layout = resolveHarnessLayout(rootInput);
+  let attributionEventsProjected = 0;
+  if (!dryRun) {
+    if (!durableFileExists(layout.projectionPath)) rebuildTaskProjection({
+      rootDir: layout.rootDir,
+      ...(typeof rootInput === "object" ? { layoutOverrides: rootInput.layoutOverrides } : {})
+    });
+    attributionEventsProjected = materializeAttributionProjection(rootInput, layout.projectionPath).length;
+  }
+
   return {
     dryRun,
     merged,
     considered: reports.filter((report) => report.commitCount > 0).length,
     branches: reports,
     warnings,
-    projectionRebuilt: merged > 0
+    projectionRebuilt: merged > 0,
+    attributionEventsProjected
   };
 }
 

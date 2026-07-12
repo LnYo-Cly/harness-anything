@@ -113,6 +113,25 @@ export function appendJsonLineDurably(filePath: string, value: JournalRecord | J
   }
 }
 
+export function appendImmutableJsonLineDurably(filePath: string, value: object): boolean {
+  mkdirSync(path.dirname(filePath), { recursive: true });
+  let fd: number;
+  try {
+    fd = openSync(filePath, "wx");
+  } catch (error) {
+    if (existsSync(filePath)) return false;
+    throw error;
+  }
+  try {
+    writeSync(fd, `${JSON.stringify(value)}\n`, null, "utf8");
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  fsyncDirectory(path.dirname(filePath));
+  return true;
+}
+
 function journalLineSchema(value: unknown): unknown {
   return typeof value === "object" && value !== null && "schema" in value
     ? value.schema

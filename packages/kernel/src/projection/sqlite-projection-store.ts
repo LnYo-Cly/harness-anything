@@ -13,7 +13,7 @@ import type {
   TaskProjectionRow
 } from "./types.ts";
 
-export const projectionVersion = "entity-projection/d4-v4";
+export const projectionVersion = "entity-projection/d4-v5";
 const baseTaskProjectionColumns = [
   "task_id",
   "title",

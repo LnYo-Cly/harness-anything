@@ -59,6 +59,11 @@
         "reason": "C0 coordinator/flusher internal durable write path; this is the daemon-owned write implementation, not a bypass caller."
       },
       {
+        "value": "packages/kernel/src/store/write-journal-durable.ts#closeSync@4",
+        "ref": "task_01KXBDH7PQ41C66KFSA01ENG7N",
+        "reason": "ADR-0028 P5 coordinator-owned immutable attribution event append closes its exclusive shard descriptor after fsync; this permanent trail is not a bypass caller."
+      },
+      {
         "value": "packages/kernel/src/store/write-journal-durable.ts#fsyncSync@1",
         "ref": "task_01KWW58383X74ZK28Y068CQ2TG",
         "reason": "C0 coordinator/flusher internal durable write path; this is the daemon-owned write implementation, not a bypass caller."
@@ -74,6 +79,11 @@
         "reason": "C0 coordinator/flusher internal durable write path; this is the daemon-owned write implementation, not a bypass caller."
       },
       {
+        "value": "packages/kernel/src/store/write-journal-durable.ts#fsyncSync@4",
+        "ref": "task_01KXBDH7PQ41C66KFSA01ENG7N",
+        "reason": "ADR-0028 P5 coordinator-owned immutable attribution event append fsyncs each exclusive shard before the event can confirm WAL compaction safety."
+      },
+      {
         "value": "packages/kernel/src/store/write-journal-durable.ts#mkdirSync@1",
         "ref": "task_01KWW58383X74ZK28Y068CQ2TG",
         "reason": "C0 coordinator/flusher internal durable write path; this is the daemon-owned write implementation, not a bypass caller."
@@ -82,6 +92,11 @@
         "value": "packages/kernel/src/store/write-journal-durable.ts#mkdirSync@2",
         "ref": "task_01KWW58383X74ZK28Y068CQ2TG",
         "reason": "C0 coordinator/flusher internal durable write path; this is the daemon-owned write implementation, not a bypass caller."
+      },
+      {
+        "value": "packages/kernel/src/store/write-journal-durable.ts#mkdirSync@3",
+        "ref": "task_01KXBDH7PQ41C66KFSA01ENG7N",
+        "reason": "ADR-0028 P5 coordinator-owned immutable attribution event store creates its Git-authored shard directory before exclusive append."
       },
       {
         "value": "packages/kernel/src/store/write-journal-durable.ts#openSync@1",
@@ -97,6 +112,11 @@
         "value": "packages/kernel/src/store/write-journal-durable.ts#openSync@3",
         "ref": "task_01KWW58383X74ZK28Y068CQ2TG",
         "reason": "C0 coordinator/flusher internal durable write path; this is the daemon-owned write implementation, not a bypass caller."
+      },
+      {
+        "value": "packages/kernel/src/store/write-journal-durable.ts#openSync@4",
+        "ref": "task_01KXBDH7PQ41C66KFSA01ENG7N",
+        "reason": "ADR-0028 P5 coordinator-owned immutable attribution event store uses exclusive create so an opId shard can never be overwritten or compacted."
       },
       {
         "value": "packages/kernel/src/store/write-journal-durable.ts#renameSync@1",
@@ -122,6 +142,11 @@
         "value": "packages/kernel/src/store/write-journal-durable.ts#writeSync@3",
         "ref": "task_01KWW58383X74ZK28Y068CQ2TG",
         "reason": "C0 coordinator/flusher internal durable write path; this is the daemon-owned write implementation, not a bypass caller."
+      },
+      {
+        "value": "packages/kernel/src/store/write-journal-durable.ts#writeSync@4",
+        "ref": "task_01KXBDH7PQ41C66KFSA01ENG7N",
+        "reason": "ADR-0028 P5 coordinator-owned immutable attribution event store writes one permanent event line to an exclusive Git-authored shard."
       },
       {
         "value": "packages/kernel/src/store/write-journal-locks.ts#closeSync@1",

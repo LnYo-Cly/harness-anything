@@ -1,0 +1,145 @@
+import type { HarnessLayoutInput } from "../layout/index.ts";
+import { resolveHarnessLayout } from "../layout/index.ts";
+import { localLayoutFileSystem } from "../local/local-layout-file-system.ts";
+import { readAttributionEvents } from "../local/attribution-event-source.ts";
+import type { ActorAxes, ExecutorSource, PrincipalSource } from "../schemas/actor-attribution.ts";
+import type { AttributionEvent } from "../schemas/attribution-event.ts";
+import { runSqlite } from "./sqlite-projection-store.ts";
+import { SqlClient } from "@effect/sql";
+import { Effect } from "effect";
+
+export interface AttributionProjectionRow {
+  readonly eventId: string;
+  readonly opId: string;
+  readonly subjectRef: string;
+  readonly operation: string;
+  readonly actor: ActorAxes;
+  readonly occurredAt: string;
+  readonly principalSource: PrincipalSource;
+  readonly executorSource: ExecutorSource;
+  readonly payloadHash: string;
+  readonly payloadRef: AttributionEvent["payloadRef"];
+}
+
+export function materializeAttributionProjection(
+  rootInput: HarnessLayoutInput,
+  projectionPath = resolveHarnessLayout(rootInput).projectionPath
+): ReadonlyArray<AttributionProjectionRow> {
+  if (!localLayoutFileSystem.exists(projectionPath)) throw new Error("base projection database must exist before attribution materialization");
+  const events = readAttributionEvents(rootInput);
+  runSqlite(projectionPath, Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* createAttributionTable(sql);
+    yield* sql`DELETE FROM attribution_events`;
+    for (const event of events) yield* insertAttributionEvent(sql, event);
+  }));
+  return events.map(eventToProjectionRow);
+}
+
+export function readAttributionProjection(
+  rootInput: HarnessLayoutInput,
+  projectionPath = resolveHarnessLayout(rootInput).projectionPath
+): ReadonlyArray<AttributionProjectionRow> {
+  return runSqlite(projectionPath, Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const records = yield* sql<AttributionRecord>`
+      SELECT event_id, op_id, subject_ref, operation, principal_person_id,
+             executor_agent_id, occurred_at, source_json
+      FROM attribution_events
+      ORDER BY occurred_at, event_id
+    `;
+    return records.map(recordToProjectionRow);
+  }));
+}
+
+function createAttributionTable(sql: SqlClient.SqlClient): Effect.Effect<unknown, unknown> {
+  return Effect.gen(function* () {
+    yield* sql`
+      CREATE TABLE IF NOT EXISTS attribution_events (
+        event_id TEXT PRIMARY KEY,
+        op_id TEXT NOT NULL UNIQUE,
+        subject_ref TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        principal_person_id TEXT NOT NULL,
+        executor_agent_id TEXT,
+        occurred_at TEXT NOT NULL,
+        source_json TEXT NOT NULL
+      )
+    `;
+    yield* sql`CREATE INDEX IF NOT EXISTS attribution_events_subject_time ON attribution_events(subject_ref, occurred_at, event_id)`;
+  });
+}
+
+function insertAttributionEvent(sql: SqlClient.SqlClient, event: AttributionEvent): Effect.Effect<unknown, unknown> {
+  return sql`
+    INSERT INTO attribution_events (
+      event_id, op_id, subject_ref, operation, principal_person_id,
+      executor_agent_id, occurred_at, source_json
+    ) VALUES (
+      ${event.eventId}, ${event.opId}, ${event.entityId}, ${event.kind},
+      ${event.actor.principal.personId}, ${event.actor.executor?.id ?? null},
+      ${event.at}, ${JSON.stringify(eventSource(event))}
+    )
+  `;
+}
+
+function eventToProjectionRow(event: AttributionEvent): AttributionProjectionRow {
+  return {
+    eventId: event.eventId,
+    opId: event.opId,
+    subjectRef: event.entityId,
+    operation: event.kind,
+    actor: event.actor,
+    occurredAt: event.at,
+    principalSource: event.principalSource,
+    executorSource: event.executorSource,
+    payloadHash: event.payloadHash,
+    payloadRef: event.payloadRef
+  };
+}
+
+function recordToProjectionRow(record: AttributionRecord): AttributionProjectionRow {
+  const source = JSON.parse(String(record.source_json)) as ReturnType<typeof eventSource>;
+  return {
+    eventId: String(record.event_id),
+    opId: String(record.op_id),
+    subjectRef: String(record.subject_ref),
+    operation: String(record.operation),
+    actor: {
+      principal: { kind: "person", personId: String(record.principal_person_id) },
+      executor: record.executor_agent_id === null ? null : { kind: "agent", id: String(record.executor_agent_id) }
+    },
+    occurredAt: String(record.occurred_at),
+    principalSource: source.principalSource,
+    executorSource: source.executorSource,
+    payloadHash: source.payloadHash,
+    payloadRef: source.payloadRef
+  };
+}
+
+function eventSource(event: AttributionEvent): {
+  readonly journalRecordSchema: "write-journal/v2";
+  readonly principalSource: PrincipalSource;
+  readonly executorSource: ExecutorSource;
+  readonly payloadHash: string;
+  readonly payloadRef: AttributionEvent["payloadRef"];
+} {
+  return {
+    journalRecordSchema: event.journalRecordSchema,
+    principalSource: event.principalSource,
+    executorSource: event.executorSource,
+    payloadHash: event.payloadHash,
+    payloadRef: event.payloadRef
+  };
+}
+
+interface AttributionRecord {
+  readonly event_id: unknown;
+  readonly op_id: unknown;
+  readonly subject_ref: unknown;
+  readonly operation: unknown;
+  readonly principal_person_id: unknown;
+  readonly executor_agent_id: unknown;
+  readonly occurred_at: unknown;
+  readonly source_json: unknown;
+}
