@@ -11,8 +11,8 @@
   ],
   "rowCountReconciliation": {
     "phase1FunctionalRows": 26,
-    "registryRows": 35,
-    "difference": "Six additional rows split mixed write functions and infrastructure: module canonical/view, script declared writes/produces, worktree code/binding, task-holder runtime state, one WriteCoordinator runtime substrate row, and the Fact-to-Execution administrative migration road. Two further ADR-0028 P4 rows register the attributed doc_sync_submit coordinator road and the preset script staging-mirror ingest road. One ADR-0028 P5 row registers the coordinator-owned immutable attribution event trail."
+    "registryRows": 36,
+    "difference": "Six additional rows split mixed write functions and infrastructure: module canonical/view, script declared writes/produces, worktree code/binding, task-holder runtime state, one WriteCoordinator runtime substrate row, and the Fact-to-Execution administrative migration road. Two further ADR-0028 P4 rows register the attributed doc_sync_submit coordinator road and the preset script staging-mirror ingest road. One ADR-0028 P5 row registers the coordinator-owned immutable attribution event trail. One ADR-0029 TW-01 row registers the authority replication submission road (attributed-coordinator entry over forced-command SSH)."
   },
   "rows": [
     {
@@ -542,6 +542,18 @@
       ],
       "evidence": ["packages/cli/src/commands/extensions/script-staging.ts:32", "packages/cli/src/commands/core/extension.ts:10"],
       "freshness": "staging-mirror-ingest"
+    },
+    {
+      "id": "authority.replication.submit",
+      "sourceInventoryRows": [1],
+      "road": "A",
+      "bearing": "authority-replication",
+      "leaseRequired": false,
+      "channel": { "pathClass": "coordinator-attributed", "zoneClass": "canonical-entity-via-attributed-coordinator" },
+      "entry": ["forced-command-ssh", "authority-daemon"],
+      "callsiteFiles": ["packages/application/src/authority/service.ts"],
+      "evidence": ["packages/application/src/authority/service.ts:86", "packages/daemon/src/authority/forced-command-session.ts:1"],
+      "freshness": "authority-serialized-first-parent"
     }
   ]
 }
