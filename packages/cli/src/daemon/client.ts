@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -17,12 +18,14 @@ import {
   type JsonObject,
   type LocalDaemonTarget
 } from "../../../daemon/src/index.ts";
+import { createHarnessRuntimeContext, resolveHarnessLayout } from "../../../kernel/src/index.ts";
 import { CliErrorCode, cliError } from "../cli/error-codes.ts";
 import type { CommandFailureReceipt, CommandReceipt } from "../cli/receipt.ts";
 import { toCommandReceipt } from "../cli/receipt.ts";
 import type { ParsedCommand } from "../cli/types.ts";
 import { CliActorAttributionError, readCliJournalActorFromEnv, readCliJournalActorFromFlag } from "../composition/actor-attribution.ts";
 import { parsePositiveIntegerOr } from "../cli/value-utils.ts";
+import { buildDocSyncSubmitRequest } from "./doc-sync-service.ts";
 
 export {
   daemonIdForRoot,
@@ -41,6 +44,7 @@ export type DaemonClientMode = "direct" | "local" | "remote";
 
 export interface DaemonClientConfig {
   readonly mode: DaemonClientMode;
+  readonly modeExplicit: boolean;
   readonly idleExitMs: number;
   readonly autostartTimeoutMs: number;
   readonly userRoot: string;
@@ -67,6 +71,7 @@ export function readDaemonClientConfig(env: NodeJS.ProcessEnv = process.env): Da
   const userRoot = daemonUserRoot(env);
   return {
     mode,
+    modeExplicit: typeof env.HARNESS_DAEMON_MODE === "string" && env.HARNESS_DAEMON_MODE.trim().length > 0,
     idleExitMs: parsePositiveIntegerOr(env.HARNESS_DAEMON_IDLE_MS, defaultDaemonIdleExitMs),
     autostartTimeoutMs: parsePositiveIntegerOr(env.HARNESS_DAEMON_AUTOSTART_TIMEOUT_MS, defaultDaemonAutostartTimeoutMs),
     userRoot,
@@ -80,6 +85,7 @@ export async function runCommandThroughDaemon(
   config: DaemonClientConfig = readDaemonClientConfig()
 ): Promise<CommandReceipt | CommandFailureReceipt | undefined> {
   if (config.mode === "direct") return undefined;
+  if (!config.modeExplicit && (command.action.kind === "init" || !isInitializedHarness(command))) return undefined;
   try {
     return config.mode === "remote" && config.remote
       ? await runRemoteCommand(command, config.remote)
@@ -100,6 +106,22 @@ async function runLocalCommand(command: ParsedCommand, config: DaemonClientConfi
     daemonId: config.daemonId,
     autoRegisterSingleRepo: true
   });
+  if (isDocSyncSubmitCommand(command)) {
+    let request: ReturnType<typeof buildDocSyncSubmitRequest>;
+    try {
+      request = buildDocSyncSubmitRequest({ rootDir: command.rootDir, layoutOverrides: command.layoutOverrides }, target.repoId, docSyncSubmitPaths(command));
+    } catch (error) {
+      return docSyncSubmitPreviewRejected(error);
+    }
+    const response = await requestLocalDaemonJsonRpcForTarget(target, "repo.doc.sync.submit", request as unknown as JsonObject, 200, {
+      entryPath: daemonClientCliEntrypointPath(),
+      idleExitMs: config.idleExitMs,
+      timeoutMs: config.autostartTimeoutMs,
+      layoutOverrides: command.layoutOverrides
+    });
+    if (isCommandReceipt(response)) return normalizeDocSyncSubmitReceipt(response);
+    throw new Error("repo.doc.sync.submit did not return command-receipt/v2");
+  }
   if (isTaskHolderCommand(command)) {
     const response = await requestLocalDaemonJsonRpcForTarget(target, taskHolderMethod(command), {
       repo: { repoId: target.repoId },
@@ -144,6 +166,17 @@ async function runWithLineClient(
 ): Promise<CommandReceipt | CommandFailureReceipt> {
   try {
     await client.request("protocol.hello", { protocolVersion: currentDaemonProtocolVersion });
+    if (isDocSyncSubmitCommand(command)) {
+      let request: ReturnType<typeof buildDocSyncSubmitRequest>;
+      try {
+        request = buildDocSyncSubmitRequest(command.rootDir, repoId, docSyncSubmitPaths(command));
+      } catch (error) {
+        return docSyncSubmitPreviewRejected(error);
+      }
+      const response = await client.request("repo.doc.sync.submit", request as unknown as JsonObject);
+      if (isCommandReceipt(response)) return normalizeDocSyncSubmitReceipt(response);
+      throw new Error("repo.doc.sync.submit did not return command-receipt/v2");
+    }
     if (isTaskHolderCommand(command)) {
       const response = await client.request(taskHolderMethod(command), {
         repo: { repoId, canonicalRoot: command.rootDir },
@@ -191,7 +224,12 @@ function daemonActorAttributionReceipt(command: ParsedCommand, error: CliActorAt
 
 function readMode(value: string | undefined): DaemonClientMode {
   if (value === "direct" || value === "local" || value === "remote") return value;
-  return "direct";
+  return "local";
+}
+
+function isInitializedHarness(command: ParsedCommand): boolean {
+  const layout = resolveHarnessLayout(createHarnessRuntimeContext(command.rootDir, command.layoutOverrides));
+  return existsSync(path.join(layout.authoredRoot, "harness.yaml"));
 }
 
 export function remoteDaemonSshArgs(remote: RemoteDaemonConfig): ReadonlyArray<string> {
@@ -233,6 +271,14 @@ function isCommandReceipt(value: JsonObject): boolean {
 
 function isTaskHolderCommand(command: ParsedCommand): command is TaskHolderParsedCommand {
   return command.action.kind === "task-claim" || command.action.kind === "task-holder" || command.action.kind === "task-release";
+}
+
+function isDocSyncSubmitCommand(command: ParsedCommand): boolean {
+  return command.action.kind === "doc-sync-submit";
+}
+
+function docSyncSubmitPaths(command: ParsedCommand): ReadonlyArray<string> {
+  return command.action.kind === "doc-sync-submit" ? command.action.paths : [];
 }
 
 function taskHolderMethod(command: TaskHolderParsedCommand): "repo.task.claim" | "repo.task.holder" | "repo.task.release" {
@@ -277,4 +323,31 @@ function normalizeTaskHolderReceipt(response: JsonObject, commandKind: "task-cla
     command: commandKind,
     action: commandKind.replace(/^task-/u, "task.")
   };
+}
+
+function normalizeDocSyncSubmitReceipt(response: JsonObject): CommandReceipt | CommandFailureReceipt {
+  const receipt = response as unknown as CommandReceipt | CommandFailureReceipt;
+  if (!receipt.ok) {
+    return { ...receipt, command: "doc sync submit", action: "submit" };
+  }
+  const data = receipt.details?.data ?? {};
+  return {
+    ...receipt,
+    command: "doc sync submit",
+    action: "submit",
+    details: {
+      ...(receipt.details ?? {}),
+      data: { report: data }
+    }
+  };
+}
+
+function docSyncSubmitPreviewRejected(error: unknown): CommandFailureReceipt {
+  const receipt = toCommandReceipt({
+    ok: false,
+    command: "doc-sync-submit",
+    error: cliError(CliErrorCode.WriteRejected, error instanceof Error ? error.message : String(error))
+  });
+  if (receipt.ok) throw new Error("doc sync preview rejection unexpectedly succeeded");
+  return receipt;
 }

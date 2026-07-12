@@ -31,6 +31,15 @@ const testTierManifest = discoverTestTierManifest(repoRoot);
 const testFiles = Object.values(testTierManifest).flat().sort();
 const selection = selectTestFiles(testFiles, testTierManifest, options.tier);
 
+// Most CLI integration fixtures exercise the in-process application boundary
+// against disposable repositories. Keep that test boundary explicit now that
+// initialized product repositories default to the user daemon. Daemon-focused
+// tests opt back into local mode with HARNESS_DAEMON_MODE=local and isolated
+// user roots.
+if (options.tier === "integration" || options.tier === "all") {
+  process.env.HARNESS_DAEMON_MODE ||= "direct";
+}
+
 if (selection.errors.length > 0) {
   for (const error of selection.errors) {
     console.error(error);

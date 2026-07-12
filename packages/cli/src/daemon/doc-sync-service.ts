@@ -84,6 +84,61 @@ export function buildDocSyncReport(rootInput: HarnessLayoutInput) {
   };
 }
 
+export function buildDocSyncSubmitRequest(
+  rootInput: HarnessLayoutInput,
+  repoId: string,
+  selectedPaths: ReadonlyArray<string> = []
+): DocSyncSubmitRequestV1 {
+  const report = buildDocSyncReport(rootInput);
+  const selected = new Set(selectedPaths);
+  const files = selected.size > 0
+    ? report.dirtyFiles.filter((entry) => selected.has(entry.path))
+    : report.dirtyFiles;
+  const missingSelections = [...selected].filter((selectedPath) => !files.some((entry) => entry.path === selectedPath));
+  if (missingSelections.length > 0) {
+    throw new Error(`Doc sync selected path is not dirty or is unknown: ${missingSelections.join(", ")}. Run 'ha doc status'.`);
+  }
+  const filePaths = new Set(files.map((entry) => entry.path));
+  const forbiddenTouches = report.forbiddenTouches.filter((entry) => filePaths.has(entry.path));
+  const unresolvedTouches = report.unresolvedTouches.filter((entry) => filePaths.has(entry.path));
+  const deletions = report.deletions.filter((entry) => filePaths.has(entry.path));
+  if (forbiddenTouches.length > 0 || unresolvedTouches.length > 0 || deletions.length > 0) {
+    throw new Error(
+      `Doc sync preview is not ready: ${forbiddenTouches.length} forbidden touch(es), ` +
+      `${unresolvedTouches.length} unresolved touch(es), ${deletions.length} deletion(s). Run 'ha doc status'.`
+    );
+  }
+  if (!report.baseLedgerSha) throw new Error("Doc sync submit requires an initialized authored Git repository.");
+  const layout = resolveHarnessLayout(rootInput);
+  const changes = report.candidateBlobs.filter((entry) => filePaths.has(entry.path)).map((entry) => {
+    const body = readFileSync(path.join(layout.authoredRoot, entry.path), "utf8");
+    return {
+      path: entry.path,
+      baseBlobSha256: entry.baseBlobSha256,
+      newBlobSha256: entry.newBlobSha256!,
+      mediaType: entry.mediaType,
+      size: entry.size,
+      declaredBearing: "task-document",
+      declaredZoneClass: "task-authored-prose-or-stage",
+      declaredPathClass: entry.pathClass ?? undefined,
+      content: { kind: "inline" as const, body }
+    };
+  });
+  const intentMaterial = JSON.stringify({
+    baseLedgerSha: report.baseLedgerSha,
+    changes: changes.map(({ path: changePath, baseBlobSha256, newBlobSha256 }) => ({ path: changePath, baseBlobSha256, newBlobSha256 }))
+  });
+  return {
+    repo: { repoId },
+    payload: {
+      baseLedgerSha: report.baseLedgerSha,
+      intentId: `intent_${sha256Text(intentMaterial).slice(0, 24)}`,
+      declaredIntent: "prose-edit",
+      changes
+    }
+  };
+}
+
 export function validateDocSyncSubmitRequest(input: { readonly rootInput: HarnessLayoutInput; readonly request: DocSyncSubmitRequestV1 }): DocSyncValidationResult {
   const layout = resolveHarnessLayout(input.rootInput);
   const registry = loadRegistry(layout.rootDir);

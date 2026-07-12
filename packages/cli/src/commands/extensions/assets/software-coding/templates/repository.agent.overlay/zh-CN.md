@@ -5,7 +5,9 @@
 - 组装写入前优先自描述：`ha <command> --help`、preset manifest、capabilities 元数据。命令支持 JSON / `--from-file` 时用结构化输入，别塞 shell 转义的长文本；不支持时用当前 flag。
 - 提交、复核与完成：用 `ha task transition <id> in_review --completion-claim "..."` 提交 active Execution，并按需重复传入 `--deliverable`、`--output`、`--verification`、`--known-gap` 与 `--residual-risk`；纯文字提交与零条 Evidence 合法。另一位 reviewer 再运行 `ha task review-execution <id> --execution-id <exe-id> --verdict <approved|changes_requested|dismissed> --findings "..." --rationale "..." [--evidence-checked <evidence-id>]...` 复核该轮交付。然后运行 `ha task complete <id>`；只有解析出的 preset/profile 声明 `ci` gate 时才传 `--ci passed`。Fact 保持 `0..N` 的显式晋升；review 或 closeout 占位内容仍会 fail closed（依据 `dec_mrg3z1we/CH1`、`CH4`、ADR-0027 D3、D5-D7）。
 - 走投影查询：`ha decision list --state active --module <key> --compact`、`ha decision show <id|E<n>>`、`ha task list --module <key>`。
-- 非 coordinator 写入收尾：手工改文档、标准、模板、artifact 索引或源码后，结束前检查对应仓库 `git status --short`，只提交自己触碰的路径；不要把已有无关脏文件卷进来。若明确不提交，必须记录 owner 和 no-commit 理由。
+- 手改已登记的人读 task prose 后：先跑 `ha doc status` 与 `ha doc sync --dry-run`，再用可重复的 `ha doc sync --submit --path <authored-relative-path>` 只提交自己拥有的路径；daemon 校验区域并创建归因 commit，不要补第二次 raw Git commit。
+- 顶层 ADR、standard、template 与 repository-agent prose 在 write-road registry 明确登记前仍走既有治理仓库流程；未知 Markdown 会 fail closed。
+- authored harness 之外的公开源码与 release docs 仍走正常代码 PR Git 流程：检查 `git status --short`，只 stage 自己触碰的路径，不要卷入已有无关 dirty；明确不提交时记录 owner 与 no-commit 理由。
 - 模板资产是操作面的一部分。AGENTS/task/governance 工作流文本变更时，同步更新 seeded 模板，避免新 scaffold 教旧行为。
 
 ## Scaffold folders (see each folder README, do not duplicate here)

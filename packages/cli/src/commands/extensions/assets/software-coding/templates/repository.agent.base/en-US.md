@@ -30,7 +30,9 @@ This entry holds stable operating rules only. Current milestone context, roadmap
 ## WriteCoordinator discipline
 
 - Writes through the harness CLI are auto-committed when the harness root is inside a Git repository. Do not add a second commit for coordinator-owned writes.
-- Hand-edited prose, standards, templates, artifact indexes, or source files must be committed by the agent that changed them: check `git status --short`, stage only paths touched in the task, and leave unrelated dirty files alone.
+- For registered hand-edited task prose, run `ha doc status`, preview with `ha doc sync --dry-run`, then submit only owned paths with repeatable `ha doc sync --submit --path <authored-relative-path>`. The daemon validates zones and creates the attributed commit; do not add a second raw Git commit.
+- Top-level ADR, standard, template, and repository-agent prose stays on its existing governed repository path until the write-road registry explicitly classifies it for doc sync; unknown Markdown fails closed.
+- Public source and release-document files outside the authored harness remain on the normal code-PR Git path: inspect `git status --short`, stage only task-owned paths, and leave unrelated dirty files alone.
 - Machine-read fields and relations must be written through CLI commands. Human-read prose may be edited directly, but it does not create graph state.
 
 Generated state under `.harness/` is local-only and must not be committed.

@@ -172,6 +172,9 @@ function daemonTestEnv(rootDir: string, env: Readonly<Record<string, string>>): 
     ...process.env,
     HOME: path.join(rootDir, ".home"),
     GIT_CONFIG_GLOBAL: "/dev/null",
+    HARNESS_ACTOR: "agent:daemon-cli-test",
+    HARNESS_GIT_AUTHOR_NAME: "Harness Test",
+    HARNESS_GIT_AUTHOR_EMAIL: "harness@example.test",
     HARNESS_DAEMON_USER_ROOT: defaultDaemonUserRoot(rootDir),
     ...env
   };

@@ -1,9 +1,9 @@
 # Server Daemon Operations
 
-Harness Anything can run a local daemon that coordinates reads and writes for
-one or more canonical repositories on the same machine. The CLI does not switch
-to the daemon automatically: by default it runs in-process direct mode. Set
-`HARNESS_DAEMON_MODE=local` for commands that should use the local daemon.
+Harness Anything uses a local daemon to coordinate reads and writes for one or
+more initialized canonical repositories on the same machine. The CLI defaults
+to the auto-started local daemon. `HARNESS_DAEMON_MODE=direct` is an explicit
+bootstrap and test boundary, not a routine write path for an initialized ledger.
 
 The remote path is experimental. A remote CLI command opens an SSH stdio relay
 to an already-running daemon; it does not start a daemon over SSH. Remote team
@@ -12,8 +12,8 @@ in [Team onboarding with SSH forced commands](#team-onboarding-with-ssh-forced-c
 
 ## Supported Topologies
 
-- Local daemon, one repository: start the daemon next to the canonical
-  repository, then opt CLI commands into it with `HARNESS_DAEMON_MODE=local`.
+- Local daemon, one repository: run ordinary `ha` commands next to the canonical
+  repository; the CLI registers and auto-starts the local daemon as needed.
 - Local daemon, multiple repositories on one machine: register each repository
   in the user daemon registry, start one daemon, and route commands with
   `--repo <id>`.
@@ -78,11 +78,15 @@ Run it in the foreground when a service manager should supervise the process:
 ha daemon start --foreground
 ```
 
-CLI commands keep using direct mode unless you opt in:
+CLI commands use the local daemon by default and auto-start it when needed:
 
 ```bash
-HARNESS_DAEMON_MODE=local ha task list
+ha task list
 ```
+
+Use `HARNESS_DAEMON_MODE=direct` only for explicit initialization, recovery, or
+test fixtures that cannot yet have a daemon. Do not advertise it as a lock
+conflict workaround.
 
 ## Multi-Repository Registry
 
@@ -97,11 +101,33 @@ ha daemon start --service
 Route CLI commands to a registered repository with `--repo`:
 
 ```bash
-HARNESS_DAEMON_MODE=local ha --repo A task list
+ha --repo A task list
 ```
 
 The running daemon reconciles the registry every second. A newly registered
 repository can attach without restarting the daemon.
+
+## Submitting hand-edited task prose
+
+Machine-read fields and typed records continue to use their dedicated CLI/RPC
+commands. After editing registered human-read task prose, inspect and submit
+only the paths you own:
+
+```bash
+ha doc status --json
+ha doc sync --dry-run --json
+ha doc sync --submit --path tasks/task_01ABC/task_plan.md --json
+```
+
+Repeat `--path` to submit more than one owned file. The daemon re-derives the
+allowed zones, rejects structured or unresolved touches, checks the Git base,
+and creates the attributed commit. Do not run a second raw Git commit for files
+accepted by doc sync.
+
+Top-level ADR, standard, template, and repository-agent prose is not yet in the
+registered doc-sync surface. Keep using its governed repository workflow until
+the write-road registry explicitly classifies those paths; `doc sync` fails
+closed instead of treating an unknown Markdown file as prose.
 
 ## Remote SSH Relay
 

@@ -61,7 +61,7 @@ export function daemonActorAttribution(actor: AuthenticatedActor, executor: Task
     throw new CliActorAttributionError(`Daemon actor ${actor.personId} requires primaryEmail for git author attribution.`);
   }
   return {
-    actor: { kind: "human", id: actor.personId },
+    actor: executor ?? { kind: "human", id: actor.personId },
     commitAuthor: { name: actor.displayName, email },
     source: "daemon",
     ...(executor ? { executor } : {}),

@@ -6,6 +6,7 @@ import net from "node:net";
 import path from "node:path";
 import test from "node:test";
 import { JsonRpcLineClient } from "../../daemon/src/index.ts";
+import { readDaemonClientConfig } from "../src/daemon/client.ts";
 import {
   defaultDaemonUserRoot,
   delay,
@@ -27,6 +28,11 @@ import {
 
 const expectedCliVersion = readCliPackageVersion();
 const cliEntry = path.resolve("packages/cli/src/index.ts");
+
+test("daemon client defaults to local while preserving an explicit direct bootstrap mode", () => {
+  assert.equal(readDaemonClientConfig({}).mode, "local");
+  assert.equal(readDaemonClientConfig({ HARNESS_DAEMON_MODE: "direct" }).mode, "direct");
+});
 
 test("daemon connect relays opaque bytes without creating repository runtime state", { skip: process.platform === "win32" }, async () => {
   await withTempRootAsync(async (rootDir) => {

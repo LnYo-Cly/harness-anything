@@ -30,6 +30,7 @@ const expectedConflictPreflightKinds = [
   "distill-commit",
   "fact-invalidate",
   "doc-generate",
+  "doc-sync-submit",
   "governance-rebuild",
   "init",
   "legacy-copy-safe-docs",
@@ -291,7 +292,14 @@ function runJson(rootDir: string, args: ReadonlyArray<string>, env: NodeJS.Proce
   try {
     const stdout = execFileSync(process.execPath, [cliEntry, "--root", rootDir, "--json", ...args], {
       encoding: "utf8",
-      env: { ...process.env, ...env }
+      env: {
+        ...process.env,
+        HARNESS_DAEMON_MODE: "direct",
+        HARNESS_ACTOR: "agent:conflict-preflight-test",
+        HARNESS_GIT_AUTHOR_NAME: "Harness Test",
+        HARNESS_GIT_AUTHOR_EMAIL: "harness@example.test",
+        ...env
+      }
     });
     return unwrapCommandReceipt(JSON.parse(stdout) as Record<string, any>);
   } catch (error) {

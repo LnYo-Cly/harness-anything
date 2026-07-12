@@ -1,10 +1,14 @@
 // harness-test-tier: integration
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { Effect } from "effect";
+import { appendCommandRuntimeEvent } from "../src/cli/command-runtime-events.ts";
+import type { CommandRunnerContext } from "../src/cli/runner-registry.ts";
+import type { ParsedCommand } from "../src/cli/types.ts";
 import { unwrapCommandReceipt } from "./helpers/receipt.ts";
 import { writeSubstantiveTaskPlan } from "./helpers/task-plan-fixture.ts";
 
@@ -17,6 +21,47 @@ const cleanRuntimeEnv = {
   ZCODE_SESSION_ID: "",
   ANTIGRAVITY_SESSION_ID: ""
 } as const;
+
+test("automatic runtime event failure warns without reversing a successful command receipt", async () => {
+  const command = {
+    rootDir: "/tmp/runtime-event-failure",
+    json: true,
+    action: { kind: "new-task" }
+  } as unknown as ParsedCommand;
+  const context = {
+    currentSessionProbe: {
+      currentSession: Effect.succeed({ source: "runtime", runtime: "codex", sessionId: "codex-event-failure" })
+    },
+    runtimeEventLedgerService: {
+      append: () => Effect.fail({
+        _tag: "RuntimeEventLedgerRejected" as const,
+        sessionId: "codex-event-failure",
+        reason: "global write conflict"
+      })
+    },
+    taskHolderPrincipal: () => ({
+      principal: { personId: "person_test", displayName: "Harness Test" },
+      executor: { kind: "agent", id: "codex" },
+      responsibleHuman: "person:person_test"
+    })
+  } as unknown as CommandRunnerContext;
+
+  const result = await runEffect(appendCommandRuntimeEvent(context, command, {
+    ok: true,
+    command: "new-task",
+    taskId: "task_event_success",
+    packagePath: "harness/tasks/task_event_success"
+  }));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.error, undefined);
+  assert.deepEqual(result.warnings, [{
+    severity: "warning",
+    code: "runtime_event_append_failed",
+    sessionId: "codex-event-failure",
+    message: "Runtime event append failed after the command result was determined: global write conflict"
+  }]);
+});
 
 test("CLI authored write commands append a current-session result event", () => {
   withTempRoot((rootDir) => {
@@ -36,6 +81,11 @@ test("CLI authored write commands append a current-session result event", () => 
     assert.equal(events[0].session.taskId, created.taskId);
     assert.equal(events[0].result.status, "succeeded");
     assert.equal(events[0].result.summary, "CLI command succeeded: new-task");
+    const commandEvents = readdirSync(path.dirname(ledgerPath))
+      .filter((file) => file.endsWith(".jsonl"))
+      .flatMap((file) => readJsonl(path.join(path.dirname(ledgerPath), file)))
+      .filter((event) => event.tool?.toolName === "new-task");
+    assert.equal(commandEvents.length, 1);
   });
 });
 
@@ -104,7 +154,8 @@ test("CLI warns when runtime event actor attribution cannot be resolved", () => 
     const sessionId = "codex-runtime-event-missing-actor";
     const output = runJsonWithStderr(rootDir, ["new-task", "--title", "Missing Actor Event"], {
       CODEX_SESSION_ID: sessionId,
-      CODEX_THREAD_ID: ""
+      CODEX_THREAD_ID: "",
+      HARNESS_DAEMON_MODE: "direct"
     });
     const ledgerPath = path.join(rootDir, ".harness/generated/runtime-events", `${sessionId}.jsonl`);
     const events = readJsonl(ledgerPath);
@@ -271,6 +322,8 @@ function runJson(
         HARNESS_ACTOR: "agent:harness-test",
         HARNESS_GIT_AUTHOR_NAME: "Harness Tester",
         HARNESS_GIT_AUTHOR_EMAIL: "tester@example.test",
+        HARNESS_DAEMON_USER_ROOT: path.join(rootDir, ".daemon-user"),
+        HARNESS_DAEMON_IDLE_MS: "250",
         ...env
       }
     });
@@ -280,6 +333,14 @@ function runJson(
     const failure = error as { readonly stdout?: string };
     return unwrapCommandReceipt(JSON.parse(failure.stdout ?? "{}") as Record<string, any>);
   }
+}
+
+function runEffect<A, E>(effect: Effect.Effect<A, E>): Promise<A> {
+  return new Promise((resolve, reject) => {
+    Effect.runCallback(effect, {
+      onExit: (exit) => exit._tag === "Success" ? resolve(exit.value) : reject(new Error(String(exit.cause)))
+    });
+  });
 }
 
 function runJsonWithStderr(
