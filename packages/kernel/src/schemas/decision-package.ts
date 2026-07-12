@@ -47,6 +47,7 @@ export const DecisionPackageSchema = Schema.Struct({
   urgency: DecisionUrgencySchema,
   vertical: NonBlankStringSchema,
   preset: NonBlankStringSchema,
+  decisionClass: Schema.optional(Schema.Literal("standing-policy")),
   applies_to: Schema.Struct({
     modules: StringArray,
     productLines: StringArray

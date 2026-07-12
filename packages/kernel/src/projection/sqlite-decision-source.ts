@@ -63,6 +63,7 @@ function decisionDocumentToProjectionRow(rootDir: string, documentPath: string):
     ...(decision.urgency ? { urgency: decision.urgency } : {}),
     ...(decision.vertical ? { vertical: decision.vertical } : {}),
     ...(decision.preset ? { preset: decision.preset } : {}),
+    ...(decision.decisionClass ? { decisionClass: decision.decisionClass } : {}),
     ...(decision.proposedBy ? { proposedBy: decision.proposedBy } : {}),
     ...(decision.proposedAt ? { proposedAt: decision.proposedAt } : {}),
     ...(decision.arbiter ? { arbiter: decision.arbiter } : {}),
@@ -85,6 +86,7 @@ const decisionSourceFieldReaders = {
   urgency: (frontmatter) => readScalar(frontmatter, "urgency") as DecisionPackage["urgency"],
   vertical: (frontmatter) => unquote(readScalar(frontmatter, "vertical")),
   preset: (frontmatter) => unquote(readScalar(frontmatter, "preset")),
+  decisionClass: (frontmatter) => optional(readScalar(frontmatter, "decisionClass")) as DecisionPackage["decisionClass"],
   applies_to: (frontmatter) => ({
     modules: parseStringArray(readBlockScalar(frontmatter, "applies_to", "modules"), { tolerateInvalidArrays: true }),
     productLines: parseStringArray(readBlockScalar(frontmatter, "applies_to", "productLines"), { tolerateInvalidArrays: true })
@@ -164,6 +166,7 @@ function canonicalDecisionProjectionRow(row: DecisionProjectionRow): DecisionPro
     ...(row.urgency ? { urgency: row.urgency } : {}),
     ...(row.vertical ? { vertical: row.vertical } : {}),
     ...(row.preset ? { preset: row.preset } : {}),
+    ...(row.decisionClass ? { decisionClass: row.decisionClass } : {}),
     ...(row.proposedBy ? { proposedBy: { ...row.proposedBy } } : {}),
     ...(row.proposedAt ? { proposedAt: row.proposedAt } : {}),
     ...(row.arbiter ? { arbiter: { ...row.arbiter } } : {}),

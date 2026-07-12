@@ -41,6 +41,7 @@ export type DecisionCreateInput = Omit<DecisionPackage, "provenance" | "contentP
 
 export interface DecisionTransitionRequest {
   readonly current: DecisionPackage;
+  readonly decisionClass?: DecisionPackage["decisionClass"];
   readonly arbiter: DecisionPackage["arbiter"];
   readonly decidedAt?: string;
   readonly judgmentOnlyRationale?: string;
@@ -210,12 +211,15 @@ function transitionDecision(
   to: DecisionState,
   fallbackDecidedAt: string
 ): Effect.Effect<DecisionWriteResult, DecisionWriteRejected | WriteError> {
+  const transitionCurrent: DecisionPackage = kind === "decision_accept" && request.decisionClass
+    ? { ...request.current, decisionClass: request.decisionClass }
+    : request.current;
   const transition = explainDecisionStateTransition(request.current.state, to);
   if (!transition.allowed) {
     return Effect.fail(rejection(request.current.decision_id, `decision state transition ${request.current.state} -> ${to} rejected: ${transition.reason}`));
   }
   if (kind === "decision_accept" && request.current.state === "proposed") {
-    const evidenceFloor = acceptEvidenceFloor(request.current, request.judgmentOnlyRationale);
+    const evidenceFloor = acceptEvidenceFloor(transitionCurrent, request.judgmentOnlyRationale);
     if (evidenceFloor) return Effect.fail(evidenceFloor);
   }
   if (kind === "decision_retire") {
@@ -224,7 +228,7 @@ function transitionDecision(
   }
   const decidedAt = request.decidedAt ?? fallbackDecidedAt;
   const next: DecisionPackage = {
-    ...request.current,
+    ...transitionCurrent,
     state: to,
     arbiter: request.arbiter,
     decidedAt,
@@ -236,7 +240,7 @@ function transitionDecision(
         decidedAt,
         arbiter: request.arbiter,
         canonicalization: decisionContentCanonicalization,
-        digest: computeDecisionContentDigest(request.current)
+        digest: computeDecisionContentDigest(transitionCurrent)
       }
     ]
   };

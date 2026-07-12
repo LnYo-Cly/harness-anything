@@ -61,6 +61,7 @@ test("decision documents round-trip self-contained content pins", () => {
     urgency: "high",
     vertical: "software/coding",
     preset: "architecture-decision",
+    decisionClass: "standing-policy",
     applies_to: { modules: ["kernel"], productLines: [] },
     proposedBy: { kind: "agent", id: "codex" },
     proposedAt: "2026-07-11T00:00:00.000Z",
@@ -86,5 +87,7 @@ test("decision documents round-trip self-contained content pins", () => {
   const parsed = parseDecisionDocument(document);
 
   assert.deepEqual(parsed.decision.contentPins, decision.contentPins);
+  assert.equal(parsed.decision.decisionClass, "standing-policy");
+  assert.match(document, /^decisionClass: standing-policy$/mu);
   assert.match(document, /^contentPins:$/mu);
 });

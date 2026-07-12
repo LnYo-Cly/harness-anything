@@ -111,6 +111,7 @@ export interface DecisionProjectionRow {
   readonly urgency?: "low" | "medium" | "high";
   readonly vertical?: string;
   readonly preset?: string;
+  readonly decisionClass?: "standing-policy";
   readonly proposedBy?: { readonly kind: "agent" | "human" | "system"; readonly id: string };
   readonly proposedAt?: string;
   readonly arbiter?: { readonly kind: "agent" | "human" | "system"; readonly id: string };

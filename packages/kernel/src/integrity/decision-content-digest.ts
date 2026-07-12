@@ -5,13 +5,14 @@ export const decisionContentCanonicalization = "decision-content/v1" as const;
 
 export type DecisionContentDigestSource = Pick<
   DecisionPackage,
-  "question" | "applies_to" | "chosen" | "rejected" | "claims"
+  "question" | "applies_to" | "chosen" | "rejected" | "claims" | "decisionClass"
 >;
 
 export function canonicalizeDecisionContent(decision: DecisionContentDigestSource): string {
   return stableStringify({
     schema: decisionContentCanonicalization,
     question: decision.question,
+    ...(decision.decisionClass ? { decisionClass: decision.decisionClass } : {}),
     applies_to: decision.applies_to,
     chosen: decision.chosen,
     rejected: decision.rejected,

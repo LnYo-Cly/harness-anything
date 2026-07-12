@@ -39,6 +39,7 @@ export function parseDecisionTransitionArgs(
       arbiter,
       decidedAt: readOption(args, "--decided-at"),
       ...(op === "accept" && judgmentOnlyRationale ? { judgmentOnlyRationale } : {}),
+      ...(op === "accept" && args.includes("--standing-policy") ? { standingPolicy: true } : {}),
       body: readOption(args, "--body"),
       dryRun: args.includes("--dry-run")
     }
