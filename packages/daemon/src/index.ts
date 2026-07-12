@@ -18,6 +18,8 @@ export {
   type LocalDaemonTarget
 } from "./client/local-json-rpc-client.ts";
 export * from "./authority/index.ts";
+export * from "./broker/index.ts";
+export * from "./resolver/index.ts";
 export {
   actorGitCommitAuthor,
   actorStamp,
