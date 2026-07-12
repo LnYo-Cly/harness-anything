@@ -9,6 +9,36 @@ import type {
 } from "../../kernel/src/index.ts";
 import type { HarnessLayoutOverrides } from "../../kernel/src/index.ts";
 export { commandReceiptEnvelope } from "./command-receipt.ts";
+export {
+  authorityProtocolTuple,
+  canonicalAuthorityRequestDigest,
+  createAuthoritySubmissionService,
+  createInMemoryAuthorityOperationRegistry,
+  createInMemoryReplicaChangeLog
+} from "./authority/index.ts";
+export type {
+  AttributedCoordinatorFactory,
+  AuthorityCommittedReceipt,
+  AuthorityFenceWitness,
+  AuthorityIndeterminateReceipt,
+  AuthorityOperationEnvelope,
+  AuthorityOperationReceipt,
+  AuthorityOperationRecord,
+  AuthorityOperationRegistry,
+  AuthorityOperationState,
+  AuthorityProtocolTuple,
+  AuthorityRejectedReceipt,
+  AuthorityRetryableReceipt,
+  AuthoritySubmissionService,
+  AuthoritySubmissionServiceOptions,
+  CanonicalPublication,
+  CanonicalPublicationInspector,
+  DelegationTokenClaims,
+  DelegationTokenVerification,
+  DelegationTokenVerifier,
+  ReplicaChangeLog,
+  ReplicaChangeRecord
+} from "./authority/index.ts";
 export type { CommandFailureReceipt, CommandReceipt, CommandReceiptEnvelope } from "./command-receipt.ts";
 export { CODE_DOC_RECONCILIATION_DOCUMENT, evaluateCodeDocReconciliationGate, renderCodeDocReconciliationDraft } from "./code-doc-reconciliation.ts";
 export { currentSessionToProvenancePayload, defaultRuntimeSessionEnvCandidates, makeEnvironmentCurrentSessionProbe, makeHumanFallbackSessionProbe } from "./current-session-probe.ts";

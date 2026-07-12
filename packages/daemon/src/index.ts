@@ -17,6 +17,7 @@ export {
   type LocalDaemonJsonRpcOptions,
   type LocalDaemonTarget
 } from "./client/local-json-rpc-client.ts";
+export * from "./authority/index.ts";
 export {
   actorGitCommitAuthor,
   actorStamp,
@@ -105,6 +106,23 @@ export {
   type JsonLineFrameBatch,
   type JsonLineFrameReader
 } from "./transport/frame-codec.ts";
+export {
+  createLengthPrefixedFrameReader,
+  defaultAuthorityMaxFrameBytes,
+  encodeLengthPrefixedFrame,
+  type LengthFrameBatch,
+  type LengthPrefixedFrameReader
+} from "./transport/length-frame-codec.ts";
+export {
+  AuthorityTransportDisconnectedError,
+  PersistentSshAuthorityClient,
+  buildAuthoritySshArgs,
+  type AuthoritySshTarget,
+  type PersistentSshAuthorityClientOptions,
+  type SshAuthorityChild,
+  type SshAuthorityChildFactory,
+  type TransportFlowLimits
+} from "./transport/persistent-ssh-authority-client.ts";
 export {
   serveJsonRpcStream,
   type DaemonTransportConnection,
