@@ -10,6 +10,7 @@ import {
   WriteAttributionSchema
 } from "../../src/schemas/actor-attribution.ts";
 import { RuntimeEventRecordV2Schema } from "../../src/schemas/runtime-event.ts";
+import { AttributionEventSchema } from "../../src/schemas/attribution-event.ts";
 import { JournalRecordV2Schema } from "../../src/schemas/write-journal.ts";
 
 const fixtureRoot = "packages/kernel/fixtures/schemas/write-journal-op";
@@ -60,6 +61,35 @@ test("write attribution enforces executor/source correspondence", () => {
     principalSource: source,
     executorSource: "client-asserted"
   }));
+});
+
+test("immutable attribution event reuses actor axes and enforces source correspondence", () => {
+  const decode = Schema.decodeUnknownSync(AttributionEventSchema);
+  const event = {
+    schema: "attribution-event/v1",
+    eventId: "attribution:op-schema",
+    opId: "op-schema",
+    journalRecordSchema: "write-journal/v2",
+    entityId: "task/task-schema",
+    kind: "doc_write",
+    actor: {
+      principal: { kind: "person", personId: "person_zeyu" },
+      executor: { kind: "agent", id: "codex" }
+    },
+    principalSource: {
+      kind: "local-configured",
+      authority: "harness.yaml",
+      authoritySha256: "sha256:fixture"
+    },
+    executorSource: "client-asserted",
+    at: "2026-07-13T00:00:00.000Z",
+    mutationCommitSha: "commit-schema",
+    payloadHash: "payload-schema",
+    payloadRef: { path: ".harness/write-journal/payloads/op-schema.json", sha256: "sha256:payload" }
+  } as const;
+
+  assert.deepEqual(decode(event).actor, Schema.decodeUnknownSync(ActorAxesSchema)(event.actor));
+  assert.throws(() => decode({ ...event, executorSource: "none" }));
 });
 
 test("governed invalid fixtures fail closed", () => {

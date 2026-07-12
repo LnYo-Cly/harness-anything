@@ -27,6 +27,7 @@ import { assertCommitPlanAddable, commitTouchedPaths } from "./write-journal-git
 import { makeLocalVersionControlSystem } from "./local-version-control-system.ts";
 import { assertCodeDocGitEvidence, assertNoUncoordinatedCodeDocChange } from "./write-journal-code-doc-policy.ts";
 import { runLedgerMaterializer } from "./ledger-materializer.ts";
+import { makeLocalGitAttributionEventStore, type AttributionEventStore } from "./write-journal-attribution-events.ts";
 import { assertDirectWriteAllowed, withRepoLocks, WriteLockHeldError } from "./write-journal-locks.ts";
 import { NonTaskWriteEntityError, taskIdForJournalRecord } from "./write-journal-entity.ts";
 import { rejectWrite, WriteRejectedError } from "./write-journal-rejection.ts";
@@ -95,6 +96,7 @@ function makeJournaledWriteCoordinatorInternal(
   const heldGlobalLock = options.heldGlobalLock;
   const commitAuthor = options.commitAuthor;
   const versionControlSystem = options.versionControlSystem;
+  const attributionEventStore = options.attributionEventStore ?? makeLocalGitAttributionEventStore();
   const sessionId = cleanSessionId(options.sessionId);
   const autoMaterialize = options.autoMaterialize ?? true;
   const pending: WriteOp[] = [];
@@ -103,7 +105,7 @@ function makeJournaledWriteCoordinatorInternal(
       const state = readDurableState(journalPath, watermarkPath, rootDir);
       pending.splice(0, pending.length);
       const pendingRecords = uniquePendingRecords(state.records, state.applied);
-      return flushRecords(reason, rootDir, runtimeContext, journalPath, watermarkPath, state.watermark, pendingRecords, state.fileApplied, sessionId, commitAuthor, versionControlSystem);
+      return flushRecords(reason, rootDir, runtimeContext, journalPath, watermarkPath, state.watermark, pendingRecords, state.fileApplied, sessionId, commitAuthor, versionControlSystem, attributionEventStore);
     }, { heldGlobalLock }),
     catch: (cause): WriteError => toJournalError(cause)
   });
@@ -111,7 +113,7 @@ function makeJournaledWriteCoordinatorInternal(
     try: (): RecoveryReport => withRepoLocks(rootDir, runtimeContext, journalPath, operationalActor, lockTtlMs, [], () => {
       const state = readDurableState(journalPath, watermarkPath, rootDir);
       const pendingRecords = uniquePendingRecords(state.records, state.applied);
-      const report = flushRecords("recovery", rootDir, runtimeContext, journalPath, watermarkPath, state.watermark, pendingRecords, state.fileApplied, sessionId, commitAuthor, versionControlSystem);
+      const report = flushRecords("recovery", rootDir, runtimeContext, journalPath, watermarkPath, state.watermark, pendingRecords, state.fileApplied, sessionId, commitAuthor, versionControlSystem, attributionEventStore);
       return {
         replayedOps: report.opCount,
         recoveredWatermark: report.watermark
@@ -278,7 +280,8 @@ function flushRecords(
   fileApplied: ReadonlySet<string>,
   sessionId?: string,
   commitAuthor?: GitCommitAuthor,
-  versionControlSystem?: VersionControlSystem
+  versionControlSystem?: VersionControlSystem,
+  attributionEventStore: AttributionEventStore = makeLocalGitAttributionEventStore()
 ): FlushReport {
   const touchedPaths: string[] = [];
   const committedOpIds: string[] = [];
@@ -300,7 +303,7 @@ function flushRecords(
     committedOpIds.push(record.opId);
   }
 
-  const lastCommitSha = commitTouchedPaths(
+  const mutationCommitSha = commitTouchedPaths(
     rootDir,
     touchedPaths,
     committedOpIds,
@@ -312,6 +315,38 @@ function flushRecords(
       versionControlSystem
     }
   );
+  const eventVcs = versionControlSystem ?? makeLocalVersionControlSystem();
+  const eventWrites = plannedRecords
+    .filter((entry): entry is typeof entry & { readonly record: Extract<ReadableJournalRecord, { readonly schema: "write-journal/v2" }> } => entry.record.schema === "write-journal/v2")
+    .map(({ record }) => attributionEventStore.ensure(record, {
+      rootDir,
+      rootInput,
+      commitSha: mutationCommitSha,
+      versionControlSystem: eventVcs
+    }));
+  const eventPaths = eventWrites.flatMap((write) => write.touchedPaths);
+  const attributionCommitSha = eventPaths.length > 0
+    ? commitTouchedPaths(
+      rootDir,
+      eventPaths,
+      eventWrites.map((write) => write.event.opId),
+      rootInput,
+      `attribution trail: ${eventWrites.map((write) => write.event.opId).join(",")}`,
+      sessionId,
+      { author: commitAuthor, versionControlSystem }
+    )
+    : mutationCommitSha;
+  const confirmedAttributionOpIds = new Set(eventWrites
+    .filter((write) => attributionEventStore.confirms(write.event, {
+      rootDir,
+      rootInput,
+      commitSha: attributionCommitSha,
+      versionControlSystem: eventVcs
+    }))
+    .map((write) => write.event.opId));
+  if (confirmedAttributionOpIds.size !== eventWrites.length) {
+    throw new Error("attribution event durability confirmation failed");
+  }
   const projectionHash = committedOpIds.length > 0
     ? rebuildProjectionHash(rootDir, rootInput, touchedPaths, previousProjectionSourceHash)
     : previousWatermark?.projectionHash ?? "no-projection-change";
@@ -323,12 +358,12 @@ function flushRecords(
     const fullWatermark = {
       schema: "write-watermark/v1",
       lastCommittedOpIds: allCommitted,
-      lastCommitSha,
+      lastCommitSha: attributionCommitSha,
       projectionHash,
       updatedAt: new Date().toISOString()
     } satisfies WriteWatermark;
     writeWatermarkDurably(watermarkPath, fullWatermark);
-    if (tryCompactJournal(journalPath, new Set(allCommitted)) && recentCommitted.length < allCommitted.length) {
+    if (tryCompactJournal(journalPath, new Set(allCommitted), confirmedAttributionOpIds) && recentCommitted.length < allCommitted.length) {
       writeWatermarkDurably(watermarkPath, {
         ...fullWatermark,
         lastCommittedOpIds: recentCommitted,
@@ -480,9 +515,9 @@ function recentOpIds(opIds: ReadonlyArray<string>): ReadonlyArray<string> {
   return opIds.slice(-maxWatermarkCommittedOpIds);
 }
 
-function tryCompactJournal(journalPath: string, coveredOpIds: ReadonlySet<string>): boolean {
+function tryCompactJournal(journalPath: string, coveredOpIds: ReadonlySet<string>, confirmedAttributionOpIds: ReadonlySet<string>): boolean {
   try {
-    compactJournalDurably(journalPath, coveredOpIds);
+    compactJournalDurably(journalPath, coveredOpIds, confirmedAttributionOpIds);
     return true;
   } catch {
     // Compaction is an optimization. The watermark is authoritative for replay,
@@ -491,7 +526,7 @@ function tryCompactJournal(journalPath: string, coveredOpIds: ReadonlySet<string
   }
 }
 
-function compactJournalDurably(journalPath: string, coveredOpIds: ReadonlySet<string>): void {
+function compactJournalDurably(journalPath: string, coveredOpIds: ReadonlySet<string>, confirmedAttributionOpIds: ReadonlySet<string>): void {
   if (!existsSync(journalPath)) return;
   const body = readFileSync(journalPath, "utf8");
   if (body.trim().length === 0) return;
@@ -502,6 +537,7 @@ function compactJournalDurably(journalPath: string, coveredOpIds: ReadonlySet<st
     .filter((line) => {
       const parsed = JSON.parse(line) as Partial<ReadableJournalRecord | LockTakeoverRecord | DeleteAuditRecord | ApplyMarkerRecord>;
       if (parsed.schema !== "write-journal/v1" && parsed.schema !== "write-journal/v2" && parsed.schema !== "apply-marker/v1") return true;
+      if (parsed.schema === "write-journal/v2" && typeof parsed.opId === "string" && !confirmedAttributionOpIds.has(parsed.opId)) return true;
       return typeof parsed.opId !== "string" || !coveredOpIds.has(parsed.opId);
     });
   writeFileDurably(journalPath, retained.length === 0 ? "" : `${retained.join("\n")}\n`);

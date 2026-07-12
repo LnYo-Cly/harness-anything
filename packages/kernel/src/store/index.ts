@@ -6,3 +6,4 @@ export * from "./local-lock-registry.ts";
 export * from "./local-version-control-system.ts";
 export * from "./markdown-artifact-store.ts";
 export * from "./write-journal-coordinator.ts";
+export * from "./write-journal-attribution-events.ts";

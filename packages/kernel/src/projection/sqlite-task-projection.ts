@@ -12,6 +12,8 @@ import type { FactAnchorRow, RelationCoverageRow, RelationGraphEdgeRow } from ".
 import { buildRelationGraphProjection } from "./relation-graph-projection.ts";
 import { projectionVersion, queryDecisionProjectionRows, queryTaskChildrenRows, queryTaskProjectionRows, queryTaskSubtreeRows, readRelationGraphRows, writeProjectionDatabase, tryReadProjectionDatabase } from "./sqlite-projection-store.ts";
 import { compareDecisionRows, hashDecisionProjectionRows, readDecisionProjectionRows } from "./sqlite-decision-source.ts";
+import { materializeAttributionProjection } from "./sqlite-attribution-projection.ts";
+import { attributionEventSourceHash } from "../local/attribution-event-source.ts";
 import { compareRows, hashExactRows, readMarkdownSource, taskEntryToRow } from "./sqlite-task-source.ts";
 export { hashTaskProjectionRows } from "./sqlite-task-source.ts";
 export type {
@@ -70,6 +72,7 @@ export function rebuildTaskProjection(options: TaskProjectionOptions): Projectio
   projectDeclaredEntities(runtimeContext, sessionEntityDeclaration, projectionPath);
   projectDeclaredEntities(runtimeContext, executionDeclaration, projectionPath);
   projectDeclaredEntities(runtimeContext, reviewDeclaration, projectionPath);
+  materializeAttributionProjection(runtimeContext, projectionPath);
   return {
     rows,
     warnings: source.warnings
@@ -175,7 +178,7 @@ function projectionSourceHash(taskSourceHash: string, rootInput: ReturnType<type
     table: declaration.projection.table,
     rows: discoverDeclaredEntityRows(rootInput, declaration)
   }));
-  return sha256Text(JSON.stringify({ taskSourceHash, entityRows }));
+  return sha256Text(JSON.stringify({ taskSourceHash, entityRows, attributionEventSourceHash: attributionEventSourceHash(rootInput) }));
 }
 
 function declaredProjectionMatches(rootInput: ReturnType<typeof createHarnessRuntimeContext>, projectionPath: string): boolean {
