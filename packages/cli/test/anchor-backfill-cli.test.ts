@@ -219,7 +219,7 @@ function configureTestIdentity(rootDir: string): void {
     "settings:\n  identity:\n    personId: person_test\n    displayName: Harness Test"
   ), "utf8");
   execFileSync("git", ["-C", harnessRoot, "add", "harness.yaml"], { stdio: "ignore" });
-  execFileSync("git", ["-C", harnessRoot, "commit", "-m", "test: configure identity"], { stdio: "ignore" });
+  execFileSync("git", ["-C", harnessRoot, "-c", "user.name=Harness Test", "-c", "user.email=harness@example.test", "commit", "-m", "test: configure identity"], { stdio: "ignore" });
 }
 
 function writeContextDocs(rootDir: string): void {

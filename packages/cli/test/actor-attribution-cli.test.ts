@@ -310,7 +310,7 @@ function setConfiguredIdentity(rootDir: string, personId: string, displayName: s
     .replace(/^    displayName:.*$/mu, `    displayName: ${displayName}`);
   writeFileSync(configPath, body, "utf8");
   git(harnessRoot, ["add", "harness.yaml"]);
-  git(harnessRoot, ["commit", "-m", `test: configure ${personId}`]);
+  git(harnessRoot, ["-c", "user.name=Harness Test", "-c", "user.email=harness@example.test", "commit", "-m", `test: configure ${personId}`]);
 }
 
 function journalRecord(opId: string, entityId: string, kind: string, id: string, source: string): string {
