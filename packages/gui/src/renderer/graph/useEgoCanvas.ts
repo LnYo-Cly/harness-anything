@@ -57,6 +57,7 @@ export function useEgoCanvas({
   relations,
   axes,
   focusRef,
+  onFocusChange,
 }: {
   tasks: TaskRow[];
   decisions: DecisionRow[];
@@ -64,6 +65,17 @@ export function useEgoCanvas({
   relations: RelationEdge[];
   axes: AxisFilter;
   focusRef?: string | null;
+  /**
+   * 焦点变更上行(G3 §④2 根因修复)。画布内双击 / Switcher / 抽屉「设为焦点」触发
+   * openFocus 时,通过此回调把新焦点回灌给 AppLocation.focusedEntityRef —— 这样切换
+   * facet(关系→演化)时,GenealogyTimelineView 能拿到正确的 decision ref。
+   *
+   * 不上行 = 焦点只活在 GraphView 本地,一换面就丢。不传则维持旧行为(纯本地)。
+   *
+   * 收敛性:focusRef prop 变化时 bootstrap effect 也会调 openFocus → 同一 id 二次上行
+   * → App.tsx 的 navigate 走 locationsEqual 去重 → 无穷循环被结构性切断。
+   */
+  onFocusChange?: (id: string | null) => void;
 }): EgoCanvas {
   const [focusId, setFocusId] = useState<string | null>(null);
   const [history, setHistory] = useState<FocusHistoryState>(createFocusHistory);
@@ -95,8 +107,11 @@ export function useEgoCanvas({
       setFocusId(canonical);
       setHistory((prev) => pushFocus(prev, canonical)); // 重复推同 id 会被 pushFocus 折叠
       resetCanvasTo(canonical);
+      // G3 §④2:上行同步 AppLocation.focusedEntityRef。换焦点不只改本地,还要让
+      // EntityWorkspace 的 facet 切换(关系↔演化)能拿到最新焦点。
+      if (onFocusChange) onFocusChange(canonical);
     },
-    [resetCanvasTo],
+    [resetCanvasTo, onFocusChange],
   );
   // 稳定引用:bootstrap effect 只在 focusRef / 数据变时触发,不因 openFocus 身份变动而重排。
   const openFocusRef = useRef(openFocus);

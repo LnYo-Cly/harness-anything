@@ -38,11 +38,25 @@ export interface DrillState {
   groupBy: LaneGroupBy;
 }
 
+/**
+ * 实体工作台的「面」。同一个 focusedEntityRef 下,用户在看它的哪一面。
+ *
+ * - relations:关系图(Graph) — 默认面,所有实体都有。
+ * - lineage:演化史(Genealogy) — 仅 decision 有(task/fact 无谱系)。
+ *   GENEALOGY_KINDS(layout.ts:10-15)只认 decision↔decision 的 refines/narrows/
+ *   supersedes/supports,task/fact 没有演化史。EntityWorkspace 据此对非 decision 隐藏 tab。
+ *
+ * null = 未进入工作台 / 在非 graph 视图。See EntityWorkspace.tsx 的 facet 路由。
+ */
+export type EntityFacet = "relations" | "lineage";
+
 export interface AppLocation {
   view: ViewId;
   selectedId: string | null;
   previewId: string | null;
   focusedEntityRef: string | null;
+  /** 实体工作台的面(仅 view="graph" 时有意义)。 */
+  entityFacet: EntityFacet | null;
   taskFilters: TaskFilters;
   drill: DrillState | null;
 }
@@ -68,6 +82,7 @@ export function locationsEqual(a: AppLocation, b: AppLocation): boolean {
     a.selectedId === b.selectedId &&
     a.previewId === b.previewId &&
     a.focusedEntityRef === b.focusedEntityRef &&
+    a.entityFacet === b.entityFacet &&
     JSON.stringify(a.taskFilters) === JSON.stringify(b.taskFilters) &&
     JSON.stringify(a.drill) === JSON.stringify(b.drill)
   );

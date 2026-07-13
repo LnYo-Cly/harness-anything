@@ -54,7 +54,6 @@
   "views.homeView.learnAboutMultiEndSynchronization": "About multi-device sync",
   "views.graphView.thereNoTrigramRelationshipDataYet": "No triadic relation data yet",
   "views.graphView.currentLedgerHasNoTasksDecisionsFacts": "The current ledger has no tasks, decisions, or facts to project. Once records appear, the graph shows real nodes and kernel relation edges.",
-  "views.genealogyTimelineView.evolutionDecisionMaking": "Genealogy",
   "views.genealogyTimelineView.decisionMakingParticipationGenealogy": "decisions in lineage ·",
   "views.genealogyTimelineView.genealogyEdge": "genealogy edges",
   "views.genealogyTimelineView.genealogyRingWarning": "Lineage cycle warning ·",

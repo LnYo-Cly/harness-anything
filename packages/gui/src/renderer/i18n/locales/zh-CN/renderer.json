@@ -7,7 +7,6 @@
   "renderer.shellConfig.factTriage": "事实分诊",
   "renderer.shellConfig.evidenceExecution": "执行证据",
   "renderer.shellConfig.graph": "关系图",
-  "renderer.shellConfig.genealogy": "演化史",
   "renderer.shellConfig.engineAdapter": "引擎 Adapter",
   "renderer.shellConfig.settings": "设置",
   "renderer.shellConfig.project": "项目",

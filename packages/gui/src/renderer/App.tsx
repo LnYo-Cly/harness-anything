@@ -20,6 +20,7 @@ import { useCatalogQuery } from "./catalog-data.ts";
 import { useFavorites } from "./model/favorites.ts";
 import { MOCK_BACKED_VIEWS, type ViewId } from "./shell-config.tsx";
 import { useNavigationHistory } from "./navigation/useNavigationHistory.ts";
+import type { EntityFacet } from "./navigation/navigationHistory.ts";
 import { t, useI18n } from "./i18n/index.tsx";
 
 function AppShell() {
@@ -41,6 +42,7 @@ function AppShell() {
     selectedId: null,
     previewId: null,
     focusedEntityRef: null,
+    entityFacet: null,
     taskFilters: DEFAULT_TASK_FILTERS,
     drill: null,
   });
@@ -122,6 +124,7 @@ function AppShell() {
     navigate({
       view: v,
       focusedEntityRef: null,
+      entityFacet: null,
       selectedId: null,
       previewId: null,
       drill: v !== "board" ? null : location.drill,
@@ -133,6 +136,7 @@ function AppShell() {
     navigate({
       view: "overview",
       focusedEntityRef: null,
+      entityFacet: null,
       selectedId: null,
       previewId: null,
       drill: null,
@@ -161,7 +165,7 @@ function AppShell() {
   };
 
   const openTaskDetail = (id: string) => {
-    navigate({ focusedEntityRef: `task/${id}`, previewId: null, selectedId: id });
+    navigate({ focusedEntityRef: `task/${id}`, entityFacet: null, previewId: null, selectedId: id });
   };
 
   // W2B 活链接:跨实体跳转(task→详情, decision→决策池, fact→事实分诊)
@@ -189,10 +193,35 @@ function AppShell() {
   const navigateToDecision = (decisionId: string) =>
     navigateToEntity(`decision/${decisionId}`);
   const navigateToTask = (taskId: string) => openTaskDetail(taskId);
+
+  // 实体工作台内部焦点变更(GraphView 双击 / Genealogy 侧栏点选)。
+  // 不改 view,保留 entityFacet —— facet 切换走 setEntityFacet。
+  // 持久化 ref 让 facet 切换(关系↔演化)能拿到正确焦点。
+  const focusEntityInWorkspace = (ref: string | null) => {
+    if (ref === null) {
+      updateLocation({ focusedEntityRef: null });
+      return;
+    }
+    // 把 ego byId key 翻译成 navRef:task 是裸 id,其他与 byId key 同形。
+    const navRef = ref.includes("/") ? ref : `task/${ref}`;
+    // 走 navigate 而非 updateLocation:焦点变更应推栈(用户「回到上一个焦点」)。
+    // locationsEqual 防重复推同位置,useEgoCanvas 收到新 focusRef 再上游时也不会循环。
+    navigate({ focusedEntityRef: navRef });
+  };
+
+  // 实体工作台 facet 切换(Graph ↔ Genealogy)。同一 focusedEntityRef 下切面,推栈
+  // 让 Cmd+[ 能从「演化」回到「关系」。
+  const setEntityFacet = (facet: EntityFacet) => {
+    navigate({ entityFacet: facet });
+  };
+
+  // 跨视图「在关系图中聚焦」入口(Fact Triage / Decision Pool 等的「在关系图中看此实体」按钮)。
+  // 跳进 Graph facet,默认 relations 面。
   const focusEntityInGraph = (ref: string) => {
     navigate({
       focusedEntityRef: ref,
       view: "graph",
+      entityFacet: "relations",
       selectedId: null,
       previewId: null,
     });
@@ -270,6 +299,7 @@ function AppShell() {
               taskFilters={location.taskFilters}
               drill={location.drill}
               focusedEntityRef={location.focusedEntityRef}
+              entityFacet={location.entityFacet}
               project={project}
               catalog={catalogQuery.data}
               catalogLoading={catalogQuery.isLoading}
@@ -281,7 +311,6 @@ function AppShell() {
               events={MOCK_EVENTS}
               projectName={project.name}
               goto={goto}
-              onMultiViewSwitch={(v: ViewId) => navigate({ view: v })}
               onOpenTaskPreview={openTaskPreview}
               onDrillToBoard={drillToBoard}
               onUpdateTask={updateTask}
@@ -290,6 +319,8 @@ function AppShell() {
               onNavigateEntity={navigateToEntity}
               onNavigateDecision={navigateToDecision}
               onNavigateTask={navigateToTask}
+              onFocusEntityChange={focusEntityInWorkspace}
+              onEntityFacetChange={setEntityFacet}
               onFocusEntityInGraph={focusEntityInGraph}
               onFiltersChange={(filters: TaskFilters) =>
                 updateLocation({ taskFilters: filters })

@@ -7,7 +7,6 @@
   "renderer.shellConfig.factTriage": "Fact Triage",
   "renderer.shellConfig.evidenceExecution": "Execution Evidence",
   "renderer.shellConfig.graph": "Graph",
-  "renderer.shellConfig.genealogy": "Genealogy",
   "renderer.shellConfig.engineAdapter": "Engine Adapter",
   "renderer.shellConfig.settings": "Settings",
   "renderer.shellConfig.project": "Project",

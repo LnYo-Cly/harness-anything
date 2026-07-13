@@ -128,7 +128,7 @@ describe("GenealogyTimelineView filter correctness", () => {
     ];
 
     const markup = renderToStaticMarkup(
-      createElement(GenealogyTimelineView, { decisions, relations }),
+      createElement(GenealogyTimelineView, { decisions, relations, focusRef: "decision/dec_mrcaa7tp" }),
     );
 
     // header 统计:2 决策参与,1 演化边
@@ -140,6 +140,7 @@ describe("GenealogyTimelineView filter correctness", () => {
     expect(markup).toContain("GUI 控制面 = 可遍历三元语图");
     // 不该出现 empty-state
     expect(markup).not.toContain("genealogy-timeline-empty-state");
+    expect(markup).not.toContain("genealogy-no-focus");
   });
 
   it("counts all four genealogy kinds and dedupes identical from|to|kind triples", () => {
@@ -157,7 +158,7 @@ describe("GenealogyTimelineView filter correctness", () => {
     ];
 
     const markup = renderToStaticMarkup(
-      createElement(GenealogyTimelineView, { decisions, relations }),
+      createElement(GenealogyTimelineView, { decisions, relations, focusRef: "decision/dec_a" }),
     );
 
     // 4 个唯一 from|to|kind 组合(b/d/c supersedes + a supports b 都各算一条;
@@ -365,7 +366,7 @@ describe("Genealogy layout (DAG 拓扑)", () => {
       edge("decision/dec_new", "decision/dec_mid_a", "narrows"),
     ];
     const markup = renderToStaticMarkup(
-      createElement(GenealogyTimelineView, { decisions, relations }),
+      createElement(GenealogyTimelineView, { decisions, relations, focusRef: "decision/dec_old" }),
     );
     expect(markup).not.toContain('data-encoding-tab="ordinal"');
     expect(markup).not.toContain('data-encoding-tab="day-cluster"');
@@ -432,7 +433,7 @@ describe("Genealogy layout (DAG 拓扑)", () => {
       edge("decision/dec_b", "decision/dec_a", "refines"),
     ];
     const markup = renderToStaticMarkup(
-      createElement(GenealogyTimelineView, { decisions, relations }),
+      createElement(GenealogyTimelineView, { decisions, relations, focusRef: "decision/dec_a" }),
     );
     expect(markup).toContain("Lineage cycle warning");
   });

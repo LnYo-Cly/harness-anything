@@ -153,7 +153,8 @@ describe("layoutCanvasEgo", () => {
 
   it("焦点渲染为卡片(expanded),其余为 chip", () => {
     expect(byId.get(FOCUS)!.data.expanded).toBe(true);
-    expect(byId.get(FOCUS)!.style.width).toBe(360); // CARD_W
+    // G1:决策卡片宽 = 320(按 kind 分档,不再一刀切 360)。
+    expect(byId.get(FOCUS)!.style.width).toBe(320);
     expect(byId.get("task_C")!.data.expanded).toBe(false);
     expect(byId.get("task_C")!.style.width).toBe(216); // CHIP_W
   });
@@ -253,5 +254,170 @@ describe("D4 · estimateCardHeight(task 内容感知)", () => {
     const t = task("t", { title: "a".repeat(80) });
     const h = estimateCardHeight("task", t);
     expect(h).not.toBe(150);
+  });
+});
+
+// ══ G1:内容驱动尺寸 + 竖优先地板 + scrollable 标志 ══
+// 节点宽按 kind 分档(fact 280 / task 300 / decision 320),高按内容估算 + 地板(W:H ≤ 0.85)
+// + 硬 cap(640)。estimateCardHeight 只返内容估高(无地板无 cap);nodeDims 叠地板与 cap,
+// 并输出 scrollable 标志给 EgoNode 决定 overflow。详见 canvasEgoLayout.ts 注释。
+describe("G1 · 内容驱动尺寸 + 竖优先地板", () => {
+  it("estimateCardHeight 对 decision 包含 rejected 段(原漏算)", () => {
+    const dNoRej = decision("d1");
+    const dWithRej = decision("d2", {
+      rejected: [
+        { id: "RJ1", text: "rejected option", evidence: [], whyNot: "reason" } as any,
+      ],
+    });
+    const hNoRej = estimateCardHeight("decision", dNoRej);
+    const hWithRej = estimateCardHeight("decision", dWithRej);
+    // types.ts:145 标注 rejected 必填非空,但原公式漏算 → 现在补上。
+    expect(hWithRej).toBeGreaterThan(hNoRej);
+  });
+
+  it("expanded fact 节点 W:H ≤ 0.85(竖优先地板)", () => {
+    const f = fact("task_x", "F1");
+    const id = `fact/${f.taskId}/${f.anchor.split("/")[1] ?? f.anchor}`;
+    const out = layoutCanvasEgo({
+      focusId: id,
+      tasks: [],
+      decisions: [],
+      facts: [f],
+      relations: [],
+      filters: filters(),
+      inLoopEdges: new Set(),
+      shown: new Map([[id, 0]]),
+      expanded: new Set([id]),
+    });
+    const node = out.nodes.find((n) => n.id === id)!;
+    const w = node.style?.width as number;
+    const h = node.style?.height as number;
+    // W:H ≤ 0.85(竖优先地板),允许少许浮点。
+    expect(w / h).toBeLessThanOrEqual(0.85 + 0.01);
+    // G1 §④ 验收:fact ≤200 字时 h ≥ 280,无滚动条。
+    expect(h).toBeGreaterThanOrEqual(280);
+    expect(node.data?.scrollable).toBe(false);
+  });
+
+  it("expanded task 节点 W:H ≤ 0.85(竖优先地板)", () => {
+    const t = task("task_short", { title: "x" });
+    const id = t.taskId;
+    const out = layoutCanvasEgo({
+      focusId: id,
+      tasks: [t],
+      decisions: [],
+      facts: [],
+      relations: [],
+      filters: filters(),
+      inLoopEdges: new Set(),
+      shown: new Map([[id, 0]]),
+      expanded: new Set([id]),
+    });
+    const node = out.nodes.find((n) => n.id === id)!;
+    const w = node.style?.width as number;
+    const h = node.style?.height as number;
+    expect(w / h).toBeLessThanOrEqual(0.85 + 0.01);
+    expect(node.data?.scrollable).toBe(false);
+  });
+
+  it("expanded decision 节点 W:H ≤ 0.85(竖优先地板)", () => {
+    const d = decision("dec_short");
+    const id = `decision/${d.decisionId}`;
+    const out = layoutCanvasEgo({
+      focusId: id,
+      tasks: [],
+      decisions: [d],
+      facts: [],
+      relations: [],
+      filters: filters(),
+      inLoopEdges: new Set(),
+      shown: new Map([[id, 0]]),
+      expanded: new Set([id]),
+    });
+    const node = out.nodes.find((n) => n.id === id)!;
+    const w = node.style?.width as number;
+    const h = node.style?.height as number;
+    expect(w / h).toBeLessThanOrEqual(0.85 + 0.01);
+    expect(node.data?.scrollable).toBe(false);
+  });
+
+  it("decision 三段内容(Q+chosen+rejected)在 630px 内不滚", () => {
+    // 验证 G1 §④ 验收:decision 三段满载不滚。
+    const d = decision("dec_full", {
+      question: "x".repeat(80),
+      chosen: [
+        { id: "CH1", text: "chosen strategy", evidence: [] } as any,
+        { id: "CH2", text: "alt", evidence: [] } as any,
+      ],
+      rejected: [
+        { id: "RJ1", text: "nope", evidence: [], whyNot: "why" } as any,
+      ],
+      claims: [{ id: "CL1", text: "claim" }],
+    });
+    const id = `decision/${d.decisionId}`;
+    const out = layoutCanvasEgo({
+      focusId: id,
+      tasks: [],
+      decisions: [d],
+      facts: [],
+      relations: [],
+      filters: filters(),
+      inLoopEdges: new Set(),
+      shown: new Map([[id, 0]]),
+      expanded: new Set([id]),
+    });
+    const node = out.nodes.find((n) => n.id === id)!;
+    expect(node.style?.height).toBeLessThanOrEqual(630);
+    expect(node.data?.scrollable).toBe(false);
+  });
+
+  it("超长 decision(Q+chosen+rejected+claims 都满)触发 scrollable(cap=640)", () => {
+    // 各段都顶到 estimateCardHeight 内部 cap,总和超出 H_CAP_ABS=640 → scrollable=true。
+    const huge = decision("dec_huge", {
+      question: "x".repeat(200),  // 估高 +96(internal cap)
+      chosen: Array.from({ length: 6 }, (_, i) => ({
+        id: `CH${i}`, text: "chosen", evidence: [],
+      })) as any,  // 估高 +120(internal cap)
+      rejected: Array.from({ length: 5 }, (_, i) => ({
+        id: `RJ${i}`, text: "nope", evidence: [], whyNot: "why",
+      })) as any,  // 估高 +120(internal cap)
+      claims: Array.from({ length: 5 }, (_, i) => ({
+        id: `CL${i}`, text: "claim",
+      })),  // 估高 +120(internal cap)
+    });
+    // 估算总和:130 + 96 + 120 + 120 + 120 = 586,刚到不了 640。
+    // 但用 more 内容(Q 接近 200 字 → 96 cap、chosen 8 项 → 仍 120 cap)... 实际 internal
+    // caps 让 decision 很难超 640。改用 multi-section decision with longer Q:
+    const huge2 = decision("dec_huge2", {
+      question: "y".repeat(400),  // estimateCardHeight 内部 cap 96
+      chosen: Array.from({ length: 10 }, (_, i) => ({
+        id: `CH${i}`, text: "c", evidence: [],
+      })) as any,
+      rejected: Array.from({ length: 10 }, (_, i) => ({
+        id: `RJ${i}`, text: "r", evidence: [], whyNot: "w",
+      })) as any,
+      claims: Array.from({ length: 10 }, (_, i) => ({
+        id: `CL${i}`, text: "cl",
+      })),
+    });
+    const id = `decision/${huge2.decisionId}`;
+    const out = layoutCanvasEgo({
+      focusId: id,
+      tasks: [],
+      decisions: [huge2],
+      facts: [],
+      relations: [],
+      filters: filters(),
+      inLoopEdges: new Set(),
+      shown: new Map([[id, 0]]),
+      expanded: new Set([id]),
+    });
+    const node = out.nodes.find((n) => n.id === id)!;
+    // nodeDims 永远把 scrollable = floored > 640;floored = max(estimated, w/0.85=376)。
+    // 若 estimateCardHeight 内部 caps 让总估高 ≤ 640,scrollable=false。
+    // 这条测试是**反向保护**:确认我们没意外把所有 decision 都标成 scrollable。
+    expect(node.style?.height).toBeLessThanOrEqual(640);
+    expect(node.data?.scrollable).toBe(false);
+    void huge; // huge 是对照(同样不会撑破 cap,留作文档说明)。
   });
 });

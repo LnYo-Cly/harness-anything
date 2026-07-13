@@ -11,21 +11,24 @@ import { DecisionsView } from "../views/DecisionsView.tsx";
 import { DecisionPoolView } from "../views/DecisionPoolView.tsx";
 import { FactTriageView } from "../views/FactTriageView.tsx";
 import { ExecutionEvidenceView } from "../views/ExecutionEvidenceView.tsx";
-import { GraphView } from "../views/GraphView.tsx";
-import { GenealogyTimelineView } from "../views/GenealogyTimelineView.tsx";
 import { PresetsView } from "../views/PresetsView.tsx";
 import { AdaptersView } from "../views/AdaptersView.tsx";
 import { SettingsView } from "../views/SettingsView.tsx";
 import { TaskDetailView } from "../views/TaskDetailView.tsx";
-import { t } from "../i18n/index.tsx";
+import { EntityWorkspace } from "./EntityWorkspace.tsx";
+import type { EntityFacet } from "../navigation/navigationHistory.ts";
 
 type DrillState = { lane: string; status: SnapshotStatus; groupBy: LaneGroupBy } | null;
 
 /**
- * 主内容区的视图路由:任务详情(选中时优先)+ 多视图切换条 + 视图表。
+ * 主内容区的视图路由:任务详情(选中时优先)+ 视图表。
  *
  * 从 App.tsx 抽出(历史栈任务的前置拆分)。选中任务时渲染 TaskDetailView;
  * 否则按当前 view 渲染对应视图。所有应用位置态与导航回调由 AppShell 注入。
+ *
+ * 关系图 vs 演化史:原顶栏常驻条(整页挂「关系图|演化史」跳转)已删 —— 现在演化史是
+ * EntityWorkspace 里 decision 的一个 facet(G3 §③),不是独立 ViewId。非 graph 页面
+ * 不再无脑顶一条多视图条。
  */
 export interface ViewSwitchProps {
   view: ViewId;
@@ -34,6 +37,7 @@ export interface ViewSwitchProps {
   taskFilters: TaskFilters;
   drill: DrillState;
   focusedEntityRef: string | null;
+  entityFacet: EntityFacet | null;
   project: Project;
   catalog: CatalogRendererData | undefined;
   catalogLoading: boolean;
@@ -45,7 +49,6 @@ export interface ViewSwitchProps {
   events: EventEntry[];
   projectName: string;
   goto: (v: ViewId) => void;
-  onMultiViewSwitch: (v: ViewId) => void;
   onOpenTaskPreview: (id: string) => void;
   onDrillToBoard: (lane: string, status: SnapshotStatus, dimension: "root" | "module") => void;
   onUpdateTask: (id: string, patch: Partial<TaskRow>) => void;
@@ -55,6 +58,11 @@ export interface ViewSwitchProps {
   onNavigateEntity: (ref: string) => void;
   onNavigateDecision: (decisionId: string) => void;
   onNavigateTask: (taskId: string) => void;
+  /** 实体工作台内焦点变更(画布双击 / 谱系侧栏点选) → 写回 AppLocation.focusedEntityRef。 */
+  onFocusEntityChange: (ref: string | null) => void;
+  /** 实体工作台 facet 切换(Graph ↔ Genealogy) → 写回 AppLocation.entityFacet。 */
+  onEntityFacetChange: (facet: EntityFacet) => void;
+  /** 跨视图「在关系图中聚焦」入口(从 Fact Triage / Decision Pool 等跳进 Graph facet)。 */
   onFocusEntityInGraph: (ref: string) => void;
   onFiltersChange: (filters: TaskFilters) => void;
   onToggleFavorite: (taskId: string) => void;
@@ -69,6 +77,7 @@ export function ViewSwitch(props: ViewSwitchProps) {
     taskFilters,
     drill,
     focusedEntityRef,
+    entityFacet,
     project,
     catalog,
     catalogLoading,
@@ -80,7 +89,6 @@ export function ViewSwitch(props: ViewSwitchProps) {
     events,
     projectName,
     goto,
-    onMultiViewSwitch,
     onOpenTaskPreview,
     onDrillToBoard,
     onUpdateTask,
@@ -89,6 +97,8 @@ export function ViewSwitch(props: ViewSwitchProps) {
     onNavigateEntity,
     onNavigateDecision,
     onNavigateTask,
+    onFocusEntityChange,
+    onEntityFacetChange,
     onFocusEntityInGraph,
     onFiltersChange,
     onToggleFavorite,
@@ -99,35 +109,6 @@ export function ViewSwitch(props: ViewSwitchProps) {
 
   return (
     <>
-      {!selected && (
-        <div
-          data-testid="multi-view-switcher"
-          className="flex items-center gap-2 border-b border-border bg-surface/60 px-4 py-1.5"
-        >
-          <span className="font-mono text-[10px] uppercase tracking-wide text-text-faint">
-            {t("components.viewSwitch.multipleViews")}</span>
-          <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
-            {([
-              { id: "graph", label: t("components.viewSwitch.graph") },
-              { id: "genealogy", label: t("components.viewSwitch.genealogy") },
-            ] as const).map((item) => (
-              <button
-                key={item.id}
-                onClick={() => onMultiViewSwitch(item.id)}
-                className={`rounded px-2 py-0.5 text-[12px] ${
-                  view === item.id
-                    ? "bg-surface-raised font-medium text-text"
-                    : "text-text-muted hover:text-text"
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-          <span className="text-[11px] text-text-faint">
-            {t("components.viewSwitch.residentSwitchingLookRelationshipDiagramSeeStructure")}</span>
-        </div>
-      )}
       {selected ? (
         <TaskDetailView
           task={selected}
@@ -176,7 +157,9 @@ export function ViewSwitch(props: ViewSwitchProps) {
           onToggleFavorite={onToggleFavorite}
         />
       ) : view === "graph" ? (
-        <GraphView
+        <EntityWorkspace
+          focusedEntityRef={focusedEntityRef}
+          entityFacet={entityFacet}
           tasks={projectTasks}
           relations={relations}
           decisions={decisions}
@@ -184,15 +167,8 @@ export function ViewSwitch(props: ViewSwitchProps) {
           coverageRows={coverageRows}
           factAnchors={factAnchors}
           onNavigateEntity={onNavigateEntity}
-          focusRef={focusedEntityRef}
-        />
-      ) : view === "genealogy" ? (
-        <GenealogyTimelineView
-          decisions={decisions}
-          relations={relations}
-          focusRef={focusedEntityRef}
-          onNavigateEntity={onNavigateEntity}
-          onFocusGraph={onFocusEntityInGraph}
+          onFacetChange={onEntityFacetChange}
+          onFocusEntityChange={onFocusEntityChange}
         />
       ) : view === "factTriage" ? (
         <FactTriageView
