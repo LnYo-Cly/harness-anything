@@ -15,6 +15,9 @@ test("local controller service reads projection and writes through injected task
     writeTaskIndex(rootDir, "task-archived", "Archived Task", "done", "harness", "archived");
     writeTaskDocument(rootDir, "task-1", "task_plan.md", "# Task plan\n");
     writeTaskDocument(rootDir, "task-1", "artifacts/research/evidence.md", "# Evidence\n");
+    writeAuthoredDocument(rootDir, "adr/ADR-0001.md", "# ADR\n");
+    writeAuthoredDocument(rootDir, "artifacts/.gitkeep", "");
+    writeDecision(rootDir, "dec_test");
     const writes: string[] = [];
     const service = makeLocalControllerService({
       rootDir,
@@ -46,12 +49,18 @@ test("local controller service reads projection and writes through injected task
       { path: "INDEX.md" },
       { path: "task_plan.md" }
     ]);
+    assert.deepEqual(await service.getPeripheralDocuments(), {
+      ok: true,
+      documents: [
+        { path: "adr/ADR-0001.md" },
+        { path: "decisions/decision-dec_test/decision.md" }
+      ]
+    });
 
     const document = await service.getTaskDocument({ taskId: "task-1", path: "INDEX.md" });
     assert.equal(document.ok, true);
     assert.match(document.body ?? "", /Task One/);
     writeTaskFacts(rootDir, "task-1");
-    writeDecision(rootDir, "dec_test");
     const relationGraph = service.getRelationGraph();
     assert.equal(relationGraph.ok, true);
     assert.deepEqual(relationGraph.factAnchors.map((anchor) => anchor.factRef), ["fact/task-1/F-12345678"]);
@@ -133,6 +142,7 @@ test("local controller service honors explicit authored root for reads and write
   const layoutOverrides = { authoredRoot: ".custom-harness" };
   try {
     writeTaskIndex(rootDir, "task-1", "Custom Task", "planned", layoutOverrides.authoredRoot);
+    writeAuthoredDocument(rootDir, "adr/custom.md", "# Custom ADR\n", layoutOverrides.authoredRoot);
     const service = makeLocalControllerService({
       rootDir,
       layoutOverrides,
@@ -153,6 +163,10 @@ test("local controller service honors explicit authored root for reads and write
     const document = await service.getTaskDocument({ taskId: "task-1", path: "INDEX.md" });
     assert.equal(document.ok, true);
     assert.match(document.body ?? "", /Custom Task/);
+    assert.deepEqual(await service.getPeripheralDocuments(), {
+      ok: true,
+      documents: [{ path: "adr/custom.md" }]
+    });
     assert.deepEqual(await service.appendTaskProgress({ taskId: "task-1", text: "custom progress" }), { ok: true });
     assert.match(readFileSync(path.join(rootDir, ".custom-harness/tasks/task-1/progress.md"), "utf8"), /custom progress/);
     assert.equal(existsSync(path.join(rootDir, "harness/tasks/task-1/INDEX.md")), false);
@@ -187,6 +201,12 @@ function writeTaskIndex(rootDir: string, taskId: string, title: string, status: 
 
 function writeTaskDocument(rootDir: string, taskId: string, documentPath: string, body: string): void {
   const target = path.join(rootDir, "harness/tasks", taskId, documentPath);
+  mkdirSync(path.dirname(target), { recursive: true });
+  writeFileSync(target, body, "utf8");
+}
+
+function writeAuthoredDocument(rootDir: string, documentPath: string, body: string, authoredRoot = "harness"): void {
+  const target = path.join(rootDir, authoredRoot, documentPath);
   mkdirSync(path.dirname(target), { recursive: true });
   writeFileSync(target, body, "utf8");
 }

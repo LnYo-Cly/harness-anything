@@ -143,6 +143,17 @@ test("GUI daemon bridge exposes one batched facts reader", async () => {
   assert.deepEqual(routeIds, ["facts.list"]);
 });
 
+test("GUI daemon bridge exposes the peripheral document list", async () => {
+  const routeIds: string[] = [];
+  const bridge = createGuiServiceBridgeForDaemon(async (route) => {
+    routeIds.push(route.id);
+    return { ok: true, details: { data: { ok: true, routeId: route.id } } };
+  });
+
+  assert.equal((await bridge.invoke("getPeripheralDocuments", null) as { readonly routeId?: string }).routeId, "documents.peripheral.list");
+  assert.deepEqual(routeIds, ["documents.peripheral.list"]);
+});
+
 test("GUI daemon bridge exposes one triadic projection snapshot", async () => {
   const routeIds: string[] = [];
   const bridge = createGuiServiceBridgeForDaemon(async (route) => {

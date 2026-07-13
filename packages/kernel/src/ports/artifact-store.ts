@@ -7,6 +7,10 @@ export interface ArtifactDocument {
   readonly sha256?: string;
 }
 
+export interface AuthoredDocumentDescriptor {
+  readonly path: string;
+}
+
 export interface TaskPackageRead {
   readonly taskId: TaskId;
   readonly rootPath: string;
@@ -18,6 +22,7 @@ export interface TaskPackageRead {
 // write surface lives in artifact-store-writer.ts as a flusher-only seam.
 export interface ArtifactStore {
   readonly readTaskPackage: (taskId: TaskId) => Effect.Effect<TaskPackageRead, ArtifactStoreError>;
+  readonly listAuthoredDocuments: () => Effect.Effect<ReadonlyArray<AuthoredDocumentDescriptor>, ArtifactStoreError>;
   readonly readAuthoredDocument: (path: string) => Effect.Effect<ArtifactDocument, ArtifactStoreError>;
   readonly findBindingByExternalRef: (
     engine: EngineId,

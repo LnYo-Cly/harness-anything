@@ -16,6 +16,7 @@ type LocalControllerGuiMethod =
   | "getTasks"
   | "getTaskDetail"
   | "getTaskDocument"
+  | "getPeripheralDocuments"
   | "getRelationGraph"
   | "getTriadicProjection"
   | "getDecisions"
@@ -35,6 +36,7 @@ interface GuiBridgeServiceProxy {
   readonly getTasks: () => Promise<unknown> | unknown;
   readonly getTaskDetail: (payload: unknown) => Promise<unknown> | unknown;
   readonly getTaskDocument: (payload: unknown) => Promise<unknown> | unknown;
+  readonly getPeripheralDocuments: () => Promise<unknown> | unknown;
   readonly getRelationGraph: () => Promise<unknown> | unknown;
   readonly getTriadicProjection: () => Promise<unknown> | unknown;
   readonly getDecisions: () => Promise<unknown> | unknown;
@@ -73,6 +75,10 @@ export const guiBridgeHandlerImplementations = {
   getTaskDocument: {
     serviceMethod: "getTaskDocument",
     invoke: ({ service, payload }) => service.getTaskDocument(payload)
+  },
+  getPeripheralDocuments: {
+    serviceMethod: "getPeripheralDocuments",
+    invoke: ({ service }) => service.getPeripheralDocuments()
   },
   getRelationGraph: {
     serviceMethod: "getRelationGraph",
@@ -186,6 +192,7 @@ function createDaemonServiceProxy(request: GuiDaemonRequester): GuiBridgeService
     getTasks: () => invokeDaemonGuiRoute(request, "getTasks", undefined),
     getTaskDetail: (payload) => invokeDaemonGuiRoute(request, "getTaskDetail", payload),
     getTaskDocument: (payload) => invokeDaemonGuiRoute(request, "getTaskDocument", payload),
+    getPeripheralDocuments: () => invokeDaemonGuiRoute(request, "getPeripheralDocuments", undefined),
     getRelationGraph: () => invokeDaemonGuiRoute(request, "getRelationGraph", undefined),
     getTriadicProjection: () => invokeDaemonGuiRoute(request, "getTriadicProjection", undefined),
     getDecisions: () => invokeDaemonGuiRoute(request, "getDecisions", undefined),

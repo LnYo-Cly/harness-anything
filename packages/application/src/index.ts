@@ -274,7 +274,7 @@ export interface LocalControllerServiceOptions {
   readonly rootDir: string;
   readonly layoutOverrides?: HarnessLayoutOverrides;
   readonly taskWriter: LocalControllerTaskWriter;
-  readonly artifactStore: Pick<ArtifactStore, "readTaskPackage" | "readAuthoredDocument">;
+  readonly artifactStore: Pick<ArtifactStore, "readTaskPackage" | "listAuthoredDocuments" | "readAuthoredDocument">;
 }
 
 export interface LocalControllerSuccess {
@@ -310,6 +310,12 @@ export interface TaskDetailSuccess extends LocalControllerSuccess {
 }
 
 export type TaskDetailResult = TaskDetailSuccess | LocalControllerFailure;
+
+export interface PeripheralDocumentListSuccess extends LocalControllerSuccess {
+  readonly documents: ReadonlyArray<TaskDocumentDescriptor>;
+}
+
+export type PeripheralDocumentListResult = PeripheralDocumentListSuccess | LocalControllerFailure;
 
 export interface DecisionProjectionRejected {
   readonly text: string;
@@ -571,6 +577,7 @@ export interface LocalControllerService {
   readonly getTasks: () => TaskListResult;
   readonly getTaskDetail: (payload: TaskIdPayload) => Promise<TaskDetailResult>;
   readonly getTaskDocument: (payload: TaskDocumentPayload) => Promise<TaskDocumentResult>;
+  readonly getPeripheralDocuments: () => Promise<PeripheralDocumentListResult>;
   readonly getRelationGraph: () => RelationGraphReadResult;
   readonly getDecisions: () => DecisionListResult;
   readonly getDecisionDetail: (payload: DecisionIdPayload) => DecisionDetailResult;

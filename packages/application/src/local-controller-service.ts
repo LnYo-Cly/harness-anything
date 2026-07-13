@@ -61,6 +61,19 @@ export function makeLocalControllerService(options: LocalControllerServiceOption
       if (!parsed.ok) return parsed;
       return Effect.runPromise(readControllerTaskDocument(options.artifactStore, parsed.taskId, parsed.path));
     },
+    getPeripheralDocuments: async () => {
+      const layout = resolveHarnessLayout({ rootDir, layoutOverrides: options.layoutOverrides });
+      const tasksPrefix = path.relative(layout.authoredRoot, layout.tasksRoot).split(path.sep).join("/");
+      const documents = await Effect.runPromise(options.artifactStore.listAuthoredDocuments().pipe(
+        Effect.map((authoredDocuments) => authoredDocuments.filter((document) =>
+          tasksPrefix.startsWith("../")
+          || (tasksPrefix !== ""
+            && document.path !== tasksPrefix
+            && !document.path.startsWith(`${tasksPrefix}/`)))),
+        Effect.catchAll(() => Effect.succeed([]))
+      ));
+      return { ok: true, documents };
+    },
     getRelationGraph: () => {
       const result = readRelationGraphProjection({ rootDir, layoutOverrides: options.layoutOverrides });
       return {
