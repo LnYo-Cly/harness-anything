@@ -18,6 +18,17 @@ if (!contextPath || !resultPath) {
 
 const context = JSON.parse(readFileSync(contextPath, "utf8"));
 const rootDir = context.paths.rootDir;
+const projectionOptions = {
+  rootDir,
+  layoutOverrides: {
+    authoredRoot: repositoryRelative(rootDir, context.paths.authoredRoot),
+    localRoot: repositoryRelative(rootDir, context.paths.localRoot),
+    tasksRoot: repositoryRelative(rootDir, context.paths.tasksRoot),
+    generatedRoot: repositoryRelative(rootDir, context.paths.generatedRoot),
+    projectRootBoundary: true
+  },
+  projectionPath: path.join(context.paths.localRoot, "cache", "projections.sqlite")
+};
 const policyRules = context.policy?.presetId === "decision-conformance" ? context.policy.rules : {};
 const enforcement = policyRules.enforcement === "fail" ? "fail" : "report";
 const adoptionCutoff = policyRules.adoptionCutoff ? Date.parse(policyRules.adoptionCutoff) : undefined;
@@ -26,9 +37,9 @@ const legacyExemptions = new Set(
     ? policyRules.legacyExemptions.map((exemption) => exemption.kind)
     : []
 );
-const decisionProjection = queryDecisionProjection({ rootDir, filters: {} });
-const taskProjection = queryTaskProjection({ rootDir, filters: { includeArchived: true } });
-const relationProjection = readRelationGraphProjection({ rootDir });
+const decisionProjection = queryDecisionProjection({ ...projectionOptions, filters: {} });
+const taskProjection = queryTaskProjection({ ...projectionOptions, filters: { includeArchived: true } });
+const relationProjection = readRelationGraphProjection(projectionOptions);
 
 const decisions = decisionProjection.rows;
 const tasks = taskProjection.rows;
@@ -70,7 +81,7 @@ for (const decision of decisions) {
   }
 
   if (decision.state === "active" && !isPreRuleLegacyDecision(decision)) {
-    const coverage = readDecisionFactCoverage({ rootDir, decisionId: decision.decisionId });
+    const coverage = readDecisionFactCoverage({ ...projectionOptions, decisionId: decision.decisionId });
     for (const row of coverage.rows) {
       if (row.status === "covered") continue;
       finding(
@@ -254,6 +265,10 @@ function isStaleDecisionDocument(relativeDecisionPath, maxAgeDays) {
 function readPositiveInteger(value, fallback) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function repositoryRelative(root, target) {
+  return path.relative(root, target).split(path.sep).join("/") || ".";
 }
 
 async function importKernelProjectionApi() {

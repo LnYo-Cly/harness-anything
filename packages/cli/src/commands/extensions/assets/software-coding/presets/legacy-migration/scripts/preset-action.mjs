@@ -27,7 +27,7 @@ writeFileSync(path.join(artifactsDir, "preset-result.json"), `${JSON.stringify({
 
 function selectScan(rootDir, executionRoot, readScopes) {
   const sourcePaths = candidateSourcePaths(rootDir, executionRoot, readScopes);
-  const scans = sourcePaths.map((sourcePath) => buildScan(rootDir, sourcePath));
+  const scans = sourcePaths.map((sourcePath) => buildScan(rootDir, sourcePath, readScopes));
   return scans.find((candidate) => candidate.summary.taskCount > 0) ?? scans[0] ?? emptyScan();
 }
 
@@ -56,12 +56,12 @@ function emptyScan() {
   };
 }
 
-function buildScan(rootDir, sourcePath) {
+function buildScan(rootDir, sourcePath, readScopes) {
   const sourceRoot = path.resolve(rootDir, sourcePath);
   const entries = uniqueEntries([
-    ...collectOldTasks(sourceRoot),
-    ...collectV2Tasks(sourceRoot),
-    ...collectDocs(rootDir, sourceRoot)
+    ...collectOldTasks(sourceRoot, readScopes),
+    ...collectV2Tasks(sourceRoot, readScopes),
+    ...collectDocs(rootDir, sourceRoot, readScopes)
   ]);
   return {
     schema: "legacy-intake-scan/v1",
@@ -74,12 +74,13 @@ function buildScan(rootDir, sourcePath) {
   };
 }
 
-function collectOldTasks(sourceRoot) {
-  const rootTasks = listDirectories(path.join(sourceRoot, "docs/09-PLANNING/TASKS"))
+function collectOldTasks(sourceRoot, readScopes) {
+  const rootTasksPath = path.join(sourceRoot, "docs/09-PLANNING/TASKS");
+  const rootTasks = (isDeclaredReadPath(rootTasksPath, readScopes) ? listDirectories(rootTasksPath) : [])
     .filter((name) => !name.startsWith("_"))
     .map((name) => taskEntry(sourceRoot, `docs/09-PLANNING/TASKS/${name}`, `harness/legacy/tasks/${name}`));
   const moduleTasksRoot = path.join(sourceRoot, "docs/09-PLANNING/MODULES");
-  const moduleTasks = listDirectories(moduleTasksRoot).flatMap((moduleKey) => {
+  const moduleTasks = (isDeclaredReadPath(moduleTasksRoot, readScopes) ? listDirectories(moduleTasksRoot) : []).flatMap((moduleKey) => {
     if (moduleKey.startsWith("_")) return [];
     return listDirectories(path.join(moduleTasksRoot, moduleKey, "TASKS"))
       .filter((name) => !name.startsWith("_"))
@@ -88,10 +89,12 @@ function collectOldTasks(sourceRoot) {
   return [...rootTasks, ...moduleTasks];
 }
 
-function collectV2Tasks(sourceRoot) {
+function collectV2Tasks(sourceRoot, readScopes) {
   const privateRoot = path.join(sourceRoot, ".harness-private/coding-agent-harness");
   const publicRoot = path.join(sourceRoot, "harness");
-  const authoredRoot = existsSync(path.join(privateRoot, "harness.yaml")) ? privateRoot : existsSync(path.join(publicRoot, "harness.yaml")) ? publicRoot : undefined;
+  const authoredRoot = isDeclaredReadPath(privateRoot, readScopes) && existsSync(path.join(privateRoot, "harness.yaml"))
+    ? privateRoot
+    : isDeclaredReadPath(publicRoot, readScopes) && existsSync(path.join(publicRoot, "harness.yaml")) ? publicRoot : undefined;
   if (!authoredRoot) return [];
   const tasksRoot = path.join(authoredRoot, "tasks");
   const moduleRoot = path.join(authoredRoot, "modules");
@@ -108,14 +111,17 @@ function collectV2Tasks(sourceRoot) {
   return [...rootTasks, ...moduleTasks];
 }
 
-function collectDocs(rootDir, sourceRoot) {
-  const docsEntries = walkFiles(path.join(sourceRoot, "docs"))
+function collectDocs(rootDir, sourceRoot, readScopes) {
+  const docsRoot = path.join(sourceRoot, "docs");
+  const docsEntries = (isDeclaredReadPath(docsRoot, readScopes) ? walkFiles(docsRoot) : [])
     .map((filePath) => toSlash(path.relative(sourceRoot, filePath)))
     .filter((relativePath) => isSafeDocPath(relativePath, true))
     .map((relativePath) => docEntry(sourceRoot, relativePath, `harness/legacy/docs/${relativePath.replace(/^docs\//u, "")}`, forwardPathForOldDoc(relativePath)));
   const privateRoot = path.join(sourceRoot, ".harness-private/coding-agent-harness");
   const publicRoot = path.join(sourceRoot, "harness");
-  const authoredRoot = existsSync(path.join(privateRoot, "harness.yaml")) ? privateRoot : existsSync(path.join(publicRoot, "harness.yaml")) ? publicRoot : undefined;
+  const authoredRoot = isDeclaredReadPath(privateRoot, readScopes) && existsSync(path.join(privateRoot, "harness.yaml"))
+    ? privateRoot
+    : isDeclaredReadPath(publicRoot, readScopes) && existsSync(path.join(publicRoot, "harness.yaml")) ? publicRoot : undefined;
   if (!authoredRoot) return docsEntries;
   const authoredDocs = [
     ...collectAuthoredDocs(rootDir, sourceRoot, path.join(authoredRoot, "context"), "harness/context"),
@@ -229,6 +235,14 @@ function uniqueEntries(entries) {
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
+  });
+}
+
+function isDeclaredReadPath(candidate, readScopes) {
+  const target = path.resolve(candidate);
+  return readScopes.some((scope) => {
+    const relative = path.relative(path.resolve(scope), target);
+    return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
   });
 }
 

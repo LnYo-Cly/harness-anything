@@ -63,6 +63,10 @@ const layoutFileSystem = localLayoutFileSystem;
 
 export interface HarnessLayoutOverrides {
   readonly authoredRoot?: string;
+  readonly localRoot?: string;
+  readonly tasksRoot?: string;
+  readonly generatedRoot?: string;
+  readonly projectRootBoundary?: boolean;
 }
 
 export interface HarnessRuntimeContext {
@@ -100,7 +104,7 @@ export function createHarnessRuntimeContext(
 ): HarnessRuntimeContext {
   return {
     rootDir: path.resolve(rootDir),
-    ...(layoutOverrides && layoutOverrides.authoredRoot ? { layoutOverrides } : {})
+    ...(layoutOverrides ? { layoutOverrides } : {})
   };
 }
 
@@ -122,17 +126,20 @@ export function resolveEntityRoot(
 
 function resolveHarnessLayoutSettings(input: HarnessLayoutInput): HarnessLayoutSettings {
   const rootDir = harnessRuntimeRoot(input);
-  const { projectRoot, configPath, config } = resolveProjectRootAndConfig(rootDir);
-  const authoredRootSetting = layoutInputOverrides(input).authoredRoot
+  const overrides = layoutInputOverrides(input);
+  const { projectRoot, configPath, config } = overrides.projectRootBoundary
+    ? { projectRoot: rootDir, config: {} }
+    : resolveProjectRootAndConfig(rootDir);
+  const authoredRootSetting = overrides.authoredRoot
     ?? config.authoredRoot
     ?? defaultAuthoredRoot;
   return {
     resolvedRoot: projectRoot,
     configPath,
     authoredRootSetting,
-    localRootSetting: config.localRoot ?? defaultLocalRoot,
-    tasksRootSetting: config.tasksRoot,
-    generatedRootSetting: config.generatedRoot
+    localRootSetting: overrides.localRoot ?? config.localRoot ?? defaultLocalRoot,
+    tasksRootSetting: overrides.tasksRoot ?? config.tasksRoot,
+    generatedRootSetting: overrides.generatedRoot ?? config.generatedRoot
   };
 }
 
