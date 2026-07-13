@@ -25,7 +25,6 @@ import {
   EngineBadge,
   FreshnessTag,
 } from "../components/badges";
-import { getSampleDocument } from "../model/mock";
 import { DocReader } from "../components/DocReader";
 import {
   LOCAL_TRANSITIONS,
@@ -41,6 +40,7 @@ import { docGroupLabel, inferDocGroup, isRequiredDocGroup } from "../model/docGr
 import { normalizeTaskId, spawningDecisionOf } from "../model/triadic";
 import { useTaskDetailQuery, useTaskDocumentQuery, useReviewTaskMutation } from "../task-data";
 import { t } from "../i18n/index.tsx";
+import { useToast } from "../components/MutationToast";
 
 /**
  * 推断文档分组:preset 模板里常见文件名 → DocGroup。投影只给 path,组别靠命名启发式。
@@ -57,16 +57,14 @@ function docTitleFromPath(path: string): string {
 
 /**
  * 文档阅读区:优先用真实 useTaskDocumentQuery 的 body;查询失败或加载中给出占位。
- * 当 activeDoc 为空(无文档可读)时回退到 SAMPLE_MARKDOWN 占位以保留原型可用性。
+ * 无真实正文时只报空/错,绝不拿样例文档冒充证据(产品立论:你说做完了,拿证据来)。
  */
 function DocBody({
   taskId,
   path,
-  fallbackPresent,
 }: {
   taskId: string;
   path: string | null;
-  fallbackPresent: boolean;
 }) {
   const documentQuery = useTaskDocumentQuery(path ? taskId : null, path);
 
@@ -97,10 +95,6 @@ function DocBody({
         <p className="font-mono text-[11px] text-text-faint">
           {(documentQuery.error as Error | undefined)?.message ?? t("views.taskDetailView.localLedgerBridgeDidNotReturnText")}
         </p>
-        {fallbackPresent && (
-          <p className="mt-2 font-mono text-[11px] text-text-faint">{t("views.taskDetailView.fallbackDisplaySampleText")}</p>
-        )}
-        {fallbackPresent && <DocReader content={getSampleDocument(path)} />}
       </div>
     );
   }
@@ -110,17 +104,14 @@ function DocBody({
     return <DocReader content={body} />;
   }
 
-  // body 空:既无 mock 命中也无真实正文
-  if (!fallbackPresent) {
-    return (
-      <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border-strong py-16 text-center">
-        <FileText weight="duotone" className="text-2xl text-text-faint" />
-        <p className="text-[13px] text-text-muted">{t("views.taskDetailView.documentNotMaterialized")}</p>
-        <p className="font-mono text-[11px] text-text-faint">{t("views.taskDetailView.skeletonDefinedByPreset")}</p>
-      </div>
-    );
-  }
-  return <DocReader content={getSampleDocument(path)} />;
+  // body 空:投影里有 path 但真实正文还没物化。只报空,不回落到样例文档冒充证据。
+  return (
+    <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border-strong py-16 text-center">
+      <FileText weight="duotone" className="text-2xl text-text-faint" />
+      <p className="text-[13px] text-text-muted">{t("views.taskDetailView.documentNotMaterialized")}</p>
+      <p className="font-mono text-[11px] text-text-faint">{t("views.taskDetailView.skeletonDefinedByPreset")}</p>
+    </div>
+  );
 }
 
 export function TaskDetailView({
@@ -154,6 +145,7 @@ export function TaskDetailView({
   // 真实文档清单:从 useTaskDetailQuery 拉,投影本身不内嵌 docs(task-adapter 给空数组)。
   const detailQuery = useTaskDetailQuery(task.taskId);
   // 收口机判:review gate 只机判 PASS/FAIL,人工不可覆写(dec_mrca9hx4 CH1)。
+  const showToast = useToast();
   const reviewMutation = useReviewTaskMutation();
   const realDocs = useMemo<DocEntry[]>(() => {
     const docs = detailQuery.data?.documents ?? [];
@@ -264,7 +256,6 @@ export function TaskDetailView({
             <DocBody
               taskId={task.taskId}
               path={doc?.path ?? null}
-              fallbackPresent={Boolean(doc?.present)}
             />
           </div>
         </article>
@@ -434,7 +425,16 @@ export function TaskDetailView({
                 <span className="font-mono text-[10px] uppercase tracking-wide text-text-faint">
                   {t("views.taskDetailView.closingMachineJudgment")}</span>
                 <button
-                  onClick={() => reviewMutation.mutate({ taskId: task.taskId })}
+                  onClick={() =>
+                    reviewMutation.mutate(
+                      { taskId: task.taskId },
+                      {
+                        onSuccess: () => showToast(t("renderer.mutation.reviewGateRequested"), "success"),
+                        onError: (error: Error) =>
+                          showToast(t("renderer.mutation.reviewGateRequestFailed", { error: error.message }), "error"),
+                      },
+                    )
+                  }
                   disabled={reviewMutation.isPending}
                   className="inline-flex flex-1 items-center justify-center gap-1 rounded-md bg-accent px-2 py-1.5 text-[12px] font-semibold text-accent-fg active:scale-[0.98] disabled:opacity-50"
                 >

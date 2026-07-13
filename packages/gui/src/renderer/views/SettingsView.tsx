@@ -5,6 +5,7 @@ import { STATUS_META } from "../components/badges";
 import { BTN, Section, Row, Segmented, Toggle, Kbd } from "../components/ui/widgets";
 import { useRebuildGovernanceMutation } from "../task-data";
 import { t, useI18n, type Locale } from "../i18n/index.tsx";
+import { useToast } from "../components/MutationToast";
 
 const THEME_OPTIONS: { key: ThemeMode; label: string }[] = [
   { key: "dark", get label() { return t("views.settingsView.darkColor"); } },
@@ -51,6 +52,7 @@ export function SettingsView() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("appearance");
   const [notifyOnReady, setNotifyOnReady] = useState(true);
   // 重建投影 = 重读本地投影缓存(路径A:hook 已就绪,底层只 queryTaskProjection 不写盘重算)。
+  const showToast = useToast();
   const rebuildMutation = useRebuildGovernanceMutation();
 
   const renderActivePanel = () => {
@@ -164,7 +166,13 @@ export function SettingsView() {
                 <span className="ui-meta text-accent">{t("views.settingsView.rereading")}</span>
               )}
               <button
-                onClick={() => rebuildMutation.mutate()}
+                onClick={() =>
+                  rebuildMutation.mutate(undefined, {
+                    onSuccess: () => showToast(t("renderer.mutation.projectionReread"), "success"),
+                    onError: (error: Error) =>
+                      showToast(t("renderer.mutation.projectionRereadFailed", { error: error.message }), "error"),
+                  })
+                }
                 disabled={rebuildMutation.isPending}
                 className={BTN}
               >

@@ -210,29 +210,28 @@ export function ListView({
         <div className="flex items-center gap-3 bg-accent/10 border-b border-border/40 px-4 py-2 text-[13px]">
           <span className="font-semibold text-accent">{t("views.listView.batchOperations")}{selectedTaskIds.size} {t("views.listView.itemsSelected")}</span>
           <button
-            onClick={() => {
-              alert(t("views.listView.simulatedBatchRunTaskValueCheck", { value: Array.from(selectedTaskIds).join(", ") }));
-              setSelectedTaskIds(new Set());
-            }}
-            className="rounded bg-accent px-2.5 py-1 font-semibold text-accent-fg hover:bg-accent/90 cursor-pointer"
+            disabled
+            title={t("views.listView.batchWriteSurfaceNotWired")}
+            className="inline-flex items-center gap-1 rounded bg-accent px-2.5 py-1 font-semibold text-accent-fg opacity-50 cursor-not-allowed"
           >
+            <Lock weight="bold" className="text-[11px]" />
             {t("views.listView.runCheckBatches")}</button>
           <button
-            onClick={() => {
-              alert(t("views.listView.simulatedBatchPairTaskValueMarkedAs", { value: Array.from(selectedTaskIds).join(", ") }));
-              setSelectedTaskIds(new Set());
-            }}
-            className="rounded border border-border bg-surface px-2.5 py-1 hover:bg-surface-raised cursor-pointer"
+            disabled
+            title={t("views.listView.batchWriteSurfaceNotWired")}
+            className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2.5 py-1 opacity-50 cursor-not-allowed"
           >
+            <Lock weight="bold" className="text-[11px]" />
             {t("views.listView.batchMarkReady")}</button>
           <button
-            onClick={() => {
-              alert(t("views.listView.batchArchivingTaskValueHasBeenSimulated", { value: Array.from(selectedTaskIds).join(", ") }));
-              setSelectedTaskIds(new Set());
-            }}
-            className="rounded border border-border bg-surface px-2.5 py-1 hover:bg-surface-raised text-text-muted cursor-pointer"
+            disabled
+            title={t("views.listView.batchWriteSurfaceNotWired")}
+            className="inline-flex items-center gap-1 rounded border border-border bg-surface px-2.5 py-1 text-text-muted opacity-50 cursor-not-allowed"
           >
+            <Lock weight="bold" className="text-[11px]" />
             {t("views.listView.batchArchiving")}</button>
+          <span className="font-mono text-[11px] text-text-faint">
+            {t("views.listView.batchWriteSurfaceNotWired")}</span>
           <button
             onClick={() => setSelectedTaskIds(new Set())}
             className="ml-auto text-text-faint hover:text-text cursor-pointer"

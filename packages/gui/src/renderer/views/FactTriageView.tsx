@@ -69,8 +69,10 @@ export function FactTriageView({
     if (!focusedFactRef) return;
     setInspectedFactRef(focusedFactRef);
     const frame = window.requestAnimationFrame(() => {
+      // id 模式与 FactTriageCard 一致:`triage-fact-${anchor}`(见 FactTriageCard id)。
+      // 之前这里漏了 `-fact-` 中缀,scrollIntoView 永远落空。
       document
-        .getElementById(`triage-${focusedFactRef.replaceAll("/", "-")}`)
+        .getElementById(`triage-fact-${focusedFactRef.replaceAll("/", "-")}`)
         ?.scrollIntoView({ block: "center" });
     });
     return () => window.cancelAnimationFrame(frame);

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { SnapshotStatus } from "./model/types.ts";
-import { MOCK_EVENTS } from "./model/mock.ts";
 import { ThemeProvider } from "./theme.tsx";
 import { TaskPreviewDrawer } from "./components/TaskPreviewDrawer.tsx";
 import { MockViewBanner } from "./components/shell-chrome.tsx";
 import { AppSidebar } from "./components/AppSidebar.tsx";
 import { ViewSwitch } from "./components/ViewSwitch.tsx";
 import { NavigationHistoryBar } from "./components/NavigationHistoryBar.tsx";
+import { ToastProvider, useToast } from "./components/MutationToast.tsx";
 import {
   DEFAULT_TASK_FILTERS,
   applyTaskFilters,
@@ -80,10 +80,6 @@ function AppShell() {
     () => tasks.filter((t) => t.projectId === projectId),
     [tasks, projectId],
   );
-  const projectEvents = useMemo(
-    () => MOCK_EVENTS.filter((e) => e.projectId === projectId),
-    [projectId],
-  );
 
   const activeCount = projectTasks.filter(
     (t) => t.coordinationStatus === "active" || t.coordinationStatus === "blocked" || t.coordinationStatus === "in_review",
@@ -106,13 +102,22 @@ function AppShell() {
   const inboxCount = decisions.filter((d) => d.state === "proposed").length;
 
   // 状态写真桥:乐观更新本地态 + setTaskStatus 持久化(查询刷新时被权威投影覆盖)。
+  // 写操作统一走 toast 反馈:成功/失败都显式提示,不静默。
+  const showToast = useToast();
   const statusMutation = useSetTaskStatusMutation();
   const updateTask = (taskId: string, patch: Partial<import("./model/types.ts").TaskRow>) => {
     setTasks((prev) =>
       prev.map((t) => (t.taskId === taskId ? { ...t, ...patch } : t)),
     );
     if (patch.coordinationStatus && patch.coordinationStatus !== "unknown") {
-      statusMutation.mutate({ taskId, status: patch.coordinationStatus });
+      statusMutation.mutate(
+        { taskId, status: patch.coordinationStatus },
+        {
+          onSuccess: () => showToast(t("renderer.mutation.taskStatusUpdated"), "success"),
+          onError: (error: Error) =>
+            showToast(t("renderer.mutation.taskStatusUpdateFailed", { error: error.message }), "error"),
+        },
+      );
     }
   };
 
@@ -308,7 +313,7 @@ function AppShell() {
               tasks={tasks}
               triadic={{ decisions, facts, relations, coverageRows, factAnchors }}
               favorites={favorites}
-              events={MOCK_EVENTS}
+              events={[]}
               projectName={project.name}
               goto={goto}
               onOpenTaskPreview={openTaskPreview}
@@ -335,7 +340,7 @@ function AppShell() {
         task={previewTask}
         tasks={projectTasks}
         relations={relations}
-        events={projectEvents}
+        events={[]}
         onClose={() => updateLocation({ previewId: null })}
         onOpenDetail={openTaskDetail}
         onPreviewTask={openTaskPreview}
@@ -347,7 +352,9 @@ function AppShell() {
 export function App() {
   return (
     <ThemeProvider>
-      <AppShell />
+      <ToastProvider>
+        <AppShell />
+      </ToastProvider>
     </ThemeProvider>
   );
 }
