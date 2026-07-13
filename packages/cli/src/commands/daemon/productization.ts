@@ -233,14 +233,15 @@ async function statusDaemon(input: DaemonCommandInput): Promise<number> {
   const rpcStatus = await readReachableDaemonStatus(target);
   emitDaemonResult("daemon-status", {
     ...lockStatus,
-    reachable: Boolean(rpcStatus),
     ...(rpcStatus ?? {
       version: resolveCliVersion(),
       protocolVersion: currentDaemonProtocolVersion,
       queueDepth: 0,
       queue: { interactive: 0, normal: 0, background: 0, maintenance: 0, running: false },
       connections: { active: 0, total: 0 }
-    })
+    }),
+    started: rpcStatus?.started === true,
+    reachable: Boolean(rpcStatus)
   }, input.json);
   return 0;
 }
