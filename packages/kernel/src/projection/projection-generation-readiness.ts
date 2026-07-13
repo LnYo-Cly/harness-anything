@@ -75,7 +75,7 @@ export function ensureProjectionGenerationReady(
     const projection = readTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides });
     warnings.push(...projection.warnings);
     observer?.afterProjectionValidated?.();
-    const snapshot = captureStableProjectionDatabaseIdentity(projectionPath);
+    const snapshot = captureStableProjectionDatabaseIdentity(projectionPath, projectionVersion);
     if (before !== null && before === snapshot.databaseSignature) {
       return {
         ready: new ReadyProjectionGenerationHandle(
@@ -89,6 +89,19 @@ export function ensureProjectionGenerationReady(
     }
   }
   throw new ProjectionGenerationChangedError("projection database did not stabilize across validation");
+}
+
+export function establishReadyProjectionGeneration(
+  projectionPath: string,
+  expectedVersion: string
+): ReadyProjectionGeneration {
+  const snapshot = captureStableProjectionDatabaseIdentity(projectionPath, expectedVersion);
+  return new ReadyProjectionGenerationHandle(
+    projectionPath,
+    snapshot.sourceHash,
+    snapshot.version,
+    snapshot.databaseSignature
+  );
 }
 
 export function assertReadyProjectionGeneration(
@@ -112,7 +125,7 @@ export function projectionDatabaseSignature(projectionPath: string): string {
   return signature;
 }
 
-function captureStableProjectionDatabaseIdentity(projectionPath: string): {
+function captureStableProjectionDatabaseIdentity(projectionPath: string, expectedVersion: string): {
   readonly sourceHash: string;
   readonly version: string;
   readonly databaseSignature: string;
@@ -135,7 +148,7 @@ function captureStableProjectionDatabaseIdentity(projectionPath: string): {
     }
     const after = projectionDatabaseSignature(projectionPath);
     if (before === after) {
-      if (version !== projectionVersion) throw new ProjectionGenerationChangedError("ready projection schema version changed");
+      if (version !== expectedVersion) throw new ProjectionGenerationChangedError("ready projection schema version changed");
       return { sourceHash, version, databaseSignature: after };
     }
   }

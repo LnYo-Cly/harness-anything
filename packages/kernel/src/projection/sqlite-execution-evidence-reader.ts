@@ -3,11 +3,11 @@ import type { HarnessLayoutOverrides } from "../layout/index.ts";
 import {
   assertReadyProjectionDatabaseUnchanged,
   assertReadyProjectionGeneration,
-  ensureProjectionGenerationReady,
   projectionDatabaseSignature,
   ProjectionGenerationChangedError,
   type ReadyProjectionGeneration
 } from "./projection-generation-readiness.ts";
+import { ensureExecutionEvidenceGenerationReady } from "./sqlite-execution-evidence-store.ts";
 
 export interface ExecutionEvidenceCursor {
   readonly generation: string;
@@ -81,7 +81,7 @@ export interface ExecutionEvidenceReadObserver {
 export function queryExecutionEvidencePage(
   options: ExecutionEvidencePageOptions
 ): ExecutionEvidencePage {
-  const ready = ensureProjectionGenerationReady({
+  const ready = ensureExecutionEvidenceGenerationReady({
     rootDir: options.rootDir,
     layoutOverrides: options.layoutOverrides
   }).ready;
@@ -89,7 +89,7 @@ export function queryExecutionEvidencePage(
     return queryExecutionEvidencePageFromReadyGeneration(ready, options);
   } catch (error) {
     if (options.cursor || !(error instanceof ProjectionGenerationChangedError)) throw error;
-    const reacquired = ensureProjectionGenerationReady({
+    const reacquired = ensureExecutionEvidenceGenerationReady({
       rootDir: options.rootDir,
       layoutOverrides: options.layoutOverrides
     }).ready;

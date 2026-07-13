@@ -16,6 +16,7 @@ export const localEvidenceFileSystem = {
 };
 
 export const localProjectionSourceFileSystem = {
+  realpath: (inputPath: string): string => realpathSync.native(inputPath),
   readStableDirents: (inputPath: string): { readonly entries: ReadonlyArray<Dirent<string>>; readonly signature: string } => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const before = projectionSourceStatSignature(inputPath);

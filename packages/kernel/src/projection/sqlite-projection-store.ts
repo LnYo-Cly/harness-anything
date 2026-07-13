@@ -20,9 +20,8 @@ import type {
   TaskProjectionQueryFilters,
   TaskProjectionRow
 } from "./types.ts";
-import { hashExecutionEvidenceProjectionState } from "./sqlite-execution-evidence-projection.ts";
 
-export const projectionVersion = "entity-projection/d4-v12";
+export const projectionVersion = "entity-projection/d4-v13";
 const baseTaskProjectionColumns = [
   "task_id",
   "title",
@@ -160,7 +159,6 @@ export function writeProjectionDatabase(
     yield* insertMeta(sql, "decisionRowsHash", meta.decisionRowsHash ?? "");
     yield* insertMeta(sql, "declaredRowsHash", meta.declaredRowsHash ?? "");
     yield* insertMeta(sql, "declaredManifestHash", meta.declaredManifestHash ?? "");
-    yield* insertMeta(sql, "executionEvidenceRowsHash", meta.executionEvidenceRowsHash ?? "");
     yield* insertMeta(sql, "attributionRowsHash", meta.attributionRowsHash ?? "");
     yield* insertMeta(sql, "attributionSourceHash", meta.attributionSourceHash ?? "");
     yield* insertMeta(sql, "taskSourceHash", meta.taskSourceHash ?? "");
@@ -181,8 +179,6 @@ export function writeProjectionDatabase(
     yield* sql`CREATE INDEX relation_coverage_decision_ref ON relation_coverage (decision_ref)`;
     yield* sql`CREATE INDEX task_fact_anchors_task_id ON task_fact_anchors (task_id)`;
     if (materializeSupplemental) yield* materializeSupplemental(sql);
-    const executionEvidenceRowsHash = yield* hashExecutionEvidenceProjectionState(sql);
-    yield* sql`UPDATE projection_meta SET value = ${executionEvidenceRowsHash} WHERE key = 'executionEvidenceRowsHash'`;
     const attributionRowsHash = yield* hashAttributionProjectionState(sql);
     yield* sql`UPDATE projection_meta SET value = ${attributionRowsHash} WHERE key = 'attributionRowsHash'`;
   });
@@ -307,7 +303,6 @@ function readProjectionDatabase(
         decisionRowsHash: meta.get("decisionRowsHash") ?? "",
         declaredRowsHash: meta.get("declaredRowsHash") ?? "",
         declaredManifestHash: meta.get("declaredManifestHash") ?? "",
-        executionEvidenceRowsHash: meta.get("executionEvidenceRowsHash") ?? "",
         attributionRowsHash: meta.get("attributionRowsHash") ?? "",
         attributionSourceHash: meta.get("attributionSourceHash") ?? "",
         taskSourceHash: meta.get("taskSourceHash") ?? "",

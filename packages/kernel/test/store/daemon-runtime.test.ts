@@ -168,7 +168,7 @@ test("multi-repo daemon keeps projection generations and evidence pages isolated
     const generations = status.repos.map((repo) => repo.projectionGeneration);
     assert.ok(generations.every((generation) => generation.validationRuns === 1));
     assert.equal(new Set(generations.map((generation) => generation.sourceHash)).size, 5);
-    assert.equal(new Set(repos.map((repo) => resolveHarnessLayout(createHarnessRuntimeContext(repo.rootDir)).projectionPath)).size, 5);
+    assert.equal(new Set(repos.map((repo) => resolveHarnessLayout(createHarnessRuntimeContext(repo.rootDir)).executionEvidenceProjectionPath)).size, 5);
 
     await runtime.enqueueInteractiveWrite("repo-1", {
       commandId: "cmd-first-generation-invalidation",
@@ -485,7 +485,7 @@ test("daemon no-op materializer preserves the ready projection generation", asyn
     });
     await runtime.start();
     await runtime.queryExecutionEvidencePage({ limit: 1 });
-    const projectionPath = resolveHarnessLayout(createHarnessRuntimeContext(rootDir)).projectionPath;
+    const projectionPath = resolveHarnessLayout(createHarnessRuntimeContext(rootDir)).executionEvidenceProjectionPath;
     const before = projectionDatabaseSignature(projectionPath);
 
     const report = await runtime.enqueueMaterializerBatch();

@@ -5,8 +5,12 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { aggregateExecutions } from "../../packages/gui/src/renderer/execution-data.ts";
 import { queryExecutionEvidencePage, queryExecutions, rebuildTaskProjection } from "../../packages/kernel/src/index.ts";
-import { ensureProjectionGenerationReady } from "../../packages/kernel/src/projection/projection-generation-readiness.ts";
 import { queryExecutionEvidencePageFromReadyGeneration } from "../../packages/kernel/src/projection/sqlite-execution-evidence-reader.ts";
+import {
+  ensureExecutionEvidenceGenerationReady,
+  rebuildExecutionEvidenceProjection,
+  updateExecutionEvidenceProjectionIncrementally
+} from "../../packages/kernel/src/projection/sqlite-execution-evidence-store.ts";
 import { captureProjectionSourceFingerprint } from "../../packages/kernel/src/projection/projection-source-snapshot.ts";
 import { readDeclaredSourceManifestRows } from "../../packages/kernel/src/projection/sqlite-declared-source-manifest.ts";
 import { updateTaskProjectionIncrementally } from "../../packages/kernel/src/projection/sqlite-task-incremental-projection.ts";
@@ -23,19 +27,25 @@ try {
   const fixtureRows = [];
   for (let index = 0; index < size; index += 1) fixtureRows.push(writeTask(index));
   const fixtureMs = performance.now() - fixtureStart;
+  initAuthoredGit();
+
+  const evidenceFacetBuildStart = performance.now();
+  rebuildExecutionEvidenceProjection({ rootDir });
+  const evidenceFacetBuildMs = performance.now() - evidenceFacetBuildStart;
 
   const rebuildStart = performance.now();
   const rebuilt = rebuildTaskProjection({ rootDir });
   const rebuildMs = performance.now() - rebuildStart;
-  initAuthoredGit();
 
   const querySamples = sample(20, () => queryExecutions({ rootDir }));
   const executions = querySamples.value;
   const legacyExecutionsPayloadBytes = Buffer.byteLength(JSON.stringify({ ok: true, executions }), "utf8");
   const warmQueryP95 = percentile(querySamples.samples, 0.95);
-  const evidencePageSamples = sample(20, () => queryExecutionEvidencePage({ rootDir, limit: 25 }));
+  // The direct API intentionally revalidates authored sources on every call. Keep this
+  // diagnostic sample bounded; the GUI hot path is the ready daemon generation below.
+  const evidencePageSamples = sample(5, () => queryExecutionEvidencePage({ rootDir, limit: 25 }));
   const evidencePage = evidencePageSamples.value;
-  const readyGeneration = ensureProjectionGenerationReady({ rootDir }).ready;
+  const readyGeneration = ensureExecutionEvidenceGenerationReady({ rootDir }).ready;
   const readyEvidencePageSamples = sample(20, () => queryExecutionEvidencePageFromReadyGeneration(readyGeneration, { limit: 25 }));
   const readyEvidencePageP95 = percentile(readyEvidencePageSamples.samples, 0.95);
   const daemonRuntime = createDaemonRuntime({ rootDir, materializerPollMs: false });
@@ -56,8 +66,16 @@ try {
   const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
   const manifest = readDeclaredSourceManifestRows(projectionPath);
   const previousSourceFingerprint = captureProjectionSourceFingerprint(rootDir, manifest).fingerprint;
+  const previousEvidenceSourceFingerprint = readyGeneration.sourceHash;
   const changedBody = JSON.parse(readFileSync(changedExecution.executionPath, "utf8"));
   writeFileSync(changedExecution.executionPath, `${JSON.stringify({ ...changedBody, state: "accepted" }, null, 2)}\n`);
+  const incrementalEvidenceStarted = performance.now();
+  const incrementalEvidence = updateExecutionEvidenceProjectionIncrementally({
+    rootDir,
+    touchedPaths: [changedExecution.executionPath],
+    previousSourceFingerprint: previousEvidenceSourceFingerprint
+  });
+  const incrementalEvidenceMs = performance.now() - incrementalEvidenceStarted;
   const incrementalStarted = performance.now();
   const incremental = updateTaskProjectionIncrementally({
     rootDir,
@@ -66,7 +84,7 @@ try {
   });
   const incrementalExecutionMs = performance.now() - incrementalStarted;
   const result = {
-    schema: "gui-projection-benchmark/v1",
+    schema: "gui-projection-benchmark/v2",
     fixture: {
       tasks: size,
       executions: size,
@@ -76,6 +94,7 @@ try {
     },
     milliseconds: {
       fixture: rounded(fixtureMs),
+      evidenceFacetBuild: rounded(evidenceFacetBuildMs),
       rebuild: rounded(rebuildMs),
       queryExecutions: summarize(querySamples.samples),
       queryExecutionEvidencePage: summarize(evidencePageSamples.samples),
@@ -83,6 +102,7 @@ try {
       queryExecutionEvidencePageFromDaemonGeneration: summarize(daemonEvidencePageSamples.samples),
       daemonGenerationReady: rounded(daemonGenerationReadyMs),
       aggregateExecutions: summarize(aggregateSamples.samples),
+      incrementalEvidence: rounded(incrementalEvidenceMs),
       incrementalExecution: rounded(incrementalExecutionMs)
     },
     assertions: {
@@ -119,11 +139,24 @@ try {
         : size === 5_000
           ? rebuildMs <= 9_000
           : null,
-      coldFirstUsableMs: rounded(rebuildMs + daemonGenerationReadyMs + daemonEvidencePageP95),
-      coldFirstUsableBudgetMs: size === 1_000 || size === 5_000 ? 10_000 : null,
-      coldFirstUsableWithinBudget: size === 1_000 || size === 5_000
-        ? rebuildMs + daemonGenerationReadyMs + daemonEvidencePageP95 <= 10_000
+      evidenceFacetBuildBudgetMs: size === 1_000 ? 3_000 : size === 5_000 ? 9_000 : null,
+      evidenceFacetBuildWithinBudget: size === 1_000
+        ? evidenceFacetBuildMs <= 3_000
+        : size === 5_000
+          ? evidenceFacetBuildMs <= 9_000
+          : null,
+      coldFirstUsableMs: rounded(evidenceFacetBuildMs + readyEvidencePageP95),
+      coldFirstUsableBudgetMs: size === 1_000 ? 3_000 : size === 5_000 ? 9_000 : null,
+      coldFirstUsableWithinBudget: size === 1_000
+        ? evidenceFacetBuildMs + readyEvidencePageP95 <= 3_000
+        : size === 5_000
+          ? evidenceFacetBuildMs + readyEvidencePageP95 <= 9_000
         : null,
+      incrementalEvidenceBudgetMs: size === 1_000 || size === 5_000 ? 250 : null,
+      incrementalEvidenceWithinBudget: size === 1_000 || size === 5_000
+        ? incrementalEvidenceMs <= 250
+        : null,
+      incrementalEvidenceMode: incrementalEvidence.mode,
       incrementalExecutionMode: incremental.mode
     }
   };
@@ -138,7 +171,10 @@ try {
       !result.assertions.daemonGenerationReused ||
       !result.assertions.daemonFirstPageMatchesReadyPage ||
       result.assertions.coldProjectionBuildWithinBudget === false ||
+      result.assertions.evidenceFacetBuildWithinBudget === false ||
       result.assertions.coldFirstUsableWithinBudget === false ||
+      result.assertions.incrementalEvidenceWithinBudget === false ||
+      incrementalEvidence.mode !== "incremental" ||
       incremental.mode !== "incremental") {
     process.exitCode = 1;
   }
