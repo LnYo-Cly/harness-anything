@@ -1,4 +1,5 @@
-import { Funnel, SquaresFour, Graph, Bandaids } from "@phosphor-icons/react";
+import { useState } from "react";
+import { Funnel, SquaresFour, Graph, Bandaids, CaretDown, CaretRight } from "@phosphor-icons/react";
 import {
   AXIS_COLOR_VAR,
   AXIS_LABEL,
@@ -54,14 +55,40 @@ export function GraphFilterPanel({ filters, setFilters, availableModules }: Prop
     }));
   };
 
+  // 默认收起:这个面板是覆盖在画布上的浮层,常驻展开会永久吃掉左上角 ——
+  // 聚光灯模式下压住焦点卡片,领地模式下压住第一个领地块。收起态是一颗 pill,
+  // 上面标出「已收窄」的筛选数,状态一眼可见,画布还给内容。
+  const [open, setOpen] = useState(false);
+  const narrowed =
+    AXIS_ORDER.filter((a) => !filters.axes[a]).length +
+    (3 - filters.types.size) +
+    Math.max(0, availableModules.length - filters.modules.size);
+
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface shadow-sm w-[260px] pointer-events-auto">
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+    <div
+      className={`flex flex-col rounded-lg border border-border bg-surface shadow-sm pointer-events-auto ${open ? "gap-3 w-[260px]" : ""}`}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={open ? "收起筛选面板" : "展开筛选面板"}
+        className={`flex items-center gap-2 px-3 py-2 text-left hover:bg-surface-raised rounded-lg ${open ? "border-b border-border rounded-b-none" : ""}`}
+      >
+        {open ? (
+          <CaretDown weight="bold" className="text-text-faint text-[10px]" />
+        ) : (
+          <CaretRight weight="bold" className="text-text-faint text-[10px]" />
+        )}
         <Funnel weight="duotone" className="text-text-muted" />
         <span className="font-mono text-xs font-semibold text-text">Filters</span>
-      </div>
+        {!open && narrowed > 0 && (
+          <span className="rounded-full bg-accent px-1.5 py-0.5 font-mono text-[10px] text-accent-fg">
+            {narrowed}
+          </span>
+        )}
+      </button>
 
-      <div className="px-3 pb-3 flex flex-col gap-4">
+      <div className={`px-3 pb-3 flex-col gap-4 ${open ? "flex" : "hidden"}`}>
         {/* Semantic Axis Filter */}
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-1.5 text-[11px] text-text-muted font-mono uppercase tracking-wide">
