@@ -176,24 +176,65 @@ test("decision accept emits an append-only body mutation for judgment-only ratio
   assert.match(payload.writeMode?.appendBody ?? "", /CEO accepted this as a judgment-only policy choice/u);
 });
 
-test("decision write service rejects self-judgment from the same full ActorAxes and unsupported transitions", () => {
+test("an agent may not judge the decision it proposed, and terminal transitions stay rejected", () => {
   const service = makeRawDecisionWriteService({
     coordinator: fakeCoordinator([]),
-    attribution: proposerAttribution,
+    attribution: proposerAttribution, // executor = agent:claude — the same agent that proposed
     readAttributionEvents: () => [proposeAttributionEvent]
   });
   const proposed = decisionPackage({ state: "proposed" });
   const rejected = decisionPackage({ state: "rejected" });
 
-  const selfArbiter = Effect.runSyncExit(service.accept({ current: proposed, judgmentOnlyRationale: "Self judgment must still be rejected." }));
+  const selfArbiter = Effect.runSyncExit(service.accept({ current: proposed, judgmentOnlyRationale: "Agent self judgment must still be rejected." }));
   const terminalTransition = Effect.runSyncExit(service.accept({
     current: rejected
   }));
 
   assert.equal(selfArbiter._tag, "Failure");
-  assert.match(failureReason(selfArbiter.cause), /must differ from the decision_propose actor/u);
+  assert.match(failureReason(selfArbiter.cause), /an agent may not judge the decision it proposed/u);
   assert.equal(terminalTransition._tag, "Failure");
   assert.match(failureReason(terminalTransition.cause), /terminal_state/u);
+});
+
+// dec_01KXCHW9MFV8E3QGZJJW91YNDS:分离不变量防的是 agent 自我签字,不是人自我签字。
+test("a human judging directly may accept the decision they proposed themselves", () => {
+  const humanProposeEvent = {
+    ...proposeAttributionEvent,
+    ...humanDirectAttribution // propose 也是这个人直接做的,没有 executor
+  } as AttributionEvent;
+  const enqueued: WriteOp[] = [];
+  const service = makeRawDecisionWriteService({
+    coordinator: fakeCoordinator(enqueued),
+    attribution: humanDirectAttribution, // 判定者:同一个人,直接操作,无 executor
+    readAttributionEvents: () => [humanProposeEvent]
+  });
+
+  const result = Effect.runSync(service.accept({
+    current: decisionPackage({ state: "proposed" }),
+    judgmentOnlyRationale: "A solo operator is both the only proposer and the only authority.",
+    opIdPrefix: "accept"
+  }));
+
+  assert.deepEqual(result, { decisionId: "dec_TEST", state: "active" });
+  assert.equal(enqueued.length, 1);
+});
+
+test("a human judging directly may also accept a decision an agent proposed", () => {
+  const enqueued: WriteOp[] = [];
+  const service = makeRawDecisionWriteService({
+    coordinator: fakeCoordinator(enqueued),
+    attribution: humanDirectAttribution, // 人直接判定
+    readAttributionEvents: () => [proposeAttributionEvent] // agent:claude 提的
+  });
+
+  const result = Effect.runSync(service.accept({
+    current: decisionPackage({ state: "proposed" }),
+    judgmentOnlyRationale: "Human signoff on an agent-proposed decision.",
+    opIdPrefix: "accept"
+  }));
+
+  assert.deepEqual(result, { decisionId: "dec_TEST", state: "active" });
+  assert.equal(enqueued.length, 1);
 });
 
 test("decision judgment fails closed when the immutable propose attribution event is missing", () => {
@@ -474,6 +515,10 @@ const judgmentAttribution = {
   principalSource: { kind: "migration", evidenceRef: "test/judgment" },
   executorSource: "none"
 } as const;
+
+// 人在直接操作:principal 是人,executor 为空(没有 agent 在代跑)。判定动作长这样时
+// 分离校验整条豁免(dec_01KXCHW9MFV8E3QGZJJW91YNDS)。
+const humanDirectAttribution = judgmentAttribution;
 
 const proposeAttributionEvent = {
   schema: "attribution-event/v1",

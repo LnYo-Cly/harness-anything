@@ -391,9 +391,16 @@ function assertIndependentJudgmentActor(options: DecisionWriteServiceOptions, de
       event.kind === "decision_propose" &&
       (event.entityId === decisionId || event.entityId === `decision/${decisionId}`)
     );
+    // 溯源仍然 fail-closed,对谁都一样:判定前必须能验到那条不可变的 propose 事件。
+    // 下面豁免的只是「判定者与提议者不得同一」,不是「提议事件必须存在」。
     if (!propose) return rejection(decisionId, "decision judgment requires an immutable decision_propose attribution event");
+    // 判定动作没有 executor = 一个人在直接操作 → 分离校验整条豁免:人可以批自己提的,
+    // 也可以批别人提的(dec_01KXCHW9MFV8E3QGZJJW91YNDS)。分离不变量承重的目的是阻止
+    // **agent** 给自己签字 —— 那是问责层的核心承诺 —— 不是阻止人给自己签字。单人
+    // 操作者是绝大多数决策的唯一提议者兼唯一权威,一律分离等于把他锁在自己的台账外面。
+    if (!currentActor.executor) return null;
     return sameActorAxes(propose.actor, currentActor)
-      ? rejection(decisionId, "decision judgment actor must differ from the decision_propose actor")
+      ? rejection(decisionId, "an agent may not judge the decision it proposed; a human must sign off")
       : null;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
