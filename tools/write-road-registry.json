@@ -1118,6 +1118,10 @@
           "command": "git"
         },
         {
+          "file": "packages/adapters/local/src/projection-source-fence.ts",
+          "command": "git"
+        },
+        {
           "file": "packages/cli/src/commands/core/authored-git.ts",
           "command": "git"
         },
@@ -1135,6 +1139,7 @@
         }
       ],
       "evidence": [
+        "packages/adapters/local/src/projection-source-fence.ts:219",
         "packages/cli/src/commands/core/worktree.ts:183",
         "packages/kernel/src/store/local-version-control-system.ts:21"
       ],

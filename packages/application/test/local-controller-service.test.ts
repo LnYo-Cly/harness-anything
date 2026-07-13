@@ -111,7 +111,9 @@ test("local controller service reads projection and writes through injected task
     const executions = service.getExecutions();
     assert.equal(executions.ok, true);
     assert.deepEqual(executions.executions, []);
-    const executionEvidence = service.getExecutionEvidencePage({ limit: 40 });
+    const pendingExecutionEvidence = service.getExecutionEvidencePage({ limit: 40 });
+    assert.ok(pendingExecutionEvidence instanceof Promise);
+    const executionEvidence = await pendingExecutionEvidence;
     assert.equal(executionEvidence.ok, true);
     assert.deepEqual(executionEvidence.groups, []);
     assert.equal(executionEvidence.stats.totalExecutions, 0);
@@ -165,6 +167,46 @@ test("local controller service reads projection and writes through injected task
     assert.deepEqual(await service.appendTaskProgress({ taskId: "task-1", text: "GUI update" }), { ok: true });
     assert.deepEqual(writes, ["status:task-1:active", "progress:task-1:GUI update"]);
     assert.match(readFileSync(path.join(rootDir, "harness/tasks/task-1/progress.md"), "utf8"), /GUI update/);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("local controller service delegates evidence pages to an injected projection query", async () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "ha-app-"));
+  try {
+    const payloads: unknown[] = [];
+    const service = makeLocalControllerService({
+      rootDir,
+      artifactStore: makeMarkdownArtifactStore({ rootDir }),
+      taskWriter: {
+        setStatus: (payload) => Effect.succeed({ taskId: payload.taskId, status: payload.status }),
+        appendProgress: (payload) => Effect.succeed({ taskId: payload.taskId, path: "progress.md" })
+      },
+      projectionQueries: {
+        getExecutionEvidencePage: async (payload) => {
+          payloads.push(payload);
+          return {
+            ok: true,
+            groups: [],
+            stats: {
+              totalExecutions: 7,
+              archivalExecutions: 0,
+              realExecutions: 7,
+              totalOutputs: 0,
+              passingReceiptOutputs: 0,
+              tasksWithExecutions: 0
+            },
+            nextCursor: null
+          };
+        }
+      }
+    });
+
+    const result = await service.getExecutionEvidencePage({ limit: 25 });
+    assert.equal(result.ok, true);
+    assert.equal(result.stats.totalExecutions, 7);
+    assert.deepEqual(payloads, [{ limit: 25 }]);
   } finally {
     rmSync(rootDir, { recursive: true, force: true });
   }

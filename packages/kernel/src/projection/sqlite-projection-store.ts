@@ -67,9 +67,8 @@ export function writeProjectionDatabase(
   mkdirSync(path.dirname(projectionPath), { recursive: true });
   const tempPath = `${projectionPath}.${process.pid}.${Date.now()}.tmp`;
   rmSync(tempPath, { force: true });
-  const writeEffect = Effect.gen(function* () {
+  const materializeEffect = Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    yield* sql`PRAGMA journal_mode = DELETE`;
     yield* sql`CREATE TABLE projection_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`;
     yield* sql`
       CREATE TABLE task_projection (
@@ -186,6 +185,18 @@ export function writeProjectionDatabase(
     yield* sql`UPDATE projection_meta SET value = ${executionEvidenceRowsHash} WHERE key = 'executionEvidenceRowsHash'`;
     const attributionRowsHash = yield* hashAttributionProjectionState(sql);
     yield* sql`UPDATE projection_meta SET value = ${attributionRowsHash} WHERE key = 'attributionRowsHash'`;
+  });
+  const writeEffect = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`PRAGMA journal_mode = DELETE`;
+    yield* sql`BEGIN IMMEDIATE`;
+    try {
+      yield* materializeEffect;
+      yield* sql`COMMIT`;
+    } catch (error) {
+      yield* sql`ROLLBACK`;
+      throw error;
+    }
   });
   try {
     runSqlite(tempPath, writeEffect);

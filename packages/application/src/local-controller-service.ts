@@ -126,15 +126,17 @@ export function makeLocalControllerService(options: LocalControllerServiceOption
       ok: true,
       executions: queryExecutions({ rootDir, layoutOverrides: options.layoutOverrides })
     }),
-    getExecutionEvidencePage: (payload) => ({
-      ok: true,
-      ...queryExecutionEvidencePage({
-        rootDir,
-        layoutOverrides: options.layoutOverrides,
-        limit: payload.limit,
-        ...(payload.cursor ? { cursor: payload.cursor } : {})
-      })
-    }),
+    getExecutionEvidencePage: async (payload) => options.projectionQueries
+      ? options.projectionQueries.getExecutionEvidencePage(payload)
+      : ({
+          ok: true,
+          ...queryExecutionEvidencePage({
+            rootDir,
+            layoutOverrides: options.layoutOverrides,
+            limit: payload.limit,
+            ...(payload.cursor ? { cursor: payload.cursor } : {})
+          })
+        }),
     getExecutionDetail: (payload) => {
       validateLocalControllerDecisionId(payload.executionId);
       const execution = queryExecutionProjection({ rootDir, layoutOverrides: options.layoutOverrides, executionId: payload.executionId });

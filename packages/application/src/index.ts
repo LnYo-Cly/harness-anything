@@ -17,6 +17,13 @@ export interface LocalControllerServiceOptions {
   readonly artifactStore: Pick<ArtifactStore, "readTaskPackage" | "listAuthoredDocuments" | "readAuthoredDocument">;
   readonly catalogSnapshotReader?: () => CatalogSnapshotResult;
   readonly decisionMutationPort?: LocalControllerDecisionMutationPort;
+  readonly projectionQueries?: LocalControllerProjectionQueries;
+}
+
+export interface LocalControllerProjectionQueries {
+  readonly getExecutionEvidencePage: (
+    payload: ExecutionEvidencePagePayload
+  ) => Promise<ExecutionEvidencePageResult>;
 }
 
 export interface LocalControllerSuccess {
@@ -553,7 +560,7 @@ export interface LocalControllerService {
   readonly deferDecision: (payload: DecisionTransitionPayload, context?: LocalControllerCallContext) => Promise<DecisionMutationResult>;
   readonly getTaskExecutions: (payload: TaskIdPayload) => TaskExecutionListResult;
   readonly getExecutions: () => ExecutionListResult;
-  readonly getExecutionEvidencePage: (payload: ExecutionEvidencePagePayload) => ExecutionEvidencePageResult;
+  readonly getExecutionEvidencePage: (payload: ExecutionEvidencePagePayload) => Promise<ExecutionEvidencePageResult>;
   readonly getExecutionDetail: (payload: ExecutionIdPayload) => ExecutionDetailResult;
   readonly getReviewDetail: (payload: ReviewIdPayload) => ReviewDetailResult;
   readonly getTaskFacts: (payload: TaskIdPayload) => Promise<TaskFactListResult>;

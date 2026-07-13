@@ -9,7 +9,13 @@ import { stablePayloadHash } from "../../../kernel/src/index.ts";
 import type { HarnessLayoutInput } from "../../../kernel/src/index.ts";
 import { createHarnessRuntimeContext, harnessRuntimeRoot, taskPackagePath } from "../../../kernel/src/index.ts";
 import type { WriteCoordinator } from "../../../kernel/src/index.ts";
-import { createDaemonRuntime, createMultiRepoDaemonRuntime, makeJournaledWriteCoordinator, runLedgerMaterializer } from "../../../kernel/src/store/index.ts";
+import {
+  createDaemonRuntime as createKernelDaemonRuntime,
+  createMultiRepoDaemonRuntime as createKernelMultiRepoDaemonRuntime,
+  makeJournaledWriteCoordinator,
+  runLedgerMaterializer
+} from "../../../kernel/src/store/index.ts";
+import { makeLocalProjectionSourceFenceReader } from "./projection-source-fence.ts";
 import { renderSupersedesRelation } from "./task-relations.ts";
 import { assertValidParentBinding, indexPath, makeIndex, readIndexEffect, renderIndex, validateGeneratedTaskId, validateTaskId } from "./task-index.ts";
 import { appendProgressDelta, deleteTaskPackage, stageTaskDocument, stageTaskTree, writeSupersedeTaskDocuments, writeTaskDocument } from "./task-writes.ts";
@@ -37,7 +43,7 @@ import type { AdapterProviderMetadata } from "./types.ts";
 export { collectGitDiffEvidence } from "./git-diff-evidence.ts";
 export type { GitDiffEvidenceFile, GitDiffEvidenceOptions, GitDiffEvidenceReport } from "./git-diff-evidence.ts";
 export { runLedgerMaterializer };
-export { createDaemonRuntime, createMultiRepoDaemonRuntime };
+export { makeLocalProjectionSourceFenceReader };
 export type {
   AdapterProviderMetadata,
   AppendProgressInput,
@@ -76,6 +82,20 @@ export const localAdapterProviderMetadata = {
   writable: true,
   defaultProvider: true
 } as const satisfies AdapterProviderMetadata;
+
+export function createDaemonRuntime(options: Parameters<typeof createKernelDaemonRuntime>[0]): ReturnType<typeof createKernelDaemonRuntime> {
+  return createKernelDaemonRuntime({
+    ...options,
+    projectionSourceFenceFactory: options.projectionSourceFenceFactory ?? makeLocalProjectionSourceFenceReader
+  });
+}
+
+export function createMultiRepoDaemonRuntime(options: Parameters<typeof createKernelMultiRepoDaemonRuntime>[0]): ReturnType<typeof createKernelMultiRepoDaemonRuntime> {
+  return createKernelMultiRepoDaemonRuntime({
+    ...options,
+    projectionSourceFenceFactory: options.projectionSourceFenceFactory ?? makeLocalProjectionSourceFenceReader
+  });
+}
 
 export function makeLocalWriteCoordinator(options: LocalWriteCoordinatorOptions): WriteCoordinator {
   return makeJournaledWriteCoordinator({

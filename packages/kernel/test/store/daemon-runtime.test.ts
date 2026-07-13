@@ -1,18 +1,331 @@
 // harness-test-tier: integration
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, utimesSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { Effect } from "effect";
 import { createHarnessRuntimeContext, resolveHarnessLayout } from "../../src/layout/index.ts";
 import { makeTaskHolderService, taskHolderActor } from "../../src/local/task-holder-state.ts";
+import type { ProjectionSourceFence } from "../../src/ports/projection-source-fence.ts";
+import { queryExecutionEvidencePage } from "../../src/projection/sqlite-execution-evidence-reader.ts";
+import { rebuildTaskProjection } from "../../src/projection/sqlite-task-projection.ts";
+import { projectionDatabaseSignature } from "../../src/projection/projection-generation-readiness.ts";
+import { createDaemonProjectionGenerationManager } from "../../src/store/daemon-projection-generation-manager.ts";
 import { makeJournaledWriteCoordinator } from "../../src/store/write-journal-coordinator.ts";
-import { createDaemonRuntime, createMultiRepoDaemonRuntime } from "../../src/store/daemon-runtime.ts";
+import { createDaemonRuntime, createMultiRepoDaemonRuntime } from "../../../adapters/local/src/index.ts";
 import { acquireDaemonGlobalLock } from "../../src/store/write-journal-locks.ts";
 import { docWrite, withTempStoreAsync } from "./helpers.ts";
+import {
+  commitAuthoredFixture,
+  daemonAttribution,
+  git,
+  initAuthoredGit,
+  readGitFile,
+  spawnJournalOnlyDaemon,
+  stableProjectionFence,
+  writeExecutionEvidenceFixture
+} from "./helpers/daemon-runtime.ts";
 
 const testAttribution = daemonAttribution("person_test", "test", "credential-test");
+
+test("daemon runtime coalesces concurrent evidence reads into one ready repo generation", async () => {
+  await withTempStoreAsync(async (rootDir) => {
+    writeExecutionEvidenceFixture(rootDir, "Concurrent generation");
+    initAuthoredGit(rootDir);
+    commitAuthoredFixture(rootDir);
+    rebuildTaskProjection({ rootDir });
+    const runtime = createDaemonRuntime({
+      rootDir,
+      materializerPollMs: false,
+      interactiveMicroBatchMs: 0
+    });
+    await runtime.start();
+
+    const pages = await Promise.all(Array.from({ length: 100 }, () =>
+      runtime.queryExecutionEvidencePage({ limit: 1 })));
+
+    assert.equal(pages.length, 100);
+    assert.ok(pages.every((page) => page.groups[0]?.title === "Concurrent generation"));
+    assert.equal(runtime.status().projectionGeneration.validationRuns, 1);
+    assert.equal(runtime.status().projectionGeneration.state, "ready", JSON.stringify(runtime.status().projectionGeneration));
+    for (let index = 0; index < 20; index += 1) {
+      await runtime.queryExecutionEvidencePage({ limit: 1 });
+    }
+    assert.ok(runtime.status().projectionGeneration.fenceRuns >= 22, JSON.stringify(runtime.status().projectionGeneration));
+    await runtime.stop();
+  });
+});
+
+test("daemon stop drains an in-flight evidence read before it resolves", async () => {
+  await withTempStoreAsync(async (rootDir) => {
+    writeExecutionEvidenceFixture(rootDir, "Shutdown drain");
+    initAuthoredGit(rootDir);
+    commitAuthoredFixture(rootDir);
+    rebuildTaskProjection({ rootDir });
+    let captureStarted!: () => void;
+    let releaseCapture!: () => void;
+    const captureStartedPromise = new Promise<void>((resolve) => {
+      captureStarted = resolve;
+    });
+    const releaseCapturePromise = new Promise<void>((resolve) => {
+      releaseCapture = resolve;
+    });
+    const runtime = createDaemonRuntime({
+      rootDir,
+      materializerPollMs: false,
+      projectionSourceFenceFactory: () => ({
+        capture: async () => {
+          captureStarted();
+          await releaseCapturePromise;
+          return {
+            kind: "stable",
+            identity: "sha256:shutdown-drain",
+            headOid: "shutdown-drain",
+            dirty: false,
+            changedPaths: []
+          };
+        }
+      })
+    });
+    await runtime.start();
+
+    const settled: string[] = [];
+    const read = runtime.queryExecutionEvidencePage({ limit: 1 }).then(
+      () => { settled.push("read"); },
+      () => { settled.push("read"); }
+    );
+    await captureStartedPromise;
+    const stop = runtime.stop().then(() => {
+      settled.push("stop");
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(settled, []);
+    releaseCapture();
+    await Promise.all([read, stop]);
+    assert.deepEqual(settled, ["read", "stop"]);
+  });
+});
+
+test("daemon runtime invalidates only its repo generation after a canonical write", async () => {
+  await withTempStoreAsync(async (rootDir) => {
+    writeExecutionEvidenceFixture(rootDir, "Canonical invalidation");
+    initAuthoredGit(rootDir);
+    commitAuthoredFixture(rootDir);
+    rebuildTaskProjection({ rootDir });
+    const runtime = createDaemonRuntime({
+      rootDir,
+      materializerPollMs: false,
+      interactiveMicroBatchMs: 25
+    });
+    await runtime.start();
+
+    await runtime.queryExecutionEvidencePage({ limit: 1 });
+    assert.equal(runtime.status().projectionGeneration.validationRuns, 1);
+    assert.equal(runtime.status().projectionGeneration.state, "ready", JSON.stringify(runtime.status().projectionGeneration));
+
+    const pendingWrite = runtime.enqueueInteractiveWrite({
+      commandId: "cmd-generation-invalidation",
+      attribution: testAttribution,
+      ops: [docWrite("op-generation-invalidation", "task-generation", "note.md", "changed")]
+    });
+    assert.equal(runtime.status().projectionGeneration.invalidations, 1);
+    assert.equal(runtime.status().projectionGeneration.state, "unknown");
+    await pendingWrite;
+
+    await runtime.queryExecutionEvidencePage({ limit: 1 });
+    assert.equal(runtime.status().projectionGeneration.validationRuns, 2);
+    assert.equal(runtime.status().projectionGeneration.state, "ready");
+    await runtime.stop();
+  });
+});
+
+test("multi-repo daemon keeps projection generations and evidence pages isolated", async () => {
+  await withTempStoreAsync(async (workspaceRoot) => {
+    const repos = Array.from({ length: 5 }, (_, index) => ({
+      repoId: `repo-${index + 1}`,
+      rootDir: path.join(workspaceRoot, `repo-${index + 1}`),
+      title: `Repository ${index + 1} evidence`
+    }));
+    for (const repo of repos) {
+      mkdirSync(repo.rootDir, { recursive: true });
+      writeExecutionEvidenceFixture(repo.rootDir, repo.title);
+      initAuthoredGit(repo.rootDir);
+      commitAuthoredFixture(repo.rootDir);
+      rebuildTaskProjection({ rootDir: repo.rootDir });
+    }
+    const runtime = createMultiRepoDaemonRuntime({
+      materializerPollMs: false,
+      interactiveMicroBatchMs: 0,
+      repos
+    });
+    await runtime.start();
+
+    const pages = await Promise.all(repos.map((repo) =>
+      runtime.getRepoRuntime(repo.repoId)!.queryExecutionEvidencePage({ limit: 1 })));
+    assert.deepEqual(pages.map((page) => page.groups[0]?.title), repos.map((repo) => repo.title));
+    const status = runtime.status();
+    const generations = status.repos.map((repo) => repo.projectionGeneration);
+    assert.ok(generations.every((generation) => generation.validationRuns === 1));
+    assert.equal(new Set(generations.map((generation) => generation.sourceHash)).size, 5);
+    assert.equal(new Set(repos.map((repo) => resolveHarnessLayout(createHarnessRuntimeContext(repo.rootDir)).projectionPath)).size, 5);
+
+    await runtime.enqueueInteractiveWrite("repo-1", {
+      commandId: "cmd-first-generation-invalidation",
+      attribution: testAttribution,
+      ops: [docWrite("op-first-generation-invalidation", "task-first", "note.md", "first")]
+    });
+    const afterWrite = runtime.status();
+    assert.equal(afterWrite.repos.find((repo) => repo.repoId === "repo-1")!.projectionGeneration.state, "unknown");
+    assert.ok(afterWrite.repos
+      .filter((repo) => repo.repoId !== "repo-1")
+      .every((repo) => repo.projectionGeneration.state === "ready" && repo.projectionGeneration.invalidations === 0));
+    await runtime.stop();
+  });
+});
+
+test("daemon runtime rejects a cached generation after an external authored source edit", async () => {
+  await withTempStoreAsync(async (rootDir) => {
+    writeExecutionEvidenceFixture(rootDir, "External title A");
+    initAuthoredGit(rootDir);
+    commitAuthoredFixture(rootDir);
+    rebuildTaskProjection({ rootDir });
+    const runtime = createDaemonRuntime({
+      rootDir,
+      materializerPollMs: false,
+      interactiveMicroBatchMs: 0
+    });
+    await runtime.start();
+
+    const before = await runtime.queryExecutionEvidencePage({ limit: 1 });
+    assert.equal(before.groups[0]?.title, "External title A");
+    const indexPath = path.join(rootDir, "harness/tasks/task_01KXDG00000000000000000001/INDEX.md");
+    const originalTimes = statSync(indexPath);
+    writeExecutionEvidenceFixture(rootDir, "External title B");
+    utimesSync(indexPath, originalTimes.atime, originalTimes.mtime);
+    for (let attempt = 0; attempt < 100 && runtime.status().projectionGeneration.state !== "unknown"; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(runtime.status().projectionGeneration.state, "unknown", JSON.stringify(runtime.status().projectionGeneration));
+
+    const after = await runtime.queryExecutionEvidencePage({ limit: 1 });
+    assert.equal(after.groups[0]?.title, "External title B");
+    assert.equal(runtime.status().projectionGeneration.validationRuns, 2);
+    await runtime.stop();
+  });
+});
+
+test("daemon projection manager incrementally applies one externally changed source and preserves full-rebuild parity", async () => {
+  await withTempStoreAsync(async (rootDir) => {
+    writeExecutionEvidenceFixture(rootDir, "Incremental external A");
+    initAuthoredGit(rootDir);
+    commitAuthoredFixture(rootDir);
+    rebuildTaskProjection({ rootDir });
+    const indexPath = path.join(rootDir, "harness/tasks/task_01KXDG00000000000000000001/INDEX.md");
+    const executionPath = path.join(
+      rootDir,
+      "harness/tasks/task_01KXDG00000000000000000001/executions/exe_01KXDG00000000000000000001.md"
+    );
+    const headOid = git(rootDir, "rev-parse", "HEAD");
+    let fence: ProjectionSourceFence = stableProjectionFence("external-a", headOid, []);
+    let invalidateFence!: () => void;
+    const preparations: Array<{ readonly mode: string; readonly touchedPaths: ReadonlyArray<string> }> = [];
+    const manager = createDaemonProjectionGenerationManager({
+      rootDir,
+      sourceFence: {
+        capture: () => fence,
+        subscribe: (listener) => {
+          invalidateFence = listener;
+          return () => undefined;
+        }
+      },
+      onPreparation: (event: { readonly mode: string; readonly touchedPaths: ReadonlyArray<string> }) => {
+        preparations.push(event);
+      }
+    });
+
+    const before = await manager.queryExecutionEvidencePage({ limit: 1 });
+    assert.equal(before.groups[0]?.title, "Incremental external A");
+    writeExecutionEvidenceFixture(rootDir, "Incremental external B");
+    fence = stableProjectionFence("external-b", headOid, [indexPath]);
+    invalidateFence();
+
+    const incremental = await manager.queryExecutionEvidencePage({ limit: 1 });
+    assert.equal(incremental.groups[0]?.title, "Incremental external B");
+    assert.deepEqual(preparations.map((event) => event.mode), ["full-readiness", "incremental"]);
+    assert.deepEqual(preparations.at(-1)?.touchedPaths, [path.resolve(indexPath)]);
+
+    const canonicalWrite = manager.beginCanonicalWrite([indexPath]);
+    writeExecutionEvidenceFixture(rootDir, "Incremental external C");
+    fence = stableProjectionFence("external-c", headOid, [executionPath]);
+    canonicalWrite.settle();
+    const combined = await manager.queryExecutionEvidencePage({ limit: 1 });
+    assert.equal(combined.groups[0]?.title, "Incremental external C");
+    assert.equal(preparations.at(-1)?.mode, "incremental");
+    assert.deepEqual(preparations.at(-1)?.touchedPaths, [path.resolve(executionPath), path.resolve(indexPath)]);
+    await manager.close();
+
+    rebuildTaskProjection({ rootDir });
+    const rebuilt = queryExecutionEvidencePage({ rootDir, limit: 1 });
+    assert.deepEqual(combined, rebuilt);
+  });
+});
+
+test("daemon projection manager falls back across HEAD changes and unknown fences", async () => {
+  await withTempStoreAsync(async (rootDir) => {
+    writeExecutionEvidenceFixture(rootDir, "Fence fallback A");
+    initAuthoredGit(rootDir);
+    commitAuthoredFixture(rootDir);
+    rebuildTaskProjection({ rootDir });
+    const indexPath = path.join(rootDir, "harness/tasks/task_01KXDG00000000000000000001/INDEX.md");
+    let headOid = git(rootDir, "rev-parse", "HEAD");
+    let fence: ProjectionSourceFence = stableProjectionFence("fallback-a", headOid, []);
+    let invalidateFence!: () => void;
+    const preparationModes: string[] = [];
+    const manager = createDaemonProjectionGenerationManager({
+      rootDir,
+      sourceFence: {
+        capture: () => fence,
+        subscribe: (listener) => {
+          invalidateFence = listener;
+          return () => undefined;
+        }
+      },
+      onPreparation: (event: { readonly mode: string }) => {
+        preparationModes.push(event.mode);
+      }
+    });
+
+    await manager.queryExecutionEvidencePage({ limit: 1 });
+
+    const canonicalWrite = manager.beginCanonicalWrite([indexPath]);
+    writeExecutionEvidenceFixture(rootDir, "Fence fallback B");
+    git(rootDir, "add", "-A");
+    git(rootDir, "commit", "-m", "canonical B");
+    headOid = git(rootDir, "rev-parse", "HEAD");
+    fence = stableProjectionFence("fallback-b", headOid, []);
+    canonicalWrite.settle();
+    const canonical = await manager.queryExecutionEvidencePage({ limit: 1 });
+    assert.equal(canonical.groups[0]?.title, "Fence fallback B");
+
+    writeExecutionEvidenceFixture(rootDir, "Fence fallback C");
+    git(rootDir, "add", "-A");
+    git(rootDir, "commit", "-m", "external clean HEAD C");
+    headOid = git(rootDir, "rev-parse", "HEAD");
+    fence = stableProjectionFence("fallback-c", headOid, []);
+    invalidateFence();
+    const cleanHead = await manager.queryExecutionEvidencePage({ limit: 1 });
+    assert.equal(cleanHead.groups[0]?.title, "Fence fallback C");
+
+    writeExecutionEvidenceFixture(rootDir, "Fence fallback D");
+    fence = { kind: "unknown", reason: "unstable" };
+    invalidateFence();
+    const unknown = await manager.queryExecutionEvidencePage({ limit: 1 });
+    assert.equal(unknown.groups[0]?.title, "Fence fallback D");
+    assert.deepEqual(preparationModes, ["full-readiness", "full-readiness", "full-readiness", "full-readiness"]);
+    await manager.close();
+  });
+});
 
 test("daemon runtime holds global.lock, rejects direct writes before journaling, and yields background batches to P0 writes", async () => {
   await withTempStoreAsync(async (rootDir) => {
@@ -156,6 +469,31 @@ test("daemon materializer producer runs bounded batches under the lifetime globa
     assert.equal(git(rootDir, "branch", "--list", "sessions/daemon-mat-*"), "");
     assert.equal(readGitFile(rootDir, "tasks/task-mat-1/note.md"), "one\n");
     assert.equal(readGitFile(rootDir, "tasks/task-mat-2/note.md"), "two\n");
+    await runtime.stop();
+  });
+});
+
+test("daemon no-op materializer preserves the ready projection generation", async () => {
+  await withTempStoreAsync(async (rootDir) => {
+    writeExecutionEvidenceFixture(rootDir, "No-op materializer");
+    initAuthoredGit(rootDir);
+    commitAuthoredFixture(rootDir);
+    rebuildTaskProjection({ rootDir });
+    const runtime = createDaemonRuntime({
+      rootDir,
+      materializerPollMs: false
+    });
+    await runtime.start();
+    await runtime.queryExecutionEvidencePage({ limit: 1 });
+    const projectionPath = resolveHarnessLayout(createHarnessRuntimeContext(rootDir)).projectionPath;
+    const before = projectionDatabaseSignature(projectionPath);
+
+    const report = await runtime.enqueueMaterializerBatch();
+
+    assert.equal(report.merged, 0);
+    assert.equal(projectionDatabaseSignature(projectionPath), before);
+    assert.equal(runtime.status().projectionGeneration.invalidations, 0);
+    assert.equal(runtime.status().projectionGeneration.state, "ready");
     await runtime.stop();
   });
 });
@@ -336,98 +674,3 @@ test("multi-repo daemon detaches one repo without releasing other repo locks", a
     });
   });
 });
-
-async function spawnJournalOnlyDaemon(rootDir: string): Promise<void> {
-  const childScript = `
-    import { Effect } from "effect";
-    import { makeJournaledWriteCoordinator } from "./packages/kernel/src/store/index.ts";
-    import { acquireDaemonGlobalLock } from "./packages/kernel/src/store/write-journal-locks.ts";
-    import { createHarnessRuntimeContext, resolveHarnessLayout, taskEntityId } from "./packages/kernel/src/index.ts";
-    const rootDir = ${JSON.stringify(rootDir)};
-    const runtimeContext = createHarnessRuntimeContext(rootDir);
-    const layout = resolveHarnessLayout(runtimeContext);
-    const lock = acquireDaemonGlobalLock(rootDir, runtimeContext, layout.journalPath, { scope: "operational", kind: "system", id: "daemon-runtime" }, 60_000);
-    const coordinator = makeJournaledWriteCoordinator({
-      rootDir,
-      attribution: {
-        actor: { principal: { kind: "person", personId: "person_test" }, executor: { kind: "agent", id: "test" } },
-        principalSource: { kind: "local-configured", authority: "harness.yaml", authoritySha256: "sha256:test" },
-        executorSource: "client-asserted"
-      },
-      heldGlobalLock: lock,
-      autoMaterialize: false
-    });
-    Effect.runSync(coordinator.enqueue({
-      opId: "op-crash-recovery",
-      entityId: taskEntityId("task-crash"),
-      kind: "doc_write",
-      payload: { path: "recovered.md", body: "recovered" }
-    }));
-    console.log("journaled");
-    setTimeout(() => process.kill(process.pid, "SIGKILL"), 5);
-  `;
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(process.execPath, ["--input-type=module", "-e", childScript], {
-      cwd: process.cwd(),
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    let sawJournaled = false;
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      if (String(chunk).includes("journaled")) sawJournaled = true;
-    });
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-    child.on("error", reject);
-    child.on("close", (_code, signal) => {
-      if (signal === "SIGKILL" && sawJournaled) {
-        resolve();
-        return;
-      }
-      reject(new Error(`journal child did not die as expected: signal=${signal ?? "none"} stderr=${stderr}`));
-    });
-  });
-}
-
-function daemonAttribution(personId: string, executorId: string, credentialFingerprint: string) {
-  return {
-    actor: {
-      principal: { kind: "person" as const, personId },
-      executor: { kind: "agent" as const, id: executorId }
-    },
-    principalSource: {
-      kind: "daemon-authenticated" as const,
-      providerId: "test-provider",
-      credentialFingerprint
-    },
-    executorSource: "client-asserted" as const
-  };
-}
-
-function initAuthoredGit(rootDir: string): void {
-  const harnessRoot = path.join(rootDir, "harness");
-  mkdirSync(harnessRoot, { recursive: true });
-  execFileSync("git", ["-C", harnessRoot, "init", "-b", "master"], { stdio: "ignore" });
-  execFileSync("git", ["-C", harnessRoot, "config", "user.name", "Harness Test"], { stdio: "ignore" });
-  execFileSync("git", ["-C", harnessRoot, "config", "user.email", "harness@example.test"], { stdio: "ignore" });
-  writeFileSync(path.join(harnessRoot, ".gitkeep"), "", "utf8");
-  execFileSync("git", ["-C", harnessRoot, "add", "--", ".gitkeep"], { stdio: "ignore" });
-  execFileSync("git", ["-C", harnessRoot, "commit", "-m", "seed"], { stdio: "ignore" });
-}
-
-function git(rootDir: string, ...args: ReadonlyArray<string>): string {
-  return execFileSync("git", ["-C", path.join(rootDir, "harness"), ...args], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"]
-  }).trim();
-}
-
-function readGitFile(rootDir: string, relativePath: string): string {
-  return execFileSync("git", ["-C", path.join(rootDir, "harness"), "show", `master:${relativePath}`], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-}

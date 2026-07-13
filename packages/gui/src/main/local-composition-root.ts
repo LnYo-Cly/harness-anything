@@ -8,7 +8,7 @@ import type { ApiRouteContract } from "../api/api-contract-registry.ts";
 import type { GuiServiceBridge } from "../api/service-bridge.ts";
 
 const defaultDaemonAutostartTimeoutMs = 6_000;
-const defaultDaemonIdleExitMs = 750;
+const defaultDaemonIdleExitMs = 5 * 60_000;
 
 type JsonObject = { readonly [key: string]: JsonValue };
 type JsonValue = string | number | boolean | null | JsonObject | ReadonlyArray<JsonValue>;
@@ -102,7 +102,7 @@ async function requestGuiRouteViaDaemon(
       ...(isLocalServiceRecord(payload) ? { payload: payload as JsonObject } : {})
     }, 200, {
       entryPath: cliEntrypointPath(),
-      idleExitMs: daemonIdleExitMs(),
+      idleExitMs: resolveGuiDaemonIdleExitMs(),
       timeoutMs: daemonAutostartTimeoutMs(),
       execPath: nodeRuntime.execPath,
       execArgv: nodeRuntime.execArgv,
@@ -214,8 +214,8 @@ function electronResourcesPath(): string | undefined {
   return typeof resourcesPath === "string" && resourcesPath.length > 0 ? resourcesPath : undefined;
 }
 
-function daemonIdleExitMs(): number {
-  return positiveIntegerOr(process.env.HARNESS_DAEMON_IDLE_MS, defaultDaemonIdleExitMs);
+export function resolveGuiDaemonIdleExitMs(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveIntegerOr(env.HARNESS_DAEMON_IDLE_MS, defaultDaemonIdleExitMs);
 }
 
 function daemonAutostartTimeoutMs(): number {
