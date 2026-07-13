@@ -15,7 +15,18 @@ import {
   projectDeclaredEntities,
   readDeclaredProjectionRows
 } from "../../src/projection/entity-declaration-projection.ts";
-import { entityRegistry } from "../../src/entity/registry.ts";
+import {
+  compileRegistryMutationPlan,
+  createWritableEntityRegistry,
+  entityRegistry,
+  entityRegistryKinds,
+  type EntityRegistration,
+  type KernelEntityKind
+} from "../../src/entity/registry.ts";
+import {
+  assertRegistryCompiledStoragePlan,
+  assertWritableEntityRegistry
+} from "../../src/entity/registry-compiler.ts";
 import { stablePayloadHash } from "../../src/integrity/stable-hash.ts";
 import { writeContentAddressedBlob } from "../../src/store/content-addressed-blob-store.ts";
 import { makeJournaledWriteCoordinator } from "../../src/store/write-journal-coordinator.ts";
@@ -206,15 +217,142 @@ test("fixture declarations resolve, coordinate writes, and project hosted and co
   });
 });
 
-test("entity registry declares the five-tuple surface for decision task fact relation and session", () => {
-  assert.deepEqual(Object.keys(entityRegistry).sort(), ["decision", "fact", "relation", "session", "task"]);
+test("entity registry derives all eight canonical kinds from one source", () => {
+  assert.deepEqual(entityRegistryKinds, ["task", "decision", "fact", "relation", "module", "session", "execution", "review"]);
+  assert.deepEqual(Object.keys(entityRegistry).sort(), [...entityRegistryKinds].sort());
   assert.equal(entityRegistry.session.storageForm, "composite-manifest-blob");
   assert.equal(entityRegistry.decision.storageForm, "lifecycle");
   assert.equal(entityRegistry.task.storageForm, "lifecycle");
   assert.equal(entityRegistry.fact.storageForm, "schema");
   assert.equal(entityRegistry.relation.storageForm, "host_frontmatter");
+  assert.equal(entityRegistry.execution.storageForm, "hosted-entity");
+  assert.equal(entityRegistry.review.storageForm, "hosted-entity");
   assert.equal(entityRegistry.decision.dispositionMatrix.entries["hard-delete"].supported, false);
   assert.equal(entityRegistry.fact.dispositionMatrix.entries.invalidate.supported, true);
   assert.equal(entityRegistry.fact.dispositionMatrix.entries["hard-delete"].supported, false);
   assert.equal(Object.keys(entityRegistry.fact.mutabilityContract).includes("statement"), true);
 });
+
+test("all eight identity codecs and storage locators are total without standalone hosted files", () => {
+  const fixtures = [
+    ["task", { taskId: "task_T" }, "task/task_T", {}, "tasks/task_T"],
+    ["decision", { decisionId: "dec_D" }, "decision/dec_D", {}, "decisions/decision-dec_D/decision.md"],
+    ["fact", { taskId: "task_T", factId: "F-1" }, "fact/task_T/F-1", {}, "tasks/task_T/facts.md"],
+    ["relation", { relationId: "rel_0123456789abcdef" }, "relation/rel_0123456789abcdef", { sourceRef: "fact/task_T/F-1" }, "tasks/task_T/facts.md"],
+    ["module", { moduleKey: "software/coding" }, "module/software%2Fcoding", {}, "modules.json"],
+    ["session", { sessionId: "session_S" }, "session/session_S", {}, "sessions/session_S.md"],
+    ["execution", { taskId: "task_T", executionId: "exe_E" }, "execution/task_T/exe_E", {}, "tasks/task_T/executions/exe_E.md"],
+    ["review", { taskId: "task_T", reviewId: "rev_R" }, "review/task_T/rev_R", {}, "tasks/task_T/reviews/rev_R.md"]
+  ] as const;
+
+  for (const [kind, identity, canonicalRef, storageContext, targetPath] of fixtures) {
+    const registration = entityRegistry[kind];
+    assert.equal(registration.identityCodec.status, "ready");
+    assert.equal(registration.storageLocator.status, "ready");
+    if (registration.identityCodec.status !== "ready" || registration.storageLocator.status !== "ready") continue;
+    assert.equal(registration.identityCodec.codec.encode(identity), canonicalRef);
+    assert.deepEqual(registration.identityCodec.codec.decode(canonicalRef), identity);
+    assert.equal(registration.storageLocator.locator.locate(identity, storageContext).targets[0]?.path, targetPath);
+  }
+});
+
+test("writable registration fails closed when any required facet is missing or deferred", () => {
+  const complete = writableRegistration("fact");
+  for (const facet of ["identityCodec", "storageLocator", "mutationContract", "semanticDiff", "projectionFacet"] as const) {
+    const missing = { ...complete } as Record<string, unknown>;
+    delete missing[facet];
+    assert.throws(
+      () => createWritableEntityRegistry([missing as unknown as EntityRegistration<string, KernelEntityKind>]),
+      new RegExp(`REGISTRY_FACET_MISSING:${facet}`, "u")
+    );
+  }
+  assert.throws(
+    () => createWritableEntityRegistry([entityRegistry.fact]),
+    /REGISTRY_FACET_NOT_WRITABLE:fact:mutationContract/u
+  );
+  for (const kind of entityRegistryKinds) {
+    assert.equal(entityRegistry[kind].mutationContract.status, "deferred", `${kind} must not enable a W0 writer`);
+    assert.equal(entityRegistry[kind].projectionFacet.status, "deferred", `${kind} waits for the W1 projection`);
+    assert.throws(
+      () => createWritableEntityRegistry([entityRegistry[kind] as EntityRegistration<string, KernelEntityKind>]),
+      new RegExp(`REGISTRY_FACET_NOT_WRITABLE:${kind}:mutationContract`, "u")
+    );
+  }
+  for (const kind of ["session", "execution", "review"] as const) {
+    assert.equal(entityRegistry[kind].semanticDiff.status, "typed-only");
+  }
+});
+
+test("registry compiler emits one hosted StoragePlan from the same canonical mutation set", () => {
+  const writable = createWritableEntityRegistry([
+    writableRegistration("fact"),
+    writableRegistration("relation")
+  ]);
+  const compilation = compileRegistryMutationPlan(writable, {
+    registryVersion: 1,
+    mutations: [
+      { entityKind: "fact", identity: { taskId: "task_T", factId: "F-1" }, action: "fixture-write" },
+      {
+        entityKind: "relation",
+        identity: { relationId: "rel_0123456789abcdef" },
+        action: "fixture-write",
+        storageContext: { sourceRef: "fact/task_T/F-1" }
+      }
+    ]
+  });
+
+  assert.strictEqual(compilation.storagePlan.mutations, compilation.mutationSet.mutations);
+  assert.deepEqual(compilation.mutationSet.mutations.map((mutation) => mutation.entity.canonicalRef), [
+    "fact/task_T/F-1",
+    "relation/rel_0123456789abcdef"
+  ]);
+  assert.deepEqual(compilation.storagePlan.targets, [
+    { kind: "document", path: "tasks/task_T/facts.md", access: "exact" }
+  ]);
+  assert.deepEqual(compilation.storagePlan.consistencyScopes, ["path:tasks/task_T/facts.md"]);
+});
+
+test("registry compiler has no unknown kind or action fallback", () => {
+  const writable = createWritableEntityRegistry([writableRegistration("task")]);
+  assert.throws(
+    () => compileRegistryMutationPlan(writable, {
+      registryVersion: 1,
+      mutations: [{ entityKind: "unknown", identity: { id: "x" }, action: "fixture-write" }]
+    }),
+    /UNKNOWN_ENTITY_KIND:unknown/u
+  );
+  assert.throws(
+    () => compileRegistryMutationPlan(writable, {
+      registryVersion: 1,
+      mutations: [{ entityKind: "task", identity: { taskId: "task_T" }, action: "unknown" }]
+    }),
+    /UNKNOWN_SEMANTIC_ACTION:task:unknown/u
+  );
+});
+
+test("v2 compiler inputs cannot bypass the writable registry gate", () => {
+  const writable = createWritableEntityRegistry([writableRegistration("task")]);
+  assert.doesNotThrow(() => assertWritableEntityRegistry(writable));
+  assert.throws(
+    () => assertWritableEntityRegistry({ registrations: writable.registrations }),
+    /WRITABLE_ENTITY_REGISTRY_GATE_REQUIRED/u
+  );
+  const compilation = compileRegistryMutationPlan(writable, {
+    registryVersion: 1,
+    mutations: [{ entityKind: "task", identity: { taskId: "task_T" }, action: "fixture-write" }]
+  });
+  assert.doesNotThrow(() => assertRegistryCompiledStoragePlan(compilation.storagePlan));
+  assert.throws(
+    () => assertRegistryCompiledStoragePlan({ ...compilation.storagePlan }),
+    /REGISTRY_COMPILED_STORAGE_PLAN_REQUIRED/u
+  );
+});
+
+function writableRegistration(kind: KernelEntityKind): EntityRegistration<string, KernelEntityKind> {
+  return {
+    ...entityRegistry[kind] as EntityRegistration<string, KernelEntityKind>,
+    mutationContract: { status: "ready", actions: ["fixture-write"] },
+    semanticDiff: { status: "ready", compile: () => [] },
+    projectionFacet: { status: "ready", project: () => undefined }
+  };
+}

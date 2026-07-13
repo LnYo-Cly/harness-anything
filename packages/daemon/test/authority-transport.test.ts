@@ -33,6 +33,7 @@ import {
   type ShadowPublicationLog
 } from "../../application/src/index.ts";
 import {
+  entityRegistry,
   makeJournaledWriteCoordinator,
   readAttributionEvents,
   taskEntityId,
@@ -67,6 +68,12 @@ const v2Attribution: WriteAttribution = {
   principalSource: { kind: "daemon-authenticated", providerId: "v2-test", credentialFingerprint: "sha256:redacted" },
   executorSource: "client-asserted"
 };
+const v2EntityRegistrations = [{
+  ...entityRegistry.task,
+  mutationContract: { status: "ready", actions: ["update"] },
+  semanticDiff: { status: "ready", compile: () => [] },
+  projectionFacet: { status: "ready", project: () => undefined }
+}] as const;
 
 test("portable-ascii-v2 rejects reserved, non-ASCII, overlong, and Windows-budget paths", () => {
   for (const candidate of ["tasks/CON.md", "tasks/naïve.md", `tasks/${"a".repeat(113)}.md`, `${"a".repeat(181)}`]) {
@@ -253,6 +260,7 @@ test("V2 forced-command admission recomputes mutations and anchors one exact ord
           validateAdmissionTokenRef: async (input) => input.tokenId === claims.tokenId
             && Buffer.from(input.tokenDigest).equals(Buffer.from(tokenDigest))
         },
+        entityRegistrations: v2EntityRegistrations,
         operationNamespaceVerifier: { verify: async () => undefined },
         semanticCompiler: {
           compile: async (envelope) => {
@@ -263,16 +271,17 @@ test("V2 forced-command admission recomputes mutations and anchors one exact ord
             const payload = JSON.parse(Buffer.from(envelope.intent.canonicalPayload.bytes).toString("utf8")) as { taskId: string; body: string };
             if (payload.body === "SEMANTIC_DIFF_REQUIRED") throw new SemanticAdmissionErrorV2("SEMANTIC_DIFF_REQUIRED");
             if (payload.body === "SEMANTIC_DIFF_AMBIGUOUS") throw new SemanticAdmissionErrorV2("SEMANTIC_DIFF_AMBIGUOUS");
-            const mutationSet = v2MutationSet(payload.taskId);
             return {
-              mutationSet,
+              mutationPlan: {
+                registryVersion: 1,
+                mutations: [{ entityKind: "task", identity: { taskId: payload.taskId }, action: "update" }]
+              },
               operation: {
                 opId: "authority-overrides-this",
                 entityId: taskEntityId(payload.taskId),
                 kind: "doc_write",
                 payload: { path: "notes.md", body: payload.body }
               },
-              touchedPaths: [`harness/tasks/${payload.taskId}/notes.md`],
               decodedBytes: BigInt(envelope.intent.canonicalPayload.bytes.length)
             };
           }

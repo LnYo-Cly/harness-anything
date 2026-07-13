@@ -1,6 +1,12 @@
 import { Schema } from "effect";
 import { executionStates } from "../domain/execution.ts";
 import { decodeEntityDeclaration, jsonEntityDocumentCodec } from "./declaration.ts";
+import {
+  canonicalIdentityCodec,
+  deferredRegistryFacet,
+  readyStorageLocator,
+  typedOnlySemanticDiff
+} from "./registry-compiler.ts";
 
 const PersonPrincipalSchema = Schema.Struct({
   personId: Schema.String,
@@ -161,6 +167,19 @@ export const executionDeclaration = decodeEntityDeclaration({
     }
   },
   storageForm: "hosted-entity",
+  identityCodec: canonicalIdentityCodec("execution", ["taskId", "executionId"]),
+  storageLocator: readyStorageLocator({
+    locate: (identity) => {
+      const entityPath = `tasks/${identity.taskId}/executions/${identity.executionId}.md`;
+      return {
+        targets: [{ kind: "document", path: entityPath, access: "exact" }],
+        consistencyScope: `path:${entityPath}`
+      };
+    }
+  }),
+  mutationContract: deferredRegistryFacet("W4", "OQ-3 action vocabulary is not registered"),
+  semanticDiff: typedOnlySemanticDiff("machine-owned execution documents reject transparent canonical writes"),
+  projectionFacet: deferredRegistryFacet("W1", "canonical v1/v2 union projection is not installed"),
   rootResolver: {
     pathTemplate: "tasks/{taskId}/executions/{executionId}.md",
     identity: ["taskId", "executionId"],

@@ -12,6 +12,9 @@ import {
   createInMemoryReplicaChangeLog
 } from "../../packages/application/src/index.ts";
 import {
+  compileRegistryMutationPlan,
+  createWritableEntityRegistry,
+  entityRegistry,
   makeJournaledWriteCoordinator,
   taskEntityId
 } from "../../packages/kernel/src/index.ts";
@@ -44,7 +47,10 @@ process.stdout.write(`${JSON.stringify({
 async function runScenario(writers) {
   return withHermeticGit(async ({ rootDir, env }) => {
     const service = makeAuthority(rootDir, env);
+    const registry = benchmarkRegistry();
     const samplesMs = [];
+    const registryCompileSamplesMs = [];
+    const authoritySubmitSamplesMs = [];
     for (let round = 0; round < rounds; round += 1) {
       const envelopes = Array.from(
         { length: writers },
@@ -52,25 +58,59 @@ async function runScenario(writers) {
       );
       const samples = await Promise.all(envelopes.map(async (envelope) => {
         const startedAt = performance.now();
+        const compileStartedAt = performance.now();
+        compileRegistryMutationPlan(registry, benchmarkMutationInput(envelope.operation.entityId));
+        const registryCompileMs = performance.now() - compileStartedAt;
+        const submitStartedAt = performance.now();
         const receipt = await service.submit(envelope);
+        const authoritySubmitMs = performance.now() - submitStartedAt;
         const elapsedMs = performance.now() - startedAt;
         if (receipt.tag !== "COMMITTED") {
           throw new Error(`benchmark operation ${envelope.opId} returned ${receipt.tag}`);
         }
-        return elapsedMs;
+        return { elapsedMs, registryCompileMs, authoritySubmitMs };
       }));
-      samplesMs.push(...samples);
+      samplesMs.push(...samples.map((sample) => sample.elapsedMs));
+      registryCompileSamplesMs.push(...samples.map((sample) => sample.registryCompileMs));
+      authoritySubmitSamplesMs.push(...samples.map((sample) => sample.authoritySubmitMs));
     }
-    const sorted = [...samplesMs].sort((left, right) => left - right);
+    const summary = sampleSummary(samplesMs);
     return {
       writers,
       attempts: samplesMs.length,
-      p50Ms: percentile(sorted, 0.5),
-      p95Ms: percentile(sorted, 0.95),
-      maxMs: rounded(sorted.at(-1) ?? 0),
-      samplesMs: samplesMs.map(rounded)
+      ...summary,
+      segments: {
+        registryCompileMs: sampleSummary(registryCompileSamplesMs),
+        authoritySubmitMs: sampleSummary(authoritySubmitSamplesMs)
+      }
     };
   });
+}
+
+function benchmarkRegistry() {
+  const writable = (kind) => ({
+    ...entityRegistry[kind],
+    mutationContract: { status: "ready", actions: ["benchmark-only"] },
+    semanticDiff: { status: "ready", compile: () => [] },
+    projectionFacet: { status: "ready", project: () => undefined }
+  });
+  return createWritableEntityRegistry([writable("fact"), writable("relation")]);
+}
+
+function benchmarkMutationInput(entityId) {
+  const taskId = entityId.slice("task/".length);
+  return {
+    registryVersion: 1,
+    mutations: [
+      { entityKind: "fact", identity: { taskId, factId: "F-benchmark" }, action: "benchmark-only" },
+      {
+        entityKind: "relation",
+        identity: { relationId: "rel_0123456789abcdef" },
+        action: "benchmark-only",
+        storageContext: { sourceRef: `fact/${taskId}/F-benchmark` }
+      }
+    ]
+  };
 }
 
 function makeAuthority(rootDir, env) {
@@ -211,6 +251,16 @@ function gitAt(cwd, ...args) {
 function percentile(sorted, quantile) {
   if (sorted.length === 0) return 0;
   return rounded(sorted[Math.ceil(sorted.length * quantile) - 1]);
+}
+
+function sampleSummary(samplesMs) {
+  const sorted = [...samplesMs].sort((left, right) => left - right);
+  return {
+    p50Ms: percentile(sorted, 0.5),
+    p95Ms: percentile(sorted, 0.95),
+    maxMs: rounded(sorted.at(-1) ?? 0),
+    samplesMs: samplesMs.map(rounded)
+  };
 }
 
 function rounded(value) {

@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { writeOpKinds } from "../domain/write-op-kind.ts";
+import { canonicalEntityKinds } from "../entity/canonical-kinds.ts";
 import { ActorRefSchema } from "./common.ts";
 import {
   ActorAxesSchema,
@@ -8,9 +9,7 @@ import {
 } from "./actor-attribution.ts";
 
 const EntityIdSchema = Schema.Union(
-  Schema.TemplateLiteral("task/", Schema.String),
-  Schema.TemplateLiteral("decision/", Schema.String),
-  Schema.TemplateLiteral("module/", Schema.String),
+  Schema.TemplateLiteral(Schema.Literal(...canonicalEntityKinds), "/", Schema.String),
   Schema.TemplateLiteral("entity/", Schema.String, "/", Schema.String)
 );
 

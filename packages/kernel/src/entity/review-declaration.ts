@@ -1,6 +1,12 @@
 import { Schema } from "effect";
 import { reviewVerdicts } from "../domain/review.ts";
 import { decodeEntityDeclaration, jsonEntityDocumentCodec } from "./declaration.ts";
+import {
+  canonicalIdentityCodec,
+  deferredRegistryFacet,
+  readyStorageLocator,
+  typedOnlySemanticDiff
+} from "./registry-compiler.ts";
 
 const ReviewerActorSchema = Schema.Struct({
   principal: Schema.Struct({
@@ -73,6 +79,19 @@ export const reviewDeclaration = decodeEntityDeclaration({
     }
   },
   storageForm: "hosted-entity",
+  identityCodec: canonicalIdentityCodec("review", ["taskId", "reviewId"]),
+  storageLocator: readyStorageLocator({
+    locate: (identity) => {
+      const entityPath = `tasks/${identity.taskId}/reviews/${identity.reviewId}.md`;
+      return {
+        targets: [{ kind: "document", path: entityPath, access: "exact" }],
+        consistencyScope: `path:${entityPath}`
+      };
+    }
+  }),
+  mutationContract: deferredRegistryFacet("W4", "OQ-3 action vocabulary is not registered"),
+  semanticDiff: typedOnlySemanticDiff("machine-owned review documents reject transparent canonical writes"),
+  projectionFacet: deferredRegistryFacet("W1", "canonical v1/v2 union projection is not installed"),
   rootResolver: {
     pathTemplate: "tasks/{taskId}/reviews/{reviewId}.md",
     identity: ["taskId", "reviewId"],

@@ -5,6 +5,7 @@ import {
   actorAxesBindingDigestV2,
   actorAxesBindingTokenDigestV2,
   assertMutationClaimMatchesV2,
+  assertStoragePlanMatchesMutationSetV2,
   decodeActorAxesBindingV2,
   decodeCanonicalCbor,
   decodeSemanticMutationEnvelopeV2,
@@ -123,6 +124,29 @@ test("SemanticMutationEnvelopeV2 round-trips and claimed mutations are only an i
   assert.throws(
     () => assertMutationClaimMatchesV2(decoded, authorityRecomputed),
     (error: unknown) => error instanceof Error && "code" in error && error.code === "SEMANTIC_MUTATION_MISMATCH"
+  );
+});
+
+test("StoragePlan must carry the compiler's exact canonical mutation set", () => {
+  const mutationSet = operationEnvelope(tokenClaims("token-1"), Buffer.alloc(32, 9)).claimedMutationSet;
+  const plan = {
+    schema: "storage-plan/v1" as const,
+    registryVersion: mutationSet.registryVersion,
+    mutations: mutationSet.mutations,
+    targets: [{ kind: "document" as const, path: "harness/tasks/task-one/INDEX.md", access: "exact" as const }],
+    touchedPaths: ["harness/tasks/task-one/INDEX.md"],
+    consistencyScopes: ["path:harness/tasks/task-one/INDEX.md"]
+  };
+  assert.doesNotThrow(() => assertStoragePlanMatchesMutationSetV2(mutationSet, plan));
+  assert.throws(
+    () => assertStoragePlanMatchesMutationSetV2(mutationSet, {
+      ...plan,
+      mutations: [{
+        entity: { registryVersion: 1, entityKind: "task", canonicalRef: "task/other" },
+        action: { registryVersion: 1, action: "update" }
+      }]
+    }),
+    (error: unknown) => error instanceof Error && "code" in error && error.code === "STORAGE_PLAN_MUTATION_SET_MISMATCH"
   );
 });
 

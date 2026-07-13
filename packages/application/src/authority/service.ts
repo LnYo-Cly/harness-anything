@@ -1,5 +1,7 @@
 import { Effect } from "effect";
 import {
+  compileRegistryMutationPlan,
+  createWritableEntityRegistry,
   stablePayloadHash,
   type AuthorityOperationIntegrity,
   type WriteCoordinator,
@@ -32,6 +34,7 @@ import {
 } from "./actor-axes-binding-v2.ts";
 import {
   assertMutationClaimMatchesV2,
+  assertStoragePlanMatchesMutationSetV2,
   decodeSemanticMutationEnvelopeV2,
   operationIdDiagnosticV2,
   semanticMutationSetDigestV2,
@@ -67,6 +70,7 @@ export interface AuthoritySubmissionV2Options {
   readonly schemaTuple: ProtocolSchemaTupleV2;
   readonly channelNonceDigest: Uint8Array;
   readonly bindingRuntime: ActorAxesBindingRuntimeV2;
+  readonly entityRegistrations: Parameters<typeof createWritableEntityRegistry>[0];
   readonly semanticCompiler: AuthoritySemanticCompilerV2;
   readonly operationNamespaceVerifier: OperationNamespaceVerifierV2;
   readonly matchEntityRefPrefix?: EntityRefPrefixMatcherV2;
@@ -105,6 +109,9 @@ export function canonicalAuthorityRequestDigest(envelope: Pick<AuthorityOperatio
 }
 
 export function createAuthoritySubmissionService(options: AuthoritySubmissionServiceOptions): AuthoritySubmissionService {
+  const writableEntityRegistry = options.v2
+    ? createWritableEntityRegistry(options.v2.entityRegistrations)
+    : undefined;
   const byOperation = new KeyedSerialAuthorityExecutor();
   const now = options.now ?? (() => new Date().toISOString());
   const publications = new BoundedAuthorityBatcher<AuthorityAdmission, AuthorityOperationReceipt>(
@@ -175,9 +182,11 @@ export function createAuthoritySubmissionService(options: AuthoritySubmissionSer
       })) throw new SemanticAdmissionErrorV2("ADMISSION_TOKEN_REF_MISMATCH");
       await v2.operationNamespaceVerifier.verify(envelope.operationId);
 
-      const compilation = await v2.semanticCompiler.compile(envelope);
+      const semanticCompilation = await v2.semanticCompiler.compile(envelope);
+      const compilation = compileRegistryMutationPlan(writableEntityRegistry!, semanticCompilation.mutationPlan);
+      assertStoragePlanMatchesMutationSetV2(compilation.mutationSet, compilation.storagePlan);
       assertMutationClaimMatchesV2(envelope, compilation.mutationSet);
-      authorizeSemanticCompilationV2(envelope, compilation.touchedPaths, compilation.decodedBytes, verified, v2.matchEntityRefPrefix);
+      authorizeSemanticCompilationV2(envelope, compilation.storagePlan.touchedPaths, semanticCompilation.decodedBytes, verified, v2.matchEntityRefPrefix);
 
       const mutationDigest = hex(semanticMutationSetDigestV2(compilation.mutationSet));
       const bindingDigest = hex(actorAxesBindingDigestV2(verified.token.claims));
@@ -209,7 +218,7 @@ export function createAuthoritySubmissionService(options: AuthoritySubmissionSer
           canonicalRequestEnvelope
         ));
       }
-      const operation: WriteOp = { ...compilation.operation, opId, authorityIntegrity };
+      const operation: WriteOp = { ...semanticCompilation.operation, opId, authorityIntegrity };
       const coordinator = options.coordinatorFactory.create({
         attribution: verified.attribution,
         sessionId: verified.token.claims.sessionId

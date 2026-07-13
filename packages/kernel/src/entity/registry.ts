@@ -5,106 +5,56 @@ import {
   relationFieldContracts,
   taskFieldContracts,
   type DecisionFieldKey,
-  type EntityFieldContract,
   type FactFieldKey,
   type RelationFieldKey,
   type TaskFieldKey
 } from "./field-contracts.ts";
+import { canonicalEntityKinds, type CanonicalEntityKind } from "./canonical-kinds.ts";
+import { executionDeclaration } from "./execution-declaration.ts";
+import { reviewDeclaration } from "./review-declaration.ts";
+import {
+  canonicalIdentityCodec,
+  deferredRegistryFacet,
+  readyStorageLocator
+} from "./registry-compiler.ts";
 import { sessionEntityRegistration } from "./session-declaration.ts";
+import type { DispositionAction, DispositionLevel, DispositionMatrixEntry, EntityDispositionMatrix, EntityRegistration } from "./registry-contract.ts";
 
-export type KernelEntityKind = "decision" | "task" | "fact" | "relation" | "session";
-export const entityStorageForms = [
-  "lifecycle",
-  "schema",
-  "composite",
-  "host_frontmatter",
-  "hosted-entity",
-  "composite-manifest-blob"
-] as const;
-export type EntityStorageForm = (typeof entityStorageForms)[number];
-export type DispositionLevel = "D1" | "D2" | "D3" | "D4";
-export type DispositionAction =
-  | "retire"
-  | "supersede"
-  | "invalidate"
-  | "archive"
-  | "tombstone"
-  | "hard-delete";
-
-export interface HostedEntityDeclaration {
-  readonly entityKind: string;
-  readonly pathTemplate: string;
-  readonly identity: ReadonlyArray<string>;
-}
-
-export interface EntityRootResolverDeclaration {
-  readonly pathTemplate: string;
-  readonly identity: ReadonlyArray<string>;
-  readonly host?: HostedEntityDeclaration;
-}
-
-export interface EntityProjectionColumnDeclaration {
-  readonly name: string;
-  readonly field: string;
-  readonly type: "text" | "integer" | "boolean" | "json";
-  readonly primaryKey?: boolean;
-}
-
-export interface EntityProjectionDeclaration {
-  readonly table: string;
-  readonly columns: ReadonlyArray<EntityProjectionColumnDeclaration>;
-}
-
-export interface EntityDocumentCodec {
-  readonly decode: (body: string) => unknown;
-  readonly encode: (value: unknown) => string;
-}
-
-export interface CompositeManifestBlobDeclaration {
-  readonly referenceField: string;
-  readonly store: "content-addressed";
-}
-
-export interface EntityAnchorDeclaration {
-  readonly entityRef: string;
-  readonly anchors: ReadonlyArray<{
-    readonly field: string;
-    readonly idField: string;
-    readonly ref: string;
-  }>;
-}
-
-export interface DispositionMatrixEntry {
-  readonly level: DispositionLevel;
-  readonly action: DispositionAction;
-  readonly supported: boolean;
-  readonly writeOpKinds: ReadonlyArray<string>;
-  readonly reason: string;
-}
-
-export interface EntityDispositionMatrix {
-  readonly entries: Readonly<Record<DispositionAction, DispositionMatrixEntry>>;
-}
-
-export interface EntityRegistration<FieldKey extends string, Kind extends string = KernelEntityKind> {
-  readonly kind: Kind;
-  readonly schema: unknown;
-  readonly mutabilityContract: Readonly<Record<FieldKey, EntityFieldContract>>;
-  readonly anchors: EntityAnchorDeclaration;
-  readonly dispositionMatrix: EntityDispositionMatrix;
-  readonly storageForm: EntityStorageForm;
-  readonly rootResolver?: EntityRootResolverDeclaration;
-  readonly projection?: EntityProjectionDeclaration;
-  readonly documentCodec?: EntityDocumentCodec;
-  readonly blob?: CompositeManifestBlobDeclaration;
-}
+export {
+  compileRegistryMutationPlan,
+  createWritableEntityRegistry
+} from "./registry-compiler.ts";
+export type {
+  RegistryMutationPlanInput,
+  StoragePlan
+} from "./registry-compiler.ts";
+export { entityStorageForms, isEntityStorageForm } from "./registry-contract.ts";
+export type {
+  CompositeManifestBlobDeclaration,
+  DispositionAction,
+  DispositionLevel,
+  DispositionMatrixEntry,
+  EntityAnchorDeclaration,
+  EntityDispositionMatrix,
+  EntityDocumentCodec,
+  EntityProjectionColumnDeclaration,
+  EntityProjectionDeclaration,
+  EntityRegistration,
+  EntityRootResolverDeclaration,
+  EntityStorageForm,
+  HostedEntityDeclaration
+} from "./registry-contract.ts";
+export type KernelEntityKind = CanonicalEntityKind;
 
 export type EntityRegistryShape = {
   readonly decision: EntityRegistration<DecisionFieldKey>;
   readonly task: EntityRegistration<TaskFieldKey>;
   readonly fact: EntityRegistration<FactFieldKey>;
   readonly relation: EntityRegistration<RelationFieldKey>;
+  readonly module: EntityRegistration<string, "module">;
   readonly session: typeof sessionEntityRegistration;
+  readonly execution: typeof executionDeclaration;
+  readonly review: typeof reviewDeclaration;
 };
 
 export const entityRegistry = {
@@ -128,7 +78,20 @@ export const entityRegistry = {
       unsupported("D3", "tombstone", "bad proposed decisions are rejected, not tombstoned"),
       unsupported("D4", "hard-delete", "decision is why-memory and must never be physically deleted")
     ]),
-    storageForm: "lifecycle"
+    storageForm: "lifecycle",
+    identityCodec: canonicalIdentityCodec("decision", ["decisionId"]),
+    storageLocator: readyStorageLocator({
+      locate: (identity) => {
+        const documentPath = `decisions/decision-${identity.decisionId}/decision.md`;
+        return {
+          targets: [{ kind: "document", path: documentPath, access: "exact" }],
+          consistencyScope: `path:${documentPath}`
+        };
+      }
+    }),
+    mutationContract: deferredRegistryFacet("W3", "OQ-3 action vocabulary is not registered"),
+    semanticDiff: deferredRegistryFacet("W5", "managed decision semanticDiff is not installed"),
+    projectionFacet: deferredRegistryFacet("W1", "canonical v1/v2 union projection is not installed")
   },
   task: {
     kind: "task",
@@ -146,7 +109,17 @@ export const entityRegistry = {
       supported("D3", "tombstone", ["package_tombstone"], "task tombstone preserves id existence after mistaken creation"),
       supported("D4", "hard-delete", ["package_delete_hard"], "task hard delete is allowed only after lower-bound checks and explicit confirmation")
     ]),
-    storageForm: "lifecycle"
+    storageForm: "lifecycle",
+    identityCodec: canonicalIdentityCodec("task", ["taskId"]),
+    storageLocator: readyStorageLocator({
+      locate: (identity) => ({
+        targets: [{ kind: "document", path: `tasks/${identity.taskId}`, access: "prefix" }],
+        consistencyScope: `entity:task/${identity.taskId}`
+      })
+    }),
+    mutationContract: deferredRegistryFacet("W3", "OQ-3 action vocabulary is not registered"),
+    semanticDiff: deferredRegistryFacet("W5", "managed task semanticDiff is not installed"),
+    projectionFacet: deferredRegistryFacet("W1", "canonical v1/v2 union projection is not installed")
   },
   fact: {
     kind: "fact",
@@ -164,7 +137,20 @@ export const entityRegistry = {
       unsupported("D3", "tombstone", "fact is append-only and has no single-record tombstone semantics"),
       unsupported("D4", "hard-delete", "fact must never be physically deleted as a standalone entity")
     ]),
-    storageForm: "schema"
+    storageForm: "schema",
+    identityCodec: canonicalIdentityCodec("fact", ["taskId", "factId"]),
+    storageLocator: readyStorageLocator({
+      locate: (identity) => {
+        const documentPath = `tasks/${identity.taskId}/facts.md`;
+        return {
+          targets: [{ kind: "document", path: documentPath, access: "exact" }],
+          consistencyScope: `path:${documentPath}`
+        };
+      }
+    }),
+    mutationContract: deferredRegistryFacet("W2", "OQ-3 action vocabulary is not registered"),
+    semanticDiff: deferredRegistryFacet("W5", "facts-region semanticDiff is not installed"),
+    projectionFacet: deferredRegistryFacet("W1", "canonical v1/v2 union projection is not installed")
   },
   relation: {
     kind: "relation",
@@ -182,19 +168,50 @@ export const entityRegistry = {
       unsupported("D3", "tombstone", "relation exit is represented by retired state, not tombstone"),
       unsupported("D4", "hard-delete", "relation records are provenance-bearing and are not physically deleted")
     ]),
-    storageForm: "host_frontmatter"
+    storageForm: "host_frontmatter",
+    identityCodec: canonicalIdentityCodec("relation", ["relationId"]),
+    storageLocator: readyStorageLocator({ locate: locateRelationStorage }),
+    mutationContract: deferredRegistryFacet("W2", "OQ-3 action vocabulary is not registered"),
+    semanticDiff: deferredRegistryFacet("W5", "relation-bearing semanticDiff is not installed"),
+    projectionFacet: deferredRegistryFacet("W1", "canonical v1/v2 union projection is not installed")
   },
-  session: sessionEntityRegistration
+  module: {
+    kind: "module",
+    schema: undefined,
+    mutabilityContract: {
+      identity: { mutability: "immutable", read: [{ kind: "show", path: "module.key" }], write: [], reason: "module key is stable" },
+      registry: { mutability: "lifecycle", read: [{ kind: "show", path: "module.registry" }], write: [{ kind: "lifecycle", operation: "module-registry" }], reason: "module registry commands own canonical changes" }
+    },
+    anchors: { entityRef: "module/{moduleKey}", anchors: [] },
+    dispositionMatrix: dispositionMatrix([
+      supported("D1", "retire", ["module_registry_write"], "module unregister preserves registry history"),
+      unsupported("D1", "supersede", "module changes amend the stable registry identity"),
+      unsupported("D1", "invalidate", "module invalidation is not a registered disposition"),
+      unsupported("D2", "archive", "module archive is not a registered disposition"),
+      unsupported("D3", "tombstone", "module tombstone is not a registered disposition"),
+      unsupported("D4", "hard-delete", "module registry history is retained")
+    ]),
+    storageForm: "schema",
+    identityCodec: canonicalIdentityCodec("module", ["moduleKey"]),
+    storageLocator: readyStorageLocator({
+      locate: () => ({
+        targets: [{ kind: "document", path: "modules.json", access: "exact" }],
+        consistencyScope: "path:modules.json"
+      })
+    }),
+    mutationContract: deferredRegistryFacet("W3", "OQ-3 action vocabulary is not registered"),
+    semanticDiff: deferredRegistryFacet("W5", "module registry semanticDiff is not installed"),
+    projectionFacet: deferredRegistryFacet("W1", "module canonical union projection is not installed")
+  },
+  session: sessionEntityRegistration,
+  execution: executionDeclaration,
+  review: reviewDeclaration
 } satisfies EntityRegistryShape;
 
-export const entityRegistryKinds = Object.keys(entityRegistry) as ReadonlyArray<KernelEntityKind>;
+export const entityRegistryKinds = canonicalEntityKinds;
 
 export function getEntityRegistration(kind: KernelEntityKind): EntityRegistryShape[typeof kind] {
   return entityRegistry[kind];
-}
-
-export function isEntityStorageForm(value: unknown): value is EntityStorageForm {
-  return typeof value === "string" && (entityStorageForms as ReadonlyArray<string>).includes(value);
 }
 
 function dispositionMatrix(entries: ReadonlyArray<DispositionMatrixEntry>): EntityDispositionMatrix {
@@ -213,4 +230,35 @@ function supported(
 
 function unsupported(level: DispositionLevel, action: DispositionAction, reason: string): DispositionMatrixEntry {
   return { level, action, supported: false, writeOpKinds: [], reason };
+}
+
+function locateRelationStorage(
+  _identity: Readonly<Record<string, string>>,
+  context: Readonly<Record<string, string>>
+): { readonly targets: ReadonlyArray<{ readonly kind: "document"; readonly path: string; readonly access: "exact" }>; readonly consistencyScope: string } {
+  const sourceRef = context.sourceRef;
+  if (!sourceRef) throw new Error("RELATION_STORAGE_SOURCE_REQUIRED");
+  const segments = sourceRef.split("/").map(decodeCanonicalSegment);
+  let documentPath: string;
+  if (segments[0] === "task" && segments[1]) {
+    documentPath = `tasks/${segments[1]}/INDEX.md`;
+  } else if (segments[0] === "decision" && segments[1]) {
+    documentPath = `decisions/decision-${segments[1]}/decision.md`;
+  } else if (segments[0] === "fact" && segments[1] && segments[2]) {
+    documentPath = `tasks/${segments[1]}/facts.md`;
+  } else {
+    throw new Error(`RELATION_STORAGE_SOURCE_UNSUPPORTED:${sourceRef}`);
+  }
+  return {
+    targets: [{ kind: "document", path: documentPath, access: "exact" }],
+    consistencyScope: `path:${documentPath}`
+  };
+}
+
+function decodeCanonicalSegment(value: string): string {
+  const decoded = decodeURIComponent(value);
+  if (!decoded || decoded.includes("/") || encodeURIComponent(decoded) !== value) {
+    throw new Error(`INVALID_CANONICAL_ENTITY_SEGMENT:${value}`);
+  }
+  return decoded;
 }
