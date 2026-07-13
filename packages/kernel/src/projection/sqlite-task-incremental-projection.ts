@@ -105,6 +105,18 @@ export function updateTaskProjectionIncrementally(options: TaskProjectionOptions
     applyDeclaredProjectionDeltaToSnapshots(existingDeclaredTables, declaredDelta)
   );
   const declaredManifestHash = hashDeclaredSourceManifestRows(declaredDelta.manifest.currentRows);
+  let verifiedSourceHash: string;
+  try {
+    verifiedSourceHash = captureProjectionSourceFingerprint(
+      runtimeContext,
+      declaredDelta.manifest.currentRows
+    ).fingerprint;
+  } catch {
+    return { ...rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions }), mode: "rebuild" };
+  }
+  if (verifiedSourceHash !== sourceHash) {
+    return { ...rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions }), mode: "rebuild" };
+  }
 
   updateProjectionDatabase(projectionPath, {
     deleteTaskIds: [...taskChange.deleteIds],

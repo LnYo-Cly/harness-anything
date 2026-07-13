@@ -97,7 +97,8 @@ function createMarkdownSourceCacheEntry(
 }
 
 function markdownSourceCacheEntryMatches(entry: MarkdownSourceCacheEntry): boolean {
-  return cachedPathSignaturesMatch(entry.fileSignatures) && cachedPathSignaturesMatch(entry.directorySignatures);
+  const signatures = new Map([...entry.directorySignatures, ...entry.fileSignatures]);
+  return cachedPathSignaturesMatch(signatures) && cachedPathSignaturesMatch(signatures);
 }
 
 function capturePathSignatures(paths: Iterable<string>): ReadonlyMap<string, string> | null {

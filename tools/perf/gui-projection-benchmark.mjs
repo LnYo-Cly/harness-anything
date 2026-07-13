@@ -10,6 +10,7 @@ import { updateTaskProjectionIncrementally } from "../../packages/kernel/src/pro
 
 const size = positiveInteger("--size", 1_000);
 const outputsPerExecution = positiveInteger("--outputs", 5);
+const attributionEventsPerExecution = positiveInteger("--attribution-events", 5);
 const keep = process.argv.includes("--keep");
 const rootDir = mkdtempSync(path.join(tmpdir(), "ha-gui-perf-"));
 
@@ -25,6 +26,7 @@ try {
 
   const querySamples = sample(20, () => queryExecutions({ rootDir }));
   const executions = querySamples.value;
+  const warmQueryP95 = percentile(querySamples.samples, 0.95);
   const aggregateSamples = sample(20, () => aggregateExecutions(rebuilt.rows, executions));
   const changedExecution = fixtureRows[0];
   const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
@@ -45,6 +47,7 @@ try {
       tasks: size,
       executions: size,
       outputs: size * outputsPerExecution,
+      attributionEvents: size * attributionEventsPerExecution,
       rootDir: keep ? rootDir : "<temporary>"
     },
     milliseconds: {
@@ -59,14 +62,22 @@ try {
       outputCount: aggregateSamples.value.totalOutputs === size * outputsPerExecution,
       oneThousandWarmQueryP95BudgetMs: size === 1_000 ? 100 : null,
       warmQueryWithinBudget: size === 1_000
-        ? percentile(querySamples.samples, 0.95) <= 100
+        ? warmQueryP95 <= 100
+        : null,
+      oneThousandColdProjectionReadyBudgetMs: size === 1_000 ? 10_000 : null,
+      coldProjectionReadyWithinBudget: size === 1_000
+        ? rebuildMs + warmQueryP95 <= 10_000
         : null,
       incrementalExecutionMode: incremental.mode
     }
   };
 
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  if (!result.assertions.executionCount || !result.assertions.outputCount || result.assertions.warmQueryWithinBudget === false || incremental.mode !== "incremental") {
+  if (!result.assertions.executionCount ||
+      !result.assertions.outputCount ||
+      result.assertions.warmQueryWithinBudget === false ||
+      result.assertions.coldProjectionReadyWithinBudget === false ||
+      incremental.mode !== "incremental") {
     process.exitCode = 1;
   }
 } finally {
@@ -122,6 +133,36 @@ function writeTask(index) {
     })),
     submission: null
   }, null, 2)}\n`);
+  const attributionRoot = path.join(rootDir, "harness/attribution-events");
+  mkdirSync(attributionRoot, { recursive: true });
+  for (let eventIndex = 0; eventIndex < attributionEventsPerExecution; eventIndex += 1) {
+    const eventId = `event-perf-${index}-${eventIndex}`;
+    writeFileSync(path.join(attributionRoot, `${eventId}.jsonl`), `${JSON.stringify({
+      schema: "attribution-event/v1",
+      eventId,
+      opId: `op-${eventId}`,
+      journalRecordSchema: "write-journal/v2",
+      entityId: `execution/${executionId}`,
+      kind: "progress_append",
+      actor: {
+        principal: { kind: "person", personId: "person_perf" },
+        executor: { kind: "agent", id: "codex" }
+      },
+      principalSource: {
+        kind: "local-configured",
+        authority: "harness.yaml",
+        authoritySha256: `sha256:${"0".repeat(64)}`
+      },
+      executorSource: "client-asserted",
+      at: `2026-07-13T00:00:${String(eventIndex).padStart(2, "0")}.000Z`,
+      recordedAt: `2026-07-13T00:01:${String(eventIndex).padStart(2, "0")}.000Z`,
+      payloadHash: `sha256:${"1".repeat(64)}`,
+      payloadRef: {
+        path: `.harness/payloads/${eventId}.json`,
+        sha256: `sha256:${"1".repeat(64)}`
+      }
+    })}\n`);
+  }
   return { taskId, executionId, executionPath };
 }
 

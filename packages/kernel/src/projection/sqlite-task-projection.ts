@@ -127,13 +127,19 @@ function captureStableProjectionBuild(runtimeContext: ReturnType<typeof createHa
   readonly snapshot: ReturnType<typeof captureProjectionSourceSnapshot>;
   readonly relationGraph: ReturnType<typeof buildRelationGraphProjection>;
 } {
+  let lastFailure: unknown = new Error("projection authored sources did not stabilize during rebuild");
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const snapshot = captureProjectionSourceSnapshot(runtimeContext);
-    const relationGraph = buildRelationGraphProjection(runtimeContext);
-    const verified = captureProjectionSourceFingerprint(runtimeContext);
-    if (verified.fingerprint === snapshot.fingerprint) return { snapshot, relationGraph };
+    try {
+      const snapshot = captureProjectionSourceSnapshot(runtimeContext);
+      const relationGraph = buildRelationGraphProjection(runtimeContext);
+      const verified = captureProjectionSourceFingerprint(runtimeContext);
+      if (verified.fingerprint === snapshot.fingerprint) return { snapshot, relationGraph };
+      lastFailure = new Error("projection authored sources did not stabilize during rebuild");
+    } catch (error) {
+      lastFailure = error;
+    }
   }
-  throw new Error("projection authored sources did not stabilize during rebuild");
+  throw lastFailure;
 }
 
 export function readTaskProjection(options: TaskProjectionOptions): ProjectionReadResult {

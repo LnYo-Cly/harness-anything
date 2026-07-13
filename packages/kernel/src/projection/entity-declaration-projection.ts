@@ -161,7 +161,12 @@ function readDeclaredEntitySourceAttempt(
     };
   }
   const matcher = templateMatcher(declaration.rootResolver.pathTemplate);
-  const discovered = listTemplateFiles(layout.authoredRoot, declaration.rootResolver.pathTemplate);
+  let discovered: ReturnType<typeof listTemplateFiles>;
+  try {
+    discovered = listTemplateFiles(layout.authoredRoot, declaration.rootResolver.pathTemplate);
+  } catch {
+    return retryDeclaredEntitySource(rootInput, declaration, hints, cacheKey, attempt, declaration.kind);
+  }
   const hintsByPath = new Map(hints
     .filter((hint) => hint.sourceKind === declaration.kind)
     .map((hint) => [hint.sourcePath, hint]));
@@ -421,7 +426,8 @@ function listTemplateFiles(rootPath: string, template: string): {
 }
 
 function sourceCacheEntryMatches(entry: DeclaredEntitySourceCacheEntry): boolean {
-  return pathSignaturesMatch(entry.directorySignatures) && pathSignaturesMatch(entry.fileSignatures);
+  const signatures = new Map([...entry.directorySignatures, ...entry.fileSignatures]);
+  return pathSignaturesMatch(signatures) && pathSignaturesMatch(signatures);
 }
 
 function pathSignaturesMatch(signatures: ReadonlyMap<string, string>): boolean {

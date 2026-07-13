@@ -6,8 +6,15 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { rebuildTaskProjection } from "../../src/index.ts";
-import { withTempStoreAsync } from "./helpers.ts";
+import { executionDeclaration } from "../../src/entity/execution-declaration.ts";
+import {
+  readAttributionEventSource,
+  readAttributionEventsFromSource
+} from "../../src/local/attribution-event-source.ts";
+import { localProjectionSourceFileSystem } from "../../src/local/local-layout-file-system.ts";
+import { readDeclaredEntitySource } from "../../src/projection/entity-declaration-projection.ts";
+import { readTaskProjection, rebuildTaskProjection } from "../../src/index.ts";
+import { withTempStore, withTempStoreAsync } from "./helpers.ts";
 
 test("SQLite full rebuild atomically publishes complete declared entity generations", async () => {
   await withTempStoreAsync(async (rootDir) => {
@@ -57,6 +64,177 @@ test("SQLite full rebuild atomically publishes complete declared entity generati
     assert.deepEqual(result, { reads: result.reads, failures: 0, partial: 0 });
   });
 });
+
+test("task cache rejects a concurrent rewrite between signature passes", () => {
+  withTempStore((rootDir) => {
+    const taskPath = writeCacheTask(rootDir, "Task A");
+    rebuildTaskProjection({ rootDir });
+    const originalStatSignature = localProjectionSourceFileSystem.statSignature;
+    let mutated = false;
+    localProjectionSourceFileSystem.statSignature = (inputPath) => {
+      const signature = originalStatSignature(inputPath);
+      if (!mutated && inputPath === taskPath) {
+        mutated = true;
+        writeCacheTask(rootDir, "Task B");
+      }
+      return signature;
+    };
+    let result: ReturnType<typeof readTaskProjection>;
+    try {
+      result = readTaskProjection({ rootDir });
+    } finally {
+      localProjectionSourceFileSystem.statSignature = originalStatSignature;
+    }
+
+    assert.equal(mutated, true);
+    assert.equal(result.rows[0]?.title, "Task B");
+    assert.equal(result.warnings.some((warning) => warning.code === "projection_stale"), true);
+  });
+});
+
+test("declared source cache rejects a concurrent rewrite between signature passes", () => {
+  withTempStore((rootDir) => {
+    const executionPath = writeCacheExecution(rootDir, "submitted");
+    readDeclaredEntitySource(rootDir, executionDeclaration);
+    assert.equal(readDeclaredEntitySource(rootDir, executionDeclaration).stats.cacheHit, true);
+    const originalStatSignature = localProjectionSourceFileSystem.statSignature;
+    let mutated = false;
+    localProjectionSourceFileSystem.statSignature = (inputPath) => {
+      const signature = originalStatSignature(inputPath);
+      if (!mutated && inputPath === executionPath) {
+        mutated = true;
+        writeCacheExecution(rootDir, "accepted");
+      }
+      return signature;
+    };
+    let source: ReturnType<typeof readDeclaredEntitySource>;
+    try {
+      source = readDeclaredEntitySource(rootDir, executionDeclaration);
+    } finally {
+      localProjectionSourceFileSystem.statSignature = originalStatSignature;
+    }
+
+    assert.equal(mutated, true);
+    assert.equal(source.stats.cacheHit, false);
+    assert.match(source.inputs[0]?.body ?? "", /"state": "accepted"/u);
+  });
+});
+
+test("attribution cache rejects a concurrent rewrite between signature passes", () => {
+  withTempStore((rootDir) => {
+    const eventPath = writeCacheAttribution(rootDir, "person_alpha");
+    readAttributionEventSource(rootDir);
+    const originalStatSignature = localProjectionSourceFileSystem.statSignature;
+    let mutated = false;
+    localProjectionSourceFileSystem.statSignature = (inputPath) => {
+      const signature = originalStatSignature(inputPath);
+      if (!mutated && inputPath === eventPath) {
+        mutated = true;
+        writeCacheAttribution(rootDir, "person_bravo");
+      }
+      return signature;
+    };
+    let source: ReturnType<typeof readAttributionEventSource>;
+    try {
+      source = readAttributionEventSource(rootDir);
+    } finally {
+      localProjectionSourceFileSystem.statSignature = originalStatSignature;
+    }
+
+    assert.equal(mutated, true);
+    assert.equal(
+      readAttributionEventsFromSource(source)[0]?.actor.principal.personId,
+      "person_bravo"
+    );
+  });
+});
+
+function writeCacheTask(rootDir: string, title: "Task A" | "Task B"): string {
+  const taskId = "task_01J00000000000000000000001";
+  const taskRoot = path.join(rootDir, "harness/tasks", taskId);
+  mkdirSync(taskRoot, { recursive: true });
+  const taskPath = path.join(taskRoot, "INDEX.md");
+  writeFileSync(taskPath, [
+    "---",
+    "schema: task-package/v2",
+    `task_id: ${taskId}`,
+    `title: ${title}`,
+    "lifecycle:",
+    "  bindingSchema: lifecycle-binding/v1",
+    "  engine: local",
+    "  status: active",
+    "  ref: ",
+    `  titleSnapshot: ${title}`,
+    "  url: ",
+    "  bindingCreatedAt: 2026-07-13T00:00:00.000Z",
+    "  bindingFingerprint: sha256:fixture",
+    "packageDisposition: active",
+    "vertical: default",
+    "preset: default",
+    "---",
+    "",
+    `# ${title}`,
+    ""
+  ].join("\n"));
+  return taskPath;
+}
+
+function writeCacheExecution(rootDir: string, state: "submitted" | "accepted"): string {
+  const taskId = "task_01J00000000000000000000001";
+  const executionId = "exe_01J00000000000000000000001";
+  const executionPath = path.join(rootDir, "harness/tasks", taskId, "executions", `${executionId}.md`);
+  mkdirSync(path.dirname(executionPath), { recursive: true });
+  writeFileSync(executionPath, `${JSON.stringify({
+    schema: "execution/v2",
+    execution_id: executionId,
+    task_ref: `task/${taskId}`,
+    state,
+    primary_actor: {
+      principal: { personId: "person_cache" },
+      executor: { kind: "agent", id: "agent_cache" },
+      responsibleHuman: "person_cache"
+    },
+    claimed_at: "2026-07-13T00:00:00.000Z",
+    submitted_at: "2026-07-13T00:01:00.000Z",
+    closed_at: null,
+    session_bindings: [],
+    outputs: [],
+    submission: null
+  }, null, 2)}\n`);
+  return executionPath;
+}
+
+function writeCacheAttribution(rootDir: string, personId: "person_alpha" | "person_bravo"): string {
+  const eventRoot = path.join(rootDir, "harness/attribution-events");
+  mkdirSync(eventRoot, { recursive: true });
+  const eventPath = path.join(eventRoot, "event-cache-race.jsonl");
+  writeFileSync(eventPath, `${JSON.stringify({
+    schema: "attribution-event/v1",
+    eventId: "event-cache-race",
+    opId: "op-event-cache-race",
+    journalRecordSchema: "write-journal/v2",
+    entityId: "task/task-cache",
+    kind: "progress_append",
+    actor: {
+      principal: { kind: "person", personId },
+      executor: { kind: "agent", id: "agent_cache" }
+    },
+    principalSource: {
+      kind: "local-configured",
+      authority: "harness.yaml",
+      authoritySha256: `sha256:${"0".repeat(64)}`
+    },
+    executorSource: "client-asserted",
+    at: "2026-07-13T00:00:00.000Z",
+    recordedAt: "2026-07-13T00:00:01.000Z",
+    payloadHash: `sha256:${"1".repeat(64)}`,
+    payloadRef: {
+      path: ".harness/payloads/event-cache-race.json",
+      sha256: `sha256:${"1".repeat(64)}`
+    }
+  })}\n`);
+  return eventPath;
+}
 
 function seedAtomicProjectionTask(rootDir: string, executionCount: number): string {
   const taskId = "task_01J00000000000000000000000";

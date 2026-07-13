@@ -1,9 +1,11 @@
 // harness-test-tier: integration
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import { readAttributionEventSource } from "../../src/local/attribution-event-source.ts";
+import { localProjectionSourceFileSystem } from "../../src/local/local-layout-file-system.ts";
 import {
   queryDecisionProjection,
   readTaskProjection,
@@ -188,6 +190,97 @@ test("declared entity path identity must match the document identity", () => {
     writeFileSync(executionPath, `${JSON.stringify(mismatched)}\n`);
 
     assert.throws(() => rebuildTaskProjection({ rootDir }), /path identity .* does not match projected identity/u);
+  });
+});
+
+test("attribution source cache reuses unchanged bodies and reloads only a changed shard", () => {
+  withTempStore((rootDir) => {
+    for (let index = 0; index < 5; index += 1) {
+      writeIntegrityAttribution(rootDir, `event-cache-${index}`, "task/task-a", "progress_append");
+    }
+    const originalReadStableText = localProjectionSourceFileSystem.readStableText;
+    let attributionBodyReads = 0;
+    localProjectionSourceFileSystem.readStableText = (inputPath) => {
+      if (inputPath.includes(`${path.sep}attribution-events${path.sep}`)) attributionBodyReads += 1;
+      return originalReadStableText(inputPath);
+    };
+    try {
+      const initial = readAttributionEventSource(rootDir);
+      assert.equal(initial.inputs.length, 5);
+      assert.equal(attributionBodyReads, 5);
+
+      const unchanged = readAttributionEventSource(rootDir);
+      assert.equal(unchanged.hash, initial.hash);
+      assert.equal(attributionBodyReads, 5);
+
+      writeIntegrityAttribution(rootDir, "event-cache-2", "task/task-a", "progress_append");
+      const refreshed = readAttributionEventSource(rootDir);
+      assert.equal(refreshed.hash, initial.hash);
+      assert.equal(attributionBodyReads, 6);
+    } finally {
+      localProjectionSourceFileSystem.readStableText = originalReadStableText;
+    }
+  });
+});
+
+test("attribution discovery retries when a shard disappears", () => {
+  withTempStore((rootDir) => {
+    writeIntegrityAttribution(rootDir, "event-keep", "task/task-a", "progress_append");
+    const disappearingPath = path.join(rootDir, "harness/attribution-events/event-disappears.jsonl");
+    writeIntegrityAttribution(rootDir, "event-disappears", "task/task-a", "progress_append");
+    const originalReadStableText = localProjectionSourceFileSystem.readStableText;
+    let removed = false;
+    localProjectionSourceFileSystem.readStableText = (inputPath) => {
+      if (!removed && inputPath === disappearingPath) {
+        removed = true;
+        rmSync(inputPath);
+      }
+      return originalReadStableText(inputPath);
+    };
+    try {
+      const source = readAttributionEventSource(rootDir);
+      assert.equal(removed, true);
+      assert.deepEqual(source.inputs.map((input) => input.relativePath), ["event-keep.jsonl"]);
+    } finally {
+      localProjectionSourceFileSystem.readStableText = originalReadStableText;
+    }
+  });
+});
+
+test("incremental publish falls back to a stable rebuild after a cross-generation decision edit", () => {
+  withTempStore((rootDir) => {
+    writeIntegrityTask(rootDir, "task-a", "Task A", "active");
+    const decisionPath = writeIntegrityDecision(rootDir, "Decision A");
+    rebuildTaskProjection({ rootDir });
+    const previousSourceFingerprint = captureProjectionSourceSnapshot(rootDir).fingerprint;
+    mkdirSync(path.join(rootDir, "harness/sessions"), { recursive: true });
+    writeIntegrityDecision(rootDir, "Decision B");
+
+    const sessionsRoot = path.join(rootDir, "harness/sessions");
+    const originalReadStableDirents = localProjectionSourceFileSystem.readStableDirents;
+    let mutated = false;
+    localProjectionSourceFileSystem.readStableDirents = (inputPath) => {
+      const result = originalReadStableDirents(inputPath);
+      if (!mutated && inputPath === sessionsRoot) {
+        mutated = true;
+        writeIntegrityDecision(rootDir, "Decision C");
+      }
+      return result;
+    };
+    let result: ReturnType<typeof updateTaskProjectionIncrementally>;
+    try {
+      result = updateTaskProjectionIncrementally({
+        rootDir,
+        touchedPaths: [decisionPath],
+        previousSourceFingerprint
+      });
+    } finally {
+      localProjectionSourceFileSystem.readStableDirents = originalReadStableDirents;
+    }
+
+    assert.equal(mutated, true);
+    assert.equal(result.mode, "rebuild");
+    assert.equal(queryDecisionProjection({ rootDir, filters: {} }).rows[0]?.title, "Decision C");
   });
 });
 
