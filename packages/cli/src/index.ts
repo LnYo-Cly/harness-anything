@@ -28,7 +28,7 @@ import {
   type DaemonServeHooks
 } from "./commands/daemon/productization.ts";
 import { runDaemonConnect } from "./commands/daemon/connect.ts";
-import { createDaemonLocalTransport } from "./commands/daemon/serve-transport.ts";
+import { createDaemonLocalTransport, withDaemonSocketOwnership } from "./commands/daemon/serve-transport.ts";
 import { runRegisteredCommandWithCliComposition } from "./composition/command-executor.ts";
 import { selectCliAdapterProvider } from "./composition/adapter-registry.ts";
 import { daemonIdFromEnv, daemonUserRoot, localUserDaemonEndpoint, runCommandThroughDaemon } from "./daemon/client.ts";
@@ -100,51 +100,68 @@ async function runDaemonServe(
 ): Promise<void> {
   const requestedRepoId = readOption(args, "--repo") ?? process.env.HARNESS_DAEMON_REPO_ID ?? "canonical";
   const userRoot = readOption(args, "--user-root") ?? daemonUserRoot();
-  const serveRepos = daemonServeRepos(rootDir, layoutOverrides, requestedRepoId, userRoot);
-  const defaultRepoId = defaultDaemonServeRepoId(serveRepos, rootDir, requestedRepoId);
-  const runtime = createMultiRepoDaemonRuntime({
-    materializerPollMs: 5_000,
-    reservationReconciler: async (rootInput) => {
-      const canonicalRoot = typeof rootInput === "string" ? rootInput : rootInput.rootDir;
-      const repoId = serveRepos.find((repo) => repo.canonicalRoot === canonicalRoot)?.repoId;
-      return makeDaemonReservationReconciler(rootInput, repoId ? runtime.getRepoRuntime(repoId) : undefined)();
-    },
-    repos: serveRepos.map((repo) => ({
-      repoId: repo.repoId,
-      rootDir: repo.canonicalRoot,
-      displayName: repo.displayName,
-      ...(layoutOverrides ? { layoutOverrides } : {})
-    }))
-  });
-  const startStatus = await runtime.start();
-  if (startStatus.repoCount > 0 && startStatus.attachedCount === 0 && startStatus.unavailableCount > 0) {
-    throw new Error(`daemon did not attach any registered repo: ${startStatus.repos.map((repo) => `${repo.repoId}:${repo.lastError ?? repo.state}`).join("; ")}`);
-  }
-  const idleMs = parsePositiveIntegerOr(readOption(args, "--idle-ms"), 0, { allowZero: true });
   const endpoint = readOption(args, "--socket") ?? localUserDaemonEndpoint(userRoot, daemonIdFromEnv());
-  const connections: DaemonConnectionStats = { active: 0, total: 0 };
-  const serviceHost = createDaemonServiceHost(runtime, serveRepos, defaultRepoId, layoutOverrides, idleMs, endpoint, connections);
-  serviceHost.startRegistryReconcile(userRoot);
-  const transport = createDaemonLocalTransport({
-    daemonId: serviceHost.daemonId,
-    endpoint,
-    createProtocolServer: serviceHost.createProtocolServer,
-    onConnection: () => {
-      connections.active += 1;
-      connections.total += 1;
-    },
-    onConnectionClosed: () => {
-      connections.active = Math.max(0, connections.active - 1);
+  return withDaemonSocketOwnership(endpoint, async () => {
+    let runtime: MultiRepoHarnessDaemonRuntime | undefined;
+    let serviceHost: ReturnType<typeof createDaemonServiceHost> | undefined;
+    try {
+      const serveRepos = daemonServeRepos(rootDir, layoutOverrides, requestedRepoId, userRoot);
+      const defaultRepoId = defaultDaemonServeRepoId(serveRepos, rootDir, requestedRepoId);
+      runtime = createMultiRepoDaemonRuntime({
+        materializerPollMs: 5_000,
+        reservationReconciler: async (rootInput) => {
+          const canonicalRoot = typeof rootInput === "string" ? rootInput : rootInput.rootDir;
+          const repoId = serveRepos.find((repo) => repo.canonicalRoot === canonicalRoot)?.repoId;
+          return makeDaemonReservationReconciler(rootInput, repoId ? runtime?.getRepoRuntime(repoId) : undefined)();
+        },
+        repos: serveRepos.map((repo) => ({
+          repoId: repo.repoId,
+          rootDir: repo.canonicalRoot,
+          displayName: repo.displayName,
+          ...(layoutOverrides ? { layoutOverrides } : {})
+        }))
+      });
+      const startStatus = await runtime.start();
+      if (startStatus.repoCount > 0 && startStatus.attachedCount === 0 && startStatus.unavailableCount > 0) {
+        throw new Error(`daemon did not attach any registered repo: ${startStatus.repos.map((repo) => `${repo.repoId}:${repo.lastError ?? repo.state}`).join("; ")}`);
+      }
+      const idleMs = parsePositiveIntegerOr(readOption(args, "--idle-ms"), 0, { allowZero: true });
+      const connections: DaemonConnectionStats = { active: 0, total: 0 };
+      serviceHost = createDaemonServiceHost(runtime, serveRepos, defaultRepoId, layoutOverrides, idleMs, endpoint, connections);
+      serviceHost.startRegistryReconcile(userRoot);
+      const transport = createDaemonLocalTransport({
+        daemonId: serviceHost.daemonId,
+        endpoint,
+        createProtocolServer: serviceHost.createProtocolServer,
+        onConnection: () => {
+          connections.active += 1;
+          connections.total += 1;
+        },
+        onConnectionClosed: () => {
+          connections.active = Math.max(0, connections.active - 1);
+        }
+      });
+      await transport.start();
+      serviceHost.onStop(async () => {
+        await transport.stop();
+      });
+      hooks.onStarted?.(serviceHost.status());
+      serviceHost.scheduleIdleExit();
+      await Promise.race([waitForStopSignal(), serviceHost.waitForStopRequest()]);
+    } finally {
+      let stoppedByHost = false;
+      try {
+        if (serviceHost) {
+          await serviceHost.stop();
+          stoppedByHost = true;
+        } else if (runtime) {
+          await runtime.stop();
+        }
+      } finally {
+        if (!stoppedByHost && serviceHost && runtime) await runtime.stop();
+      }
     }
   });
-  await transport.start();
-  hooks.onStarted?.(serviceHost.status());
-  serviceHost.onStop(async () => {
-    await transport.stop();
-  });
-  serviceHost.scheduleIdleExit();
-  await Promise.race([waitForStopSignal(), serviceHost.waitForStopRequest()]);
-  await serviceHost.stop();
 }
 
 function repoAvailabilityFailure(
