@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -33,15 +33,6 @@ const summaryFields = new Set([
 export async function runJavaScriptTypeScriptCodeGraph(options) {
   const scopes = selectedScopes(options.manifest, options.extractor);
   if (!scopes.ok) return scopes;
-  const roots = scanRoots(scopes.value);
-  const argv = [
-    "--no-config",
-    "--output-type", "json",
-    "--progress", "none",
-    "--exclude", defaultExclude,
-    "--",
-    ...roots
-  ];
   const execute = options.execute ?? executeDependencyCruiser;
   const versionExecution = await execute({
     executable: "depcruise",
@@ -62,6 +53,23 @@ export async function runJavaScriptTypeScriptCodeGraph(options) {
   if (versionExecution.stdout.trim() !== toolVersion) {
     return invalid("architecture_extractor_version_mismatch", "extractor.tool.version", `Expected dependency-cruiser ${toolVersion}.`);
   }
+  const roots = existingScanRoots(options.executionRoot, scanRoots(scopes.value));
+  if (roots.length === 0) {
+    return decodeDependencyCruiserCodeGraph({
+      raw: { modules: [], summary: {} },
+      executionRoot: options.executionRoot,
+      extractor: options.extractor,
+      scopes: scopes.value
+    });
+  }
+  const argv = [
+    "--no-config",
+    "--output-type", "json",
+    "--progress", "none",
+    "--exclude", defaultExclude,
+    "--",
+    ...roots
+  ];
   const execution = await execute({
     executable: "depcruise",
     argv,
@@ -193,8 +201,8 @@ async function executeDependencyCruiser({ executable, argv, cwd, timeoutMs }) {
       if (executable === "depcruise") {
         const packageEntry = fileURLToPath(import.meta.resolve("dependency-cruiser"));
         const dependencyCruiserEntry = path.resolve(path.dirname(packageEntry), "../../bin/dependency-cruise.mjs");
-        resolvedExecutable = process.execPath;
-        resolvedArgv = [dependencyCruiserEntry, ...argv];
+        resolvedExecutable = dependencyCruiserEntry;
+        resolvedArgv = argv;
       }
     } catch {
       resolve({ status: "tool-missing" });
@@ -202,7 +210,11 @@ async function executeDependencyCruiser({ executable, argv, cwd, timeoutMs }) {
     }
     const child = spawn(resolvedExecutable, resolvedArgv, {
       cwd,
-      env: { ...process.env, PREFIX: path.dirname(path.dirname(process.execPath)) },
+      env: {
+        ...process.env,
+        PATH: path.dirname(process.execPath),
+        PREFIX: path.dirname(path.dirname(process.execPath))
+      },
       shell: false,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"]
@@ -270,6 +282,17 @@ function scanRoots(scopes) {
   return [...new Set(roots)].sort(compareArchitectureText);
 }
 
+function existingScanRoots(executionRoot, roots) {
+  const expanded = roots.flatMap((root) => {
+    if (root !== ".") return existsSync(path.resolve(executionRoot, root)) ? [root] : [];
+    return readdirSync(executionRoot, { withFileTypes: true }).flatMap((entry) => {
+      if (excludedByDefault(entry.name)) return [];
+      return entry.isDirectory() || entry.isFile() && sourceExtension.test(entry.name) ? [entry.name] : [];
+    });
+  });
+  return [...new Set(expanded)].sort(compareArchitectureText);
+}
+
 function staticRoot(glob) {
   const segments = glob.split("/");
   const fixed = [];
@@ -289,7 +312,7 @@ function portableToolPath(value) {
 }
 
 function excludedByDefault(filePath) {
-  return /(^|\/)(?:node_modules|dist|test|tests|__tests__)(?:\/|$)|\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(filePath);
+  return /(^|\/)(?:\.git|\.harness|\.harness-private|\.worktrees|harness|node_modules|dist|test|tests|__tests__)(?:\/|$)|\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(filePath);
 }
 
 function nearestPackageManifest(root, filePath) {

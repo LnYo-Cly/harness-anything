@@ -87,6 +87,28 @@ test("fixed invocation disables repository config and never uses a shell", async
   });
 });
 
+test("broad scopes return an empty graph without asking dependency-cruiser to open an empty repository root", async () => {
+  const { runJavaScriptTypeScriptCodeGraph } = await import(extractorPath);
+  const executionRoot = mkdtempSync(path.join(tmpdir(), "ha-architecture-empty-"));
+  try {
+    let calls = 0;
+    const result = await runJavaScriptTypeScriptCodeGraph({
+      manifest: { sourceScopes: [{ id: "repository", include: ["**/*.ts"], exclude: [] }] },
+      extractor: { id: "js-ts-imports", adapter: "javascript-typescript/imports-v1", sourceScopeIds: ["repository"] },
+      executionRoot,
+      execute: async () => {
+        calls += 1;
+        return { status: "ok", stdout: "17.4.3\n" };
+      }
+    });
+    assert.equal(result.status, "ok");
+    assert.deepEqual(result.graph.stats, { sourceFiles: 0, packageCount: 0, dependencyEdges: 0 });
+    assert.equal(calls, 1, "only the pinned version probe runs when no source root exists");
+  } finally {
+    rmSync(executionRoot, { recursive: true, force: true });
+  }
+});
+
 test("missing, failed, malformed, version-mismatched, and unknown output fail closed", async () => {
   const { runJavaScriptTypeScriptCodeGraph } = await import(extractorPath);
   await withFixtureRoot(async (executionRoot) => {

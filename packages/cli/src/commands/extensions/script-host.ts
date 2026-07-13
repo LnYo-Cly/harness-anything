@@ -514,6 +514,7 @@ function architectureToolPackageReadPermissions(
 ): ReadonlyArray<string> {
   return isTrustedArchitectureToolScript(script, scriptPath)
     ? [
+        ...permissionPathsForScope(path.dirname(layout.rootDir), false),
         ...permissionPathsForScope(layout.rootDir, true),
         ...nodeModuleReadPermissions([path.dirname(scriptPath), script.manifestRoot, layout.rootDir])
       ]
