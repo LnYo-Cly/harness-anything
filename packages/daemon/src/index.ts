@@ -28,34 +28,60 @@ export {
   actorGitCommitAuthor,
   actorStamp,
   actorStampJson,
+  composeIdentityProvider,
   credentialKey,
   type ActorStamp,
+  type AuthenticationProvider,
   type AuthenticatedActor,
+  type AuthorizationProvider,
   type CredentialKind,
   type CredentialRef,
   type DaemonCommandClass,
   type GitCommitAuthor,
+  type IdentityAdminSnapshot,
+  type IdentityAuthenticationResult,
+  type IdentityAuthenticationSuccess,
+  type IdentityAuthorizationAction,
+  type IdentityAuthorizationDecision,
+  type IdentityAuthorizationFailure,
+  type IdentityAuthorizationInput,
+  type IdentityAuthorizationResource,
+  type IdentityAuthorizationSuccess,
+  type IdentityEvidence,
   type IdentityProvider,
   type IdentityProviderFailure,
   type IdentityProviderFailureCode,
-  type IdentityProviderResolveInput,
-  type IdentityProviderSuccess,
   type PeopleRoster,
   type PersonId,
+  type PersonRecord,
+  type PersonRegistry,
   type PersonProfile,
   type RoleId,
   type RolePolicy
 } from "./identity/types.ts";
 export {
   loadPeopleRoster,
+  makePeopleRosterIdentityAdminSnapshot,
   peopleRosterFromDocument
 } from "./identity/people-roster.ts";
 export {
+  hasPersonRegistry,
+  loadPersonRegistry,
+  personRegistryFromDocument,
+  personRegistryFromLegacyRoster,
+  personRegistryFromRecords,
+  personRegistryPath,
+  validatePeopleRosterReferences
+} from "./identity/person-registry.ts";
+export {
+  makeTransportDerivedAuthenticationProvider,
   makeTransportDerivedIdentityProvider,
   type TransportDerivedIdentityProviderOptions
 } from "./identity/transport-derived-provider.ts";
 export {
-  authorizeActorForMethod,
+  authorizePersonForMethod,
+  makePeopleRosterAuthorizationProvider,
+  makePersonAuthorizationProvider,
   type AuthorizationFailure,
   type AuthorizationSuccess
 } from "./identity/authorization.ts";

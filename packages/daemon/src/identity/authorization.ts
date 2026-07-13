@@ -1,28 +1,54 @@
-import type { JsonRpcMethodContract } from "../protocol/method-registry.ts";
-import type { AuthenticatedActor, PeopleRoster } from "./types.ts";
+import type {
+  AuthorizationProvider,
+  DaemonCommandClass,
+  IdentityAuthorizationAction,
+  IdentityAuthorizationDecision,
+  IdentityAuthorizationFailure,
+  IdentityAuthorizationSuccess,
+  PeopleRoster,
+  PersonId
+} from "./types.ts";
 
-export interface AuthorizationFailure {
-  readonly ok: false;
-  readonly code: "rbac_forbidden" | "command_class_missing";
-  readonly message: string;
-}
+export type AuthorizationFailure = IdentityAuthorizationFailure;
+export type AuthorizationSuccess = IdentityAuthorizationSuccess;
 
-export interface AuthorizationSuccess {
-  readonly ok: true;
-}
-
-export function authorizeActorForMethod(
-  actor: AuthenticatedActor,
-  contract: JsonRpcMethodContract,
+export function authorizePersonForMethod(
+  personId: PersonId,
+  action: IdentityAuthorizationAction,
   roster: PeopleRoster
-): AuthorizationSuccess | AuthorizationFailure {
-  if (!contract.commandClass) {
-    return { ok: false, code: "command_class_missing", message: `Method is missing commandClass: ${contract.method}` };
+): IdentityAuthorizationDecision {
+  if (!action.commandClass) {
+    return { ok: false, code: "command_class_missing", message: `Method is missing commandClass: ${action.method}` };
   }
-  if (actor.roles.some((roleId) => roster.roleAllows(roleId, contract.commandClass!))) return { ok: true };
+  const binding = roster.people.find((person) => person.personId === personId);
+  if (binding?.roles.some((roleId) => roster.roleAllows(roleId, action.commandClass!))) return { ok: true };
   return {
     ok: false,
     code: "rbac_forbidden",
-    message: `Person ${actor.personId} is not authorized for ${contract.commandClass} method ${contract.method}.`
+    message: `Person ${personId} is not authorized for ${action.commandClass} method ${action.method}.`
+  };
+}
+
+export function makePeopleRosterAuthorizationProvider(roster: PeopleRoster): AuthorizationProvider {
+  return { authorize: async ({ personId, action }) => authorizePersonForMethod(personId, action, roster) };
+}
+
+export function makePersonAuthorizationProvider(
+  personId: PersonId,
+  commandClasses: ReadonlyArray<DaemonCommandClass>
+): AuthorizationProvider {
+  const allowed = new Set(commandClasses);
+  return {
+    authorize: async ({ personId: candidate, action }) => {
+      if (!action.commandClass) {
+        return { ok: false, code: "command_class_missing", message: `Method is missing commandClass: ${action.method}` };
+      }
+      if (candidate === personId && allowed.has(action.commandClass)) return { ok: true };
+      return {
+        ok: false,
+        code: "rbac_forbidden",
+        message: `Person ${candidate} is not authorized for ${action.commandClass} method ${action.method}.`
+      };
+    }
   };
 }

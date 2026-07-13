@@ -9,8 +9,10 @@ import { makeTaskHolderService } from "../../application/src/index.ts";
 import { createInMemoryTerminalSessionService } from "../../gui/src/terminal/session-registry.ts";
 import {
   createJsonRpcProtocolServer,
+  makePeopleRosterIdentityAdminSnapshot,
   makeTransportDerivedIdentityProvider,
   peopleRosterFromDocument,
+  personRegistryFromLegacyRoster,
   type JsonRpcRequest,
   type JsonRpcResponse,
   type PeopleRoster
@@ -291,10 +293,12 @@ function createActorServer(
   services: Parameters<typeof createJsonRpcProtocolServer>[0]["services"],
   appendRuntimeEvent?: Parameters<typeof createJsonRpcProtocolServer>[0]["appendRuntimeEvent"]
 ) {
+  const personRegistry = personRegistryFromLegacyRoster(roster);
   return createJsonRpcProtocolServer({
     daemonId: "daemon-task-holder-test",
     repos: [{ repoId: "canonical", canonicalRoot: rootDir }],
-    peopleRoster: roster,
+    personRegistry,
+    identityAdminSnapshot: makePeopleRosterIdentityAdminSnapshot(roster, personRegistry),
     identityProvider: makeTransportDerivedIdentityProvider(roster, { sshExecIssuer: "host:team-host" }),
     authContext: {
       transportKind: "ssh-exec",

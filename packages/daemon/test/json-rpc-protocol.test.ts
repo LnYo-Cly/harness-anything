@@ -11,13 +11,17 @@ import { apiRouteContracts } from "../../gui/src/api/api-contract-registry.ts";
 import { createInMemoryTerminalSessionService } from "../../gui/src/terminal/session-registry.ts";
 import { commandSpecs } from "../../cli/src/cli/command-spec/index.ts";
 import {
+  composeIdentityProvider,
   createJsonRpcProtocolServer,
   currentDaemonProtocolVersion,
   jsonRpcServiceMethodContracts,
   jsonRpcMethodContracts,
   repoCommandRunClassifiedActionKinds,
+  makePeopleRosterAuthorizationProvider,
+  makePeopleRosterIdentityAdminSnapshot,
   makeTransportDerivedIdentityProvider,
   peopleRosterFromDocument,
+  personRegistryFromLegacyRoster,
   type IdentityProvider,
   type PeopleRoster,
   type JsonRpcRequest,
@@ -310,8 +314,7 @@ test("notification subscribe is a no-op socket and respects JSON-RPC notificatio
 test("admin people list returns roster data and stamps receipt actor", async () => {
   const roster = sampleRoster();
   const server = makeServer({
-    peopleRoster: roster,
-    identityProvider: makeTransportDerivedIdentityProvider(roster, { sshExecIssuer: "host:team-host" }),
+    ...rosterIdentityOptions(roster),
     authContext: {
       transportKind: "ssh-exec",
       sshExecUser: { username: "alice", host: "team-host", source: "ssh-authenticated-exec" }
@@ -335,12 +338,9 @@ test("admin people list returns roster data and stamps receipt actor", async () 
 test("transport-derived provider rejects unknown credentials without anonymous fallback", async () => {
   const roster = sampleRoster();
   const provider = makeTransportDerivedIdentityProvider(roster, { sshExecIssuer: "host:team-host" });
-  const resolved = await provider.resolveActor({
-    authContext: {
-      transportKind: "ssh-exec",
-      sshExecUser: { username: "mallory", host: "team-host", source: "ssh-authenticated-exec" }
-    },
-    command: { method: "repo.tasks.list", namespace: "repo", requiresRepo: true }
+  const resolved = await provider.authenticate({
+    transportKind: "ssh-exec",
+    sshExecUser: { username: "mallory", host: "team-host", source: "ssh-authenticated-exec" }
   });
 
   assert.equal(resolved.ok, false);
@@ -372,41 +372,38 @@ test("SSH forced-command authentication fails closed when the people roster prov
 
   assert.equal(receipt.ok, false);
   assert.equal(receipt.error?.code, "provider_unavailable");
-  assert.match(receipt.error?.hint ?? "", /people\.yaml roster validation/iu);
+  assert.match(receipt.error?.hint ?? "", /identity provider/iu);
 });
 
 test("mock email provider proves provider extension without daemon call-site changes", async () => {
   const roster = sampleRoster();
-  const emailProvider: IdentityProvider = {
+  const emailProvider: IdentityProvider = composeIdentityProvider({
     providerId: "email-session/v1",
-    resolveActor: async ({ authContext }) => {
-      const claims = authContext.sshTunnelToken?.subject.claims;
+    authenticate: async (evidence) => {
+      const claims = evidence.sshTunnelToken?.subject.claims;
       const email = claims && typeof claims.email === "string" ? claims.email.toLowerCase() : "";
       return roster.resolveCredential({ kind: "email-address", issuer: "email:primary", subject: email }, "email-session/v1");
     }
-  };
+  }, makePeopleRosterAuthorizationProvider(roster));
 
-  const resolved = await emailProvider.resolveActor({
-    authContext: {
-      transportKind: "ssh-tunnel",
-      sshTunnelToken: {
-        tokenId: "token-1",
-        tunnelNonce: "nonce-1",
-        subject: {
-          userId: "session-user",
-          hostProfileId: "host-profile",
-          daemonInstanceId: "daemon-test",
-          claims: { email: "ALICE@EXAMPLE.COM" }
-        }
+  const resolved = await emailProvider.authenticate({
+    transportKind: "ssh-tunnel",
+    sshTunnelToken: {
+      tokenId: "token-1",
+      tunnelNonce: "nonce-1",
+      subject: {
+        userId: "session-user",
+        hostProfileId: "host-profile",
+        daemonInstanceId: "daemon-test",
+        claims: { email: "ALICE@EXAMPLE.COM" }
       }
-    },
-    command: { method: "repo.tasks.list", namespace: "repo", requiresRepo: true }
+    }
   });
 
   assert.equal(resolved.ok, true);
   if (resolved.ok) {
-    assert.equal(resolved.actor.personId, "person_alice");
-    assert.equal(resolved.actor.providerId, "email-session/v1");
+    assert.equal(resolved.personId, "person_alice");
+    assert.equal(resolved.providerId, "email-session/v1");
   }
 });
 
@@ -416,8 +413,7 @@ test("RBAC rejects non-arbiter methods and records a runtime event with actor", 
   try {
     const roster = sampleRoster();
     const server = makeServer({
-      peopleRoster: roster,
-      identityProvider: makeTransportDerivedIdentityProvider(roster, { sshExecIssuer: "host:team-host" }),
+      ...rosterIdentityOptions(roster),
       authContext: {
         transportKind: "ssh-exec",
         sshExecUser: { username: "viewer", host: "team-host", source: "ssh-authenticated-exec" }
@@ -456,8 +452,7 @@ test("runtime event append receives the validated repo namespace", async () => {
   const eventRepos: string[] = [];
   const roster = sampleRoster();
   const server = makeServer({
-    peopleRoster: roster,
-    identityProvider: makeTransportDerivedIdentityProvider(roster, { sshExecIssuer: "host:team-host" }),
+    ...rosterIdentityOptions(roster),
     authContext: {
       transportKind: "ssh-exec",
       sshExecUser: { username: "maint", host: "team-host", source: "ssh-authenticated-exec" }
@@ -507,8 +502,7 @@ test("repo.command.run derives RBAC from the inner CLI command", async () => {
   const roster = sampleRoster();
   const calls: string[] = [];
   const server = makeServer({
-    peopleRoster: roster,
-    identityProvider: makeTransportDerivedIdentityProvider(roster, { sshExecIssuer: "host:team-host" }),
+    ...rosterIdentityOptions(roster),
     authContext: {
       transportKind: "ssh-exec",
       sshExecUser: { username: "maint", host: "team-host", source: "ssh-authenticated-exec" }
@@ -677,6 +671,15 @@ function sampleRoster(): PeopleRoster {
     "    commandClasses: [arbiter, repo-write, repo-read]",
     ""
   ].join("\n"));
+}
+
+function rosterIdentityOptions(roster: PeopleRoster) {
+  const personRegistry = personRegistryFromLegacyRoster(roster);
+  return {
+    personRegistry,
+    identityProvider: makeTransportDerivedIdentityProvider(roster, { sshExecIssuer: "host:team-host" }),
+    identityAdminSnapshot: makePeopleRosterIdentityAdminSnapshot(roster, personRegistry)
+  };
 }
 
 function createHarnessRoot(): string {

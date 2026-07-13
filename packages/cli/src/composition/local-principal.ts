@@ -5,7 +5,13 @@ import {
   type TaskHolderPersonPrincipal,
   type TaskHolderPrincipal
 } from "../../../application/src/index.ts";
-import { loadPeopleRoster } from "../../../daemon/src/index.ts";
+import {
+  hasPersonRegistry,
+  loadPeopleRoster,
+  loadPersonRegistry,
+  personRegistryFromLegacyRoster,
+  validatePeopleRosterReferences
+} from "../../../daemon/src/index.ts";
 import { resolveHarnessLayout, sha256Text, type HarnessLayoutInput, type PrincipalSource } from "../../../kernel/src/index.ts";
 import { readProjectHarnessSettings } from "../commands/settings.ts";
 import {
@@ -104,7 +110,7 @@ function readConfiguredLocalPrincipalWithSource(rootInput: HarnessLayoutInput, r
 
   const layout = resolveHarnessLayout(rootInput);
   const peoplePath = path.join(layout.authoredRoot, "people.yaml");
-  const registry = registryInput ?? legacyPersonRegistry(rootInput, peoplePath);
+  const registry = registryInput ?? authoredPersonRegistry(rootInput, peoplePath);
   if (!registry) {
     const authorityPath = layout.configPath ?? path.join(layout.authoredRoot, "harness.yaml");
     return {
@@ -140,21 +146,40 @@ function readConfiguredLocalPrincipalWithSource(rootInput: HarnessLayoutInput, r
   };
 }
 
-function legacyPersonRegistry(rootInput: HarnessLayoutInput, peoplePath: string): PersonRegistry | undefined {
-  if (!existsSync(peoplePath)) return undefined;
-  let roster: ReturnType<typeof loadPeopleRoster>;
+function authoredPersonRegistry(rootInput: HarnessLayoutInput, peoplePath: string): PersonRegistry | undefined {
+  const personsPath = path.join(resolveHarnessLayout(rootInput).authoredRoot, "persons.yaml");
+  if (!existsSync(peoplePath) && !existsSync(personsPath)) return undefined;
+  let roster: ReturnType<typeof loadPeopleRoster> | undefined;
   try {
-    roster = loadPeopleRoster(rootInput);
+    roster = existsSync(peoplePath) ? loadPeopleRoster(rootInput) : undefined;
+    const registry = hasPersonRegistry(rootInput)
+      ? loadPersonRegistry(rootInput)
+      : roster
+        ? personRegistryFromLegacyRoster(roster)
+        : undefined;
+    if (!registry) return undefined;
+    if (roster) validatePeopleRosterReferences(registry, roster);
+    const authority = hasPersonRegistry(rootInput) ? "persons.yaml" as const : "people.yaml-legacy" as const;
+    return {
+      authority,
+      authorityPath: authority === "persons.yaml" ? personsPath : peoplePath,
+      find: (personId) => {
+        const person = registry.find(personId);
+        if (!person) return undefined;
+        const binding = roster?.people.find((candidate) => candidate.personId === personId);
+        return {
+          personId: person.personId,
+          displayName: person.displayName,
+          ...(binding?.primaryEmail ? { primaryEmail: binding.primaryEmail } : {}),
+          ...(person.disabled ? { disabled: true } : {})
+        };
+      }
+    };
   } catch (error) {
     throw new CliPrincipalResolutionError(
-      `Unable to validate settings.identity against harness/people.yaml: ${error instanceof Error ? error.message : String(error)}`
+      `Unable to validate settings.identity against the person registry: ${error instanceof Error ? error.message : String(error)}`
     );
   }
-  return {
-    authority: "people.yaml-legacy",
-    authorityPath: peoplePath,
-    find: (personId) => roster.people.find((person) => person.personId === personId)
-  };
 }
 
 function localPrincipalSource(authority: "persons.yaml" | "people.yaml-legacy" | "harness.yaml", authorityPath: string): PrincipalSource {
