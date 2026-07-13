@@ -279,7 +279,8 @@ function createDaemonServiceHost(
       leaseEnforcementEnabled: (repo) => leaseEnforcementEnabled({ rootDir: repo.canonicalRoot, layoutOverrides }),
       authContext,
       ...(defaultRepoBinding().identity.identityProvider ? { identityProvider: defaultRepoBinding().identity.identityProvider } : {}),
-      ...(defaultRepoBinding().identity.peopleRoster ? { peopleRoster: defaultRepoBinding().identity.peopleRoster } : {}),
+      ...(defaultRepoBinding().identity.personRegistry ? { personRegistry: defaultRepoBinding().identity.personRegistry } : {}),
+      ...(defaultRepoBinding().identity.identityAdminSnapshot ? { identityAdminSnapshot: defaultRepoBinding().identity.identityAdminSnapshot } : {}),
       appendRuntimeEvent: (input, context) => {
         const targetRepoId = context?.repo.repoId ?? defaultRepoId;
         return repoBindings.get(targetRepoId)?.appendRuntimeEvent(input) ?? Promise.resolve();

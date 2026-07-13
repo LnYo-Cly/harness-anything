@@ -1,7 +1,16 @@
 // @slice-activation PLT-Daemon W4 transport-derived identity provider exported for daemon composition and W7 team server wiring.
 import os from "node:os";
 import type { DaemonAuthenticationContext } from "../transport/auth-context.ts";
-import type { CredentialRef, IdentityProvider, IdentityProviderFailure, PeopleRoster } from "./types.ts";
+import { makePeopleRosterAuthorizationProvider } from "./authorization.ts";
+import { composeIdentityProvider } from "./types.ts";
+import type {
+  AuthenticationProvider,
+  CredentialRef,
+  IdentityAuthenticationResult,
+  IdentityProvider,
+  IdentityProviderFailure,
+  PeopleRoster
+} from "./types.ts";
 
 export interface TransportDerivedIdentityProviderOptions {
   readonly localUnixIssuer?: string;
@@ -14,11 +23,21 @@ export function makeTransportDerivedIdentityProvider(
   roster: PeopleRoster,
   options: TransportDerivedIdentityProviderOptions = {}
 ): IdentityProvider {
+  return composeIdentityProvider(
+    makeTransportDerivedAuthenticationProvider(roster.resolveCredential, options),
+    makePeopleRosterAuthorizationProvider(roster)
+  );
+}
+
+export function makeTransportDerivedAuthenticationProvider(
+  resolveCredential: (credential: CredentialRef, providerId: string) => IdentityAuthenticationResult,
+  options: TransportDerivedIdentityProviderOptions = {}
+): AuthenticationProvider {
   const providerId = "transport-derived/v1";
   return {
     providerId,
-    resolveActor: async ({ authContext }) => {
-      const credential = credentialFromAuthContext(authContext, options);
+    authenticate: async (evidence) => {
+      const credential = credentialFromAuthContext(evidence, options);
       if (!credential) {
         return unavailableTransportCredentialFailure(
           providerId,
@@ -26,7 +45,7 @@ export function makeTransportDerivedIdentityProvider(
           "Transport authentication context did not expose a usable credential."
         );
       }
-      return roster.resolveCredential(credential, providerId);
+      return resolveCredential(credential, providerId);
     }
   };
 }

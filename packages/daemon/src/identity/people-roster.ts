@@ -8,7 +8,9 @@ import {
   type CredentialKind,
   type DaemonCommandClass,
   type IdentityProviderFailure,
+  type IdentityAdminSnapshot,
   type PeopleRoster,
+  type PersonRegistry,
   type PersonProfile,
   type RolePolicy
 } from "./types.ts";
@@ -53,20 +55,36 @@ export function peopleRosterFromDocument(body: string): PeopleRoster {
     resolveCredential: (credential, providerId) => {
       const person = peopleByCredential.get(credentialKey(credential));
       if (!person) return credentialResolutionFailure(providerId, "credential_unknown", "Credential is not bound to a person.", credential);
-      if (person.disabled) return credentialResolutionFailure(providerId, "person_disabled", `Person is disabled: ${person.personId}`, credential);
       return {
         ok: true,
-        actor: {
-          personId: person.personId,
-          displayName: person.displayName,
-          ...(person.primaryEmail ? { primaryEmail: person.primaryEmail } : {}),
-          roles: person.roles,
-          resolvedCredential: credential,
-          providerId
-        }
+        personId: person.personId,
+        providerId,
+        credential,
+        ...(person.primaryEmail ? { primaryEmail: person.primaryEmail } : {})
       };
     },
     roleAllows: (roleId, commandClass) => rolesById.get(roleId)?.commandClasses.includes(commandClass) ?? false
+  };
+}
+
+export function makePeopleRosterIdentityAdminSnapshot(
+  roster: PeopleRoster,
+  registry: PersonRegistry
+): IdentityAdminSnapshot {
+  const bindings = new Map(roster.people.map((person) => [person.personId, person]));
+  return {
+    people: registry.people.map((person) => {
+      const binding = bindings.get(person.personId);
+      return {
+        personId: person.personId,
+        displayName: person.displayName,
+        ...(binding?.primaryEmail ? { primaryEmail: binding.primaryEmail } : {}),
+        roles: binding?.roles ?? [],
+        disabled: person.disabled ?? false,
+        credentials: binding?.credentials ?? []
+      };
+    }),
+    roles: roster.roles
   };
 }
 
@@ -94,7 +112,6 @@ function validateRoster(people: ReadonlyArray<PersonProfile>, roles: ReadonlyArr
     if (!person.personId) throw new Error("personId is required");
     if (personIds.has(person.personId)) throw new Error(`duplicate personId: ${person.personId}`);
     personIds.add(person.personId);
-    if (!person.displayName) throw new Error(`displayName is required for ${person.personId}`);
     for (const roleId of person.roles) {
       if (!roleIds.has(roleId)) throw new Error(`person ${person.personId} references unknown role ${roleId}`);
     }

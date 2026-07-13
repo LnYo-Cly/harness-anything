@@ -7,6 +7,8 @@ import {
   createJsonRpcProtocolServer,
   currentDaemonProtocolVersion,
   jsonRpcMethodContracts,
+  personRegistryFromDocument,
+  type IdentityProvider,
   type JsonRpcResponse
 } from "../src/index.ts";
 
@@ -21,11 +23,30 @@ test("daemon method registry exposes repo.doc.sync.submit as an active repo writ
   assert.equal(contract.outputSchemaId, "daemon.doc-sync-submit-result/v1");
 });
 
-test("repo.doc.sync.submit appends dual-axis actor fields without inventing a human anchor", async () => {
+test("repo.doc.sync.submit appends the authenticated principal and executor axes", async () => {
   const events: Record<string, any>[] = [];
+  const identityProvider: IdentityProvider = {
+    providerId: "doc-sync-test/v1",
+    authenticate: async () => ({
+      ok: true,
+      personId: "person_editor",
+      providerId: "doc-sync-test/v1",
+      credential: { kind: "api-token", issuer: "test", subject: "editor-token" }
+    }),
+    authorize: async () => ({ ok: true })
+  };
   const server = createJsonRpcProtocolServer({
     daemonId: "daemon-test",
     repos: [{ repoId: "canonical", canonicalRoot: "/tmp/canonical" }],
+    authContext: { transportKind: "unix-socket" },
+    identityProvider,
+    personRegistry: personRegistryFromDocument([
+      "schema: harness-persons/v1",
+      "people:",
+      "  - personId: person_editor",
+      "    displayName: Editor",
+      ""
+    ].join("\n")),
     appendRuntimeEvent: async (input) => {
       events.push(input as Record<string, any>);
     },
@@ -65,7 +86,10 @@ test("repo.doc.sync.submit appends dual-axis actor fields without inventing a hu
 
   assert.equal(receipt.ok, true);
   assert.equal(receipt.command, "repo.doc.sync.submit");
-  assert.equal(events.length, 0);
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0]?.actor?.principal, { kind: "person", personId: "person_editor" });
+  assert.equal(events[0]?.actor?.executor, null);
+  assert.equal("responsibleHuman" in events[0].actor, false);
 });
 
 function emptyLocalController(): LocalControllerService {

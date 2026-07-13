@@ -18,9 +18,15 @@ import { failureReceipt, serviceResultReceipt, successReceipt } from "./receipt-
 import { isJsonObject, type JsonObject, type JsonRpcId, type JsonRpcRequest, type JsonRpcResponse, type JsonValue } from "./json-rpc-types.ts";
 import { readTaskHolderExecutor, readTaskHolderExecutorForEvent } from "./task-holder-payload.ts";
 import { commandRootMismatch, validateForcedCommandRoot } from "./forced-command-root.ts";
+import { resolveIdentityActorForMethod } from "./identity-dispatch.ts";
 import type { DaemonAuthenticationContext } from "../transport/auth-context.ts";
-import { authorizeActorForMethod } from "../identity/authorization.ts";
-import { actorStampJson, type AuthenticatedActor, type IdentityProvider, type PeopleRoster } from "../identity/types.ts";
+import {
+  actorStampJson,
+  type AuthenticatedActor,
+  type IdentityAdminSnapshot,
+  type IdentityProvider,
+  type PersonRegistry
+} from "../identity/types.ts";
 
 export interface DaemonRepoNamespace {
   readonly repoId: string;
@@ -77,7 +83,8 @@ export interface JsonRpcServerOptions {
   readonly leaseEnforcementEnabled?: (repo: DaemonRepoNamespace) => boolean;
   readonly authContext?: DaemonAuthenticationContext;
   readonly identityProvider?: IdentityProvider;
-  readonly peopleRoster?: PeopleRoster;
+  readonly personRegistry?: PersonRegistry;
+  readonly identityAdminSnapshot?: IdentityAdminSnapshot;
   readonly appendRuntimeEvent?: (input: RuntimeEventAppendInput, context?: DaemonRepoServiceContext) => Promise<void>;
 }
 
@@ -144,7 +151,7 @@ async function handleRequest(
   const repoRuntimeFailure = validateRepoRuntime(effectiveContract, repo, options);
   if (repoRuntimeFailure) return response(repoRuntimeFailure);
 
-  const actorResult = await resolveActor(effectiveContract, options);
+  const actorResult = await resolveIdentityActorForMethod(effectiveContract, options);
   if (actorResult && !actorResult.ok) {
     const receipt = failureReceipt(request.method, actorResult.code, actorResult.message, {
       providerId: actorResult.providerId,
@@ -154,8 +161,12 @@ async function handleRequest(
     return response(receipt);
   }
   const actor = actorResult?.actor;
-  if (actor && options.peopleRoster) {
-    const authz = authorizeActorForMethod(actor, effectiveContract, options.peopleRoster);
+  if (actor && options.identityProvider) {
+    const authz = await options.identityProvider.authorize({
+      personId: actor.personId,
+      action: { method: effectiveContract.method, commandClass: effectiveContract.commandClass },
+      ...(repo ? { resource: { repoId: repo.repoId, canonicalRoot: repo.canonicalRoot } } : {})
+    });
     if (!authz.ok) {
       await appendCommandEvent(options, params, effectiveContract, "failed", authz.message, authz.code, actor, repo);
       return response(stampReceipt(failureReceipt(request.method, authz.code, authz.message, {
@@ -392,41 +403,16 @@ function withEffectiveCommandClass(contract: JsonRpcMethodContract, params: Json
   return commandClass ? { ...contract, commandClass } : { ...contract };
 }
 
-async function resolveActor(
-  contract: JsonRpcMethodContract,
-  options: JsonRpcServerOptions
-): Promise<{ readonly ok: true; readonly actor: AuthenticatedActor } | Awaited<ReturnType<IdentityProvider["resolveActor"]>> | undefined> {
-  const authContext = options.authContext ?? { transportKind: "unix-socket" } satisfies DaemonAuthenticationContext;
-  if (!options.identityProvider) {
-    return authContext.sshForcedCommand
-      ? {
-          ok: false,
-          code: "provider_unavailable",
-          providerId: "transport-derived/v1",
-          message: "SSH forced-command authentication requires people.yaml roster validation."
-        }
-      : undefined;
-  }
-  return options.identityProvider.resolveActor({
-    authContext,
-    command: {
-      method: contract.method,
-      namespace: contract.namespace,
-      requiresRepo: contract.requiresRepo
-    }
-  });
-}
-
 function handleAdminMethod(
   contract: JsonRpcMethodContract,
   options: JsonRpcServerOptions
 ): ReturnType<typeof successReceipt> | ReturnType<typeof failureReceipt> {
-  if (!options.peopleRoster) {
+  if (!options.identityAdminSnapshot) {
     return failureReceipt(contract.method, "people_roster_unavailable", "Admin identity methods require a loaded people roster.");
   }
   if (contract.method === "admin.people.list") {
     return successReceipt(contract.method, "listed people", {
-      items: options.peopleRoster.people.map((person) => ({
+      items: options.identityAdminSnapshot.people.map((person) => ({
         personId: person.personId,
         displayName: person.displayName,
         ...(person.primaryEmail ? { primaryEmail: person.primaryEmail } : {}),
@@ -438,7 +424,7 @@ function handleAdminMethod(
   }
   if (contract.method === "admin.rbac.roles.list") {
     return successReceipt(contract.method, "listed RBAC roles", {
-      items: options.peopleRoster.roles.map((role) => ({
+      items: options.identityAdminSnapshot.roles.map((role) => ({
         roleId: role.roleId,
         commandClasses: [...role.commandClasses]
       }))
