@@ -20,31 +20,32 @@
   --color-border: oklch(0.35 0.01 285);
   --color-border-strong: oklch(0.45 0.012 285);
   --color-text: oklch(0.94 0.004 285);
-  --color-text-muted: oklch(0.74 0.01 285);
-  --color-text-faint: oklch(0.62 0.012 285);
+  --color-text-muted: oklch(0.80 0.01 285);
+  --color-text-faint: oklch(0.72 0.01 285);
 
-  /* coordinationStatus 六色 + unknown，等亮度 OKLch */
-  --color-status-planned: oklch(0.72 0.03 285);
-  --color-status-active: oklch(0.72 0.14 250);
-  --color-status-blocked: oklch(0.75 0.14 75);
-  --color-status-in-review: oklch(0.72 0.14 305);
-  --color-status-done: oklch(0.74 0.14 150);
-  --color-status-cancelled: oklch(0.55 0.01 285);
-  --color-status-unknown: oklch(0.70 0.12 25);
+  /* coordinationStatus 六色 + unknown，等亮度 OKLch（L≈0.78；cancelled 中性） */
+  --color-status-planned: oklch(0.78 0.03 285);
+  --color-status-active: oklch(0.78 0.14 250);
+  --color-status-blocked: oklch(0.78 0.14 75);
+  --color-status-in-review: oklch(0.78 0.14 305);
+  --color-status-done: oklch(0.78 0.14 150);
+  --color-status-cancelled: oklch(0.68 0.02 285);
+  --color-status-unknown: oklch(0.78 0.12 25);
 
   /* 唯一行动强调色：closeoutReadiness=ready 与主操作 */
   --color-accent: oklch(0.80 0.13 195);
   --color-accent-fg: oklch(0.18 0.02 195);
 
-  /* freshness 通道 */
-  --color-stale: oklch(0.75 0.12 75);
-  --color-danger: oklch(0.65 0.18 25);
+  /* freshness / 语义成功 / 危险 */
+  --color-stale: oklch(0.78 0.12 75);
+  --color-danger: oklch(0.72 0.17 25);
+  --color-success: oklch(0.80 0.13 150);
 
   /* 关系语义轴(dec_01KXA7811SVVT8P66HNDFZQ7DF CH4):权威/证据/执行/松关联 */
-  --color-axis-authority: oklch(0.72 0.14 250);
-  --color-axis-evidence: oklch(0.75 0.12 75);
-  --color-axis-execution: oklch(0.74 0.14 150);
-  --color-axis-assoc: oklch(0.62 0.012 285);
+  --color-axis-authority: oklch(0.78 0.14 250);
+  --color-axis-evidence: oklch(0.78 0.12 75);
+  --color-axis-execution: oklch(0.78 0.14 150);
+  --color-axis-assoc: oklch(0.72 0.01 285);
 }
 
 /*
@@ -59,26 +60,28 @@ html[data-theme="light"] {
   --color-border-strong: oklch(0.81 0.006 285);
   --color-text: oklch(0.23 0.006 285);
   --color-text-muted: oklch(0.46 0.008 285);
-  --color-text-faint: oklch(0.61 0.008 285);
+  --color-text-faint: oklch(0.52 0.008 285);
 
+  /* 亮色状态色：压 L 使 vs bg ≥4.5:1（WCAG AA） */
   --color-status-planned: oklch(0.52 0.03 285);
-  --color-status-active: oklch(0.54 0.16 250);
-  --color-status-blocked: oklch(0.57 0.13 75);
-  --color-status-in-review: oklch(0.54 0.16 305);
-  --color-status-done: oklch(0.56 0.14 150);
-  --color-status-cancelled: oklch(0.6 0.01 285);
-  --color-status-unknown: oklch(0.55 0.15 25);
+  --color-status-active: oklch(0.52 0.16 250);
+  --color-status-blocked: oklch(0.52 0.14 75);
+  --color-status-in-review: oklch(0.52 0.16 305);
+  --color-status-done: oklch(0.50 0.14 150);
+  --color-status-cancelled: oklch(0.50 0.02 285);
+  --color-status-unknown: oklch(0.52 0.15 25);
 
-  --color-accent: oklch(0.58 0.12 195);
+  --color-accent: oklch(0.48 0.12 195);
   --color-accent-fg: oklch(0.99 0.005 195);
 
-  --color-stale: oklch(0.57 0.12 75);
-  --color-danger: oklch(0.54 0.19 25);
+  --color-stale: oklch(0.52 0.12 75);
+  --color-danger: oklch(0.52 0.19 25);
+  --color-success: oklch(0.48 0.13 150);
 
   /* 关系语义轴 — 亮色主题保持色相一致,仅调亮度 */
-  --color-axis-authority: oklch(0.54 0.16 250);
-  --color-axis-evidence: oklch(0.57 0.12 75);
-  --color-axis-execution: oklch(0.56 0.14 150);
+  --color-axis-authority: oklch(0.52 0.16 250);
+  --color-axis-evidence: oklch(0.52 0.12 75);
+  --color-axis-execution: oklch(0.50 0.14 150);
   --color-axis-assoc: oklch(0.46 0.012 285);
 }
 
@@ -90,25 +93,39 @@ body {
   font-size: var(--ui-font-body);
 }
 
+/*
+ * 字阶 token（CJK 底线：中文 ≥12px；micro 仅 mono id）
+ * micro:11 / meta:12 / body:14 / title:16 / heading:20 / prose:15
+ */
 html {
-  --ui-font-meta: 13px;
-  --ui-font-body: 15px;
-  --ui-font-title: 18px;
+  --ui-font-micro: 11px;
+  --ui-font-meta: 12px;
+  --ui-font-body: 14px;
+  --ui-font-title: 16px;
   --ui-font-heading: 20px;
+  --ui-font-prose: 15px;
 }
 
 html[data-ui-scale="compact"] {
+  --ui-font-micro: 11px;
   --ui-font-meta: 12px;
-  --ui-font-body: 14px;
-  --ui-font-title: 17px;
+  --ui-font-body: 13px;
+  --ui-font-title: 15px;
   --ui-font-heading: 18px;
+  --ui-font-prose: 14px;
 }
 
 html[data-ui-scale="comfortable"] {
-  --ui-font-meta: 14px;
-  --ui-font-body: 16px;
-  --ui-font-title: 20px;
+  --ui-font-micro: 12px;
+  --ui-font-meta: 13px;
+  --ui-font-body: 15px;
+  --ui-font-title: 18px;
   --ui-font-heading: 22px;
+  --ui-font-prose: 16px;
+}
+
+.ui-micro {
+  font-size: var(--ui-font-micro);
 }
 
 .ui-meta {
@@ -127,6 +144,10 @@ html[data-ui-scale="comfortable"] {
   font-size: var(--ui-font-heading);
 }
 
+.ui-prose {
+  font-size: var(--ui-font-prose);
+}
+
 ::selection {
   background: oklch(0.45 0.08 250);
 }
@@ -137,9 +158,10 @@ html[data-theme="light"] ::selection {
 
 /* 文档阅读区排版（react-markdown 输出） */
 .prose-harness {
-  font-size: var(--ui-font-body);
-  line-height: 1.7;
+  font-size: var(--ui-font-prose);
+  line-height: 1.75;
   color: var(--color-text);
+  max-width: 42rem;
 }
 .prose-harness h1 {
   font-size: var(--ui-font-heading);
@@ -154,12 +176,12 @@ html[data-theme="light"] ::selection {
 }
 .prose-harness p {
   margin: 0.6rem 0;
-  color: var(--color-text-muted);
+  color: var(--color-text);
 }
 .prose-harness ul {
   padding-left: 1.25rem;
   list-style: disc;
-  color: var(--color-text-muted);
+  color: var(--color-text);
 }
 .prose-harness li {
   margin: 0.25rem 0;
@@ -210,7 +232,7 @@ html[data-theme="light"] ::selection {
   border-left: 2px solid var(--color-border-strong);
   padding-left: 1rem;
   margin: 0.75rem 0;
-  color: var(--color-text-faint);
+  color: var(--color-text-muted);
 }
 .prose-harness input[type="checkbox"] {
   accent-color: var(--color-accent);
