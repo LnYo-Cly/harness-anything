@@ -207,6 +207,14 @@ export function readAttributionProjection(
   return runSqlite(projectionPath, Effect.flatMap(SqlClient.SqlClient, readAttributionProjectionRows));
 }
 
+export function countAttributionProjectionRows(projectionPath: string): number {
+  return runSqlite(projectionPath, Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const [record] = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count FROM attribution_events`;
+    return Number(record?.count ?? 0);
+  }));
+}
+
 function createAttributionTables(sql: SqlClient.SqlClient): Effect.Effect<unknown, unknown> {
   return Effect.gen(function* () {
     yield* sql`

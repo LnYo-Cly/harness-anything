@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,6 +10,7 @@ import { queryExecutionEvidencePageFromReadyGeneration } from "../../packages/ke
 import { captureProjectionSourceFingerprint } from "../../packages/kernel/src/projection/projection-source-snapshot.ts";
 import { readDeclaredSourceManifestRows } from "../../packages/kernel/src/projection/sqlite-declared-source-manifest.ts";
 import { updateTaskProjectionIncrementally } from "../../packages/kernel/src/projection/sqlite-task-incremental-projection.ts";
+import { createDaemonRuntime } from "../../packages/adapters/local/src/index.ts";
 
 const size = positiveInteger("--size", 1_000);
 const outputsPerExecution = positiveInteger("--outputs", 5);
@@ -25,6 +27,7 @@ try {
   const rebuildStart = performance.now();
   const rebuilt = rebuildTaskProjection({ rootDir });
   const rebuildMs = performance.now() - rebuildStart;
+  initAuthoredGit();
 
   const querySamples = sample(20, () => queryExecutions({ rootDir }));
   const executions = querySamples.value;
@@ -35,6 +38,15 @@ try {
   const readyGeneration = ensureProjectionGenerationReady({ rootDir }).ready;
   const readyEvidencePageSamples = sample(20, () => queryExecutionEvidencePageFromReadyGeneration(readyGeneration, { limit: 25 }));
   const readyEvidencePageP95 = percentile(readyEvidencePageSamples.samples, 0.95);
+  const daemonRuntime = createDaemonRuntime({ rootDir, materializerPollMs: false });
+  await daemonRuntime.start();
+  const daemonGenerationStarted = performance.now();
+  const daemonFirstEvidencePage = await daemonRuntime.queryExecutionEvidencePage({ limit: 25 });
+  const daemonGenerationReadyMs = performance.now() - daemonGenerationStarted;
+  const daemonEvidencePageSamples = await sampleAsync(20, () => daemonRuntime.queryExecutionEvidencePage({ limit: 25 }));
+  const daemonEvidencePageP95 = percentile(daemonEvidencePageSamples.samples, 0.95);
+  const daemonGeneration = daemonRuntime.status().projectionGeneration;
+  await daemonRuntime.stop();
   const evidencePagePayloadBytes = Buffer.byteLength(JSON.stringify(evidencePage), "utf8");
   const evidencePageVisibleItems = evidencePage.groups.length +
     evidencePage.groups.reduce((count, group) => count + group.executions.length, 0) +
@@ -68,6 +80,8 @@ try {
       queryExecutions: summarize(querySamples.samples),
       queryExecutionEvidencePage: summarize(evidencePageSamples.samples),
       queryExecutionEvidencePageFromReadyGeneration: summarize(readyEvidencePageSamples.samples),
+      queryExecutionEvidencePageFromDaemonGeneration: summarize(daemonEvidencePageSamples.samples),
+      daemonGenerationReady: rounded(daemonGenerationReadyMs),
       aggregateExecutions: summarize(aggregateSamples.samples),
       incrementalExecution: rounded(incrementalExecutionMs)
     },
@@ -87,13 +101,28 @@ try {
         : size === 5_000
           ? readyEvidencePageP95 <= 60
           : null,
-      oneThousandWarmQueryP95BudgetMs: size === 1_000 ? 100 : null,
-      warmQueryWithinBudget: size === 1_000
-        ? warmQueryP95 <= 100
-        : null,
-      oneThousandColdProjectionReadyBudgetMs: size === 1_000 ? 10_000 : null,
-      coldProjectionReadyWithinBudget: size === 1_000
-        ? rebuildMs + warmQueryP95 <= 10_000
+      daemonEvidencePageP95BudgetMs: size === 1_000 ? 15 : size === 5_000 ? 60 : null,
+      daemonEvidencePageWithinBudget: size === 1_000
+        ? daemonEvidencePageP95 <= 15
+        : size === 5_000
+          ? daemonEvidencePageP95 <= 60
+          : null,
+      daemonGenerationValidationRuns: daemonGeneration.validationRuns,
+      daemonGenerationFenceRuns: daemonGeneration.fenceRuns,
+      daemonGenerationReused: daemonGeneration.validationRuns === 1 && daemonGeneration.fenceRuns >= 22,
+      daemonFirstPageMatchesReadyPage: JSON.stringify(daemonFirstEvidencePage) === JSON.stringify(readyEvidencePageSamples.value),
+      legacyFullValidationWarmQueryP95Ms: rounded(warmQueryP95),
+      warmQueryWithinBudget: null,
+      coldProjectionBuildBudgetMs: size === 1_000 ? 3_000 : size === 5_000 ? 9_000 : null,
+      coldProjectionBuildWithinBudget: size === 1_000
+        ? rebuildMs <= 3_000
+        : size === 5_000
+          ? rebuildMs <= 9_000
+          : null,
+      coldFirstUsableMs: rounded(rebuildMs + daemonGenerationReadyMs + daemonEvidencePageP95),
+      coldFirstUsableBudgetMs: size === 1_000 || size === 5_000 ? 10_000 : null,
+      coldFirstUsableWithinBudget: size === 1_000 || size === 5_000
+        ? rebuildMs + daemonGenerationReadyMs + daemonEvidencePageP95 <= 10_000
         : null,
       incrementalExecutionMode: incremental.mode
     }
@@ -105,8 +134,11 @@ try {
       !result.assertions.evidencePagePayloadWithinBudget ||
       !result.assertions.evidencePageVisibleItemsWithinBudget ||
       result.assertions.readyEvidencePageWithinBudget === false ||
-      result.assertions.warmQueryWithinBudget === false ||
-      result.assertions.coldProjectionReadyWithinBudget === false ||
+      result.assertions.daemonEvidencePageWithinBudget === false ||
+      !result.assertions.daemonGenerationReused ||
+      !result.assertions.daemonFirstPageMatchesReadyPage ||
+      result.assertions.coldProjectionBuildWithinBudget === false ||
+      result.assertions.coldFirstUsableWithinBudget === false ||
       incremental.mode !== "incremental") {
     process.exitCode = 1;
   }
@@ -206,6 +238,27 @@ function sample(iterations, run) {
     samples.push(performance.now() - started);
   }
   return { samples, value };
+}
+
+async function sampleAsync(iterations, run) {
+  await run();
+  const samples = [];
+  let value;
+  for (let index = 0; index < iterations; index += 1) {
+    const started = performance.now();
+    value = await run();
+    samples.push(performance.now() - started);
+  }
+  return { samples, value };
+}
+
+function initAuthoredGit() {
+  const authoredRoot = path.join(rootDir, "harness");
+  execFileSync("git", ["-C", authoredRoot, "init", "-b", "master"], { stdio: "ignore" });
+  execFileSync("git", ["-C", authoredRoot, "config", "user.name", "Harness Benchmark"], { stdio: "ignore" });
+  execFileSync("git", ["-C", authoredRoot, "config", "user.email", "benchmark@example.test"], { stdio: "ignore" });
+  execFileSync("git", ["-C", authoredRoot, "add", "-A"], { stdio: "ignore" });
+  execFileSync("git", ["-C", authoredRoot, "commit", "-m", "fixture"], { stdio: "ignore" });
 }
 
 function summarize(samples) {

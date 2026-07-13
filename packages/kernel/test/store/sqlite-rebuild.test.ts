@@ -7,6 +7,9 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Effect, Option } from "effect";
 import { auditTaskProvenance, checkTaskProjection, hashTaskProjectionRows, queryDecisionProjection, queryTaskExecutionTrace, readTaskProjection, rebuildTaskProjection } from "../../src/index.ts";
+import { replaceAttributionProjectionRows } from "../../src/projection/sqlite-attribution-projection.ts";
+import { replaceExecutionEvidenceProjectionRows } from "../../src/projection/sqlite-execution-evidence-projection.ts";
+import { writeProjectionDatabase } from "../../src/projection/sqlite-projection-store.ts";
 import { makeJournaledWriteCoordinator, makeMarkdownArtifactStore } from "../../src/store/index.ts";
 import { docWrite, withTempStore } from "./helpers.ts";
 
@@ -89,6 +92,66 @@ test("SQLite task projection rebuild is deterministic after cache deletion", () 
     assert.equal(second[0]?.sourcePath, "harness/tasks/task-1/INDEX.md");
     assert.equal(second[0]?.source, "local-document");
     assert.equal(second[1]?.closeoutReadiness, "ready");
+  });
+});
+
+test("SQLite projection full-generation materialization runs inside one transaction", () => {
+  withTempStore((rootDir) => {
+    const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
+
+    writeProjectionDatabase(
+      projectionPath,
+      [],
+      [],
+      { sourceHash: "source", rowsHash: "rows" },
+      undefined,
+      undefined,
+      (sql) => Effect.gen(function* () {
+        const nestedBegin = yield* Effect.either(sql`BEGIN IMMEDIATE`);
+        if (nestedBegin._tag === "Right") {
+          return yield* Effect.fail(new Error("full-generation materialization was not transaction-scoped"));
+        }
+        yield* replaceExecutionEvidenceProjectionRows(sql, []);
+        yield* replaceAttributionProjectionRows(sql, []);
+      })
+    );
+
+    const db = new DatabaseSync(projectionPath, { readOnly: true });
+    try {
+      assert.equal(db.prepare("SELECT value FROM projection_meta WHERE key = 'sourceHash'").get()?.value, "source");
+    } finally {
+      db.close();
+    }
+  });
+});
+
+test("SQLite projection full-generation failure does not replace the published database", () => {
+  withTempStore((rootDir) => {
+    writeIndex(rootDir, "task-1", "Published Task", "active");
+    const publishedRows = rebuildTaskProjection({ rootDir }).rows;
+    const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
+    const publishedBytes = readFileSync(projectionPath);
+
+    assert.throws(
+      () => writeProjectionDatabase(
+        projectionPath,
+        [{ ...publishedRows[0]!, title: "Unpublished Task" }],
+        [],
+        { sourceHash: "unpublished-source", rowsHash: "unpublished-rows" },
+        undefined,
+        undefined,
+        () => Effect.fail(new Error("forced supplemental materialization failure"))
+      ),
+      /forced supplemental materialization failure/
+    );
+
+    assert.deepEqual(readFileSync(projectionPath), publishedBytes);
+    const db = new DatabaseSync(projectionPath, { readOnly: true });
+    try {
+      assert.equal(db.prepare("SELECT title FROM task_projection WHERE task_id = 'task-1'").get()?.title, "Published Task");
+    } finally {
+      db.close();
+    }
   });
 });
 

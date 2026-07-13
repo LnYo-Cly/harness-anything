@@ -15,6 +15,11 @@ export type { Locale, TemplateRef, TemplateDocument } from "./template-library.t
 export { VersionControlSystem, VcsCommandError } from "./version-control-system.ts";
 export type { VcsCommitAuthor, VersionControlSystem as VersionControlSystemPort } from "./version-control-system.ts";
 
+export type {
+  ProjectionSourceFence,
+  ProjectionSourceFenceReader
+} from "./projection-source-fence.ts";
+
 export { CurrentSessionProbe } from "./current-session-probe.ts";
 export type {
   CurrentSessionProbe as CurrentSessionProbePort,

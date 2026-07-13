@@ -1,6 +1,7 @@
 import path from "node:path";
 import { Effect } from "effect";
 import type { RecoveryReport } from "../ports/write-coordinator.ts";
+import type { ProjectionSourceFenceFactory } from "../ports/projection-source-fence.ts";
 import type { WriteError } from "../domain/index.ts";
 import {
   createHarnessRuntimeContext,
@@ -20,6 +21,16 @@ import {
 import { acquireDaemonGlobalLock, type DaemonGlobalLock } from "./write-journal-locks.ts";
 import { makeJournaledWriteCoordinator, makeOperationalJournaledWriteCoordinator, recoverJournaledWrites } from "./write-journal-coordinator.ts";
 import type { OperationalActor } from "./write-journal-types.ts";
+import { writeOpTouchedPaths } from "./write-journal-operations.ts";
+import {
+  createDaemonProjectionGenerationManager,
+  type DaemonProjectionGenerationManager,
+  type DaemonProjectionGenerationSnapshot
+} from "./daemon-projection-generation-manager.ts";
+import type {
+  ExecutionEvidencePage,
+  ExecutionEvidencePageQuery
+} from "../projection/sqlite-execution-evidence-reader.ts";
 
 const defaultDaemonOperationalActor: OperationalActor = { scope: "operational", kind: "system", id: "daemon-runtime" };
 const defaultLockTtlMs = 60_000;
@@ -44,6 +55,7 @@ export interface DaemonRuntimeOptions {
   readonly maxInteractiveOpsPerCommit?: number;
   readonly materializerPollMs?: number | false;
   readonly materializerMaxBranchesPerBatch?: number;
+  readonly projectionSourceFenceFactory?: ProjectionSourceFenceFactory;
   readonly reservationReconciler?: (input: {
     readonly rootDir: string;
     readonly layoutOverrides?: HarnessLayoutOverrides;
@@ -57,6 +69,7 @@ export interface DaemonRuntimeStatus {
   readonly lockOwnerToken?: string;
   readonly queue: DaemonQueueSnapshot;
   readonly lastRecovery?: RecoveryReport;
+  readonly projectionGeneration: DaemonProjectionGenerationSnapshot;
 }
 
 export interface HarnessDaemonRuntime {
@@ -66,6 +79,7 @@ export interface HarnessDaemonRuntime {
   readonly enqueueInteractiveWrite: (request: InteractiveWriteRequest) => Promise<InteractiveWriteReceipt>;
   readonly enqueueBackgroundBatch: <Result>(request: BackgroundBatchRequest<Result>) => Promise<Result>;
   readonly enqueueMaterializerBatch: () => Promise<LedgerMaterializerReport>;
+  readonly queryExecutionEvidencePage: (query: ExecutionEvidencePageQuery) => Promise<ExecutionEvidencePage>;
 }
 
 export type DaemonRepoRuntimeState = "attached" | "unavailable" | "detaching" | "detached";
@@ -117,7 +131,8 @@ export function createDaemonRuntime(options: DaemonRuntimeOptions): HarnessDaemo
     status: () => toDaemonRuntimeStatus(context.status()),
     enqueueInteractiveWrite: (request) => context.enqueueInteractiveWrite(request),
     enqueueBackgroundBatch: (request) => context.enqueueBackgroundBatch(request),
-    enqueueMaterializerBatch: () => context.enqueueMaterializerBatch()
+    enqueueMaterializerBatch: () => context.enqueueMaterializerBatch(),
+    queryExecutionEvidencePage: (query) => context.queryExecutionEvidencePage(query)
   };
 }
 
@@ -211,6 +226,8 @@ class DaemonRepoRuntimeContext implements HarnessDaemonRuntime {
   private readonly materializerMaxBranchesPerBatch: number;
   private readonly queue: DaemonWriteQueue;
   private readonly options: DaemonRepoRuntimeOptions;
+  private projectionGeneration: DaemonProjectionGenerationManager;
+  private projectionGenerationClosed = false;
   private lock: DaemonGlobalLock | undefined;
   private lastRecovery: RecoveryReport | undefined;
   private lastError: string | undefined;
@@ -231,6 +248,7 @@ class DaemonRepoRuntimeContext implements HarnessDaemonRuntime {
       options.maxInteractiveOpsPerCommit ?? defaultMaxInteractiveOpsPerCommit,
       options.interactiveMicroBatchMs ?? defaultInteractiveMicroBatchMs
     );
+    this.projectionGeneration = this.createProjectionGenerationManager();
   }
 
   start(): Promise<DaemonRuntimeStatus> {
@@ -239,6 +257,11 @@ class DaemonRepoRuntimeContext implements HarnessDaemonRuntime {
 
   async attach(input: { readonly failOnError: boolean }): Promise<DaemonRepoRuntimeStatus> {
     if (this.lock && this.state === "attached") return this.status();
+    if (this.projectionGenerationClosed) {
+      this.projectionGeneration = this.createProjectionGenerationManager();
+      this.projectionGenerationClosed = false;
+    }
+    this.projectionGeneration.reset();
     try {
       this.lock = acquireDaemonGlobalLock(this.rootDir, this.runtimeContext, this.layout.journalPath, this.operationalActor, this.lockTtlMs);
       this.lastRecovery = Effect.runSync(recoverJournaledWrites({
@@ -256,7 +279,7 @@ class DaemonRepoRuntimeContext implements HarnessDaemonRuntime {
       this.startMaterializerTimer();
       return this.status();
     } catch (error) {
-      this.releaseStartedParts();
+      await this.releaseStartedParts();
       this.state = "unavailable";
       this.lastError = describeError(error);
       if (input.failOnError) throw error;
@@ -266,10 +289,18 @@ class DaemonRepoRuntimeContext implements HarnessDaemonRuntime {
 
   async stop(): Promise<void> {
     this.state = "detaching";
+    this.projectionGeneration.reset();
     this.stopMaterializerTimer();
     await this.queue.idle();
+    let projectionCloseError: unknown;
+    try {
+      await this.closeProjectionGenerationManager();
+    } catch (error) {
+      projectionCloseError = error;
+    }
     try {
       this.lock?.release();
+      if (projectionCloseError !== undefined) throw projectionCloseError;
       this.lastError = undefined;
     } catch (error) {
       this.lastError = describeError(error);
@@ -290,6 +321,7 @@ class DaemonRepoRuntimeContext implements HarnessDaemonRuntime {
       state: this.state,
       ...(this.lock ? { lockPath: path.relative(this.rootDir, this.lock.path).split(path.sep).join("/"), lockOwnerToken: this.lock.ownerToken } : {}),
       queue: this.queue.snapshot(),
+      projectionGeneration: this.projectionGeneration.snapshot(),
       ...(this.lastRecovery ? { lastRecovery: this.lastRecovery } : {}),
       ...(this.lastError ? { lastError: this.lastError } : {}),
       ...(this.lastMaterializerError ? { lastMaterializerError: this.lastMaterializerError } : {})
@@ -298,11 +330,20 @@ class DaemonRepoRuntimeContext implements HarnessDaemonRuntime {
 
   enqueueInteractiveWrite(request: InteractiveWriteRequest): Promise<InteractiveWriteReceipt> {
     const started = this.requireAttached();
+    let touchedPaths: ReadonlyArray<string>;
+    try {
+      touchedPaths = request.ops.flatMap((op) => writeOpTouchedPaths(this.runtimeContext, op));
+    } catch (error) {
+      this.lastError = describeError(error);
+      return Promise.reject(error);
+    }
+    const projectionWrite = this.projectionGeneration.beginCanonicalWrite(touchedPaths);
     return this.queue.enqueueInteractive(request, (batch) => this.makeStartedCoordinator(started, batch))
       .catch((error: unknown) => {
         this.lastError = describeError(error);
         throw error;
-      });
+      })
+      .finally(() => projectionWrite.settle());
   }
 
   enqueueBackgroundBatch<Result>(request: BackgroundBatchRequest<Result>): Promise<Result> {
@@ -320,15 +361,25 @@ class DaemonRepoRuntimeContext implements HarnessDaemonRuntime {
       priority: "background",
       run: () => {
         const started = this.requireAttached();
-        return runLedgerMaterializer(this.runtimeContext, {
+        const report = runLedgerMaterializer(this.runtimeContext, {
           heldGlobalLock: started.lock,
           maxBranches: this.materializerMaxBranchesPerBatch
         });
+        if (report.projectionRebuilt) {
+          this.projectionGeneration.invalidate();
+        }
+        return report;
       }
     }).catch((error: unknown) => {
       this.lastMaterializerError = describeError(error);
+      this.projectionGeneration.invalidate();
       throw error;
     });
+  }
+
+  queryExecutionEvidencePage(query: ExecutionEvidencePageQuery): Promise<ExecutionEvidencePage> {
+    this.requireAttached();
+    return this.projectionGeneration.queryExecutionEvidencePage(query);
   }
 
   private requireAttached(): { readonly lock: DaemonGlobalLock } {
@@ -386,14 +437,38 @@ class DaemonRepoRuntimeContext implements HarnessDaemonRuntime {
     this.materializerTimer = undefined;
   }
 
-  private releaseStartedParts(): void {
+  private async releaseStartedParts(): Promise<void> {
     this.stopMaterializerTimer();
+    this.projectionGeneration.reset();
+    try {
+      await this.closeProjectionGenerationManager();
+    } catch {
+      // Attach failure reporting should keep the original attach error.
+    }
     try {
       this.lock?.release();
     } catch {
       // Attach failure reporting should keep the original attach error.
     }
     this.lock = undefined;
+  }
+
+  private createProjectionGenerationManager(): DaemonProjectionGenerationManager {
+    return createDaemonProjectionGenerationManager({
+      rootDir: this.rootDir,
+      ...(this.options.layoutOverrides ? { layoutOverrides: this.options.layoutOverrides } : {}),
+      ...(this.options.projectionSourceFenceFactory ? {
+        sourceFence: this.options.projectionSourceFenceFactory({
+          rootDir: this.rootDir,
+          ...(this.options.layoutOverrides ? { layoutOverrides: this.options.layoutOverrides } : {})
+        })
+      } : {})
+    });
+  }
+
+  private closeProjectionGenerationManager(): Promise<void> {
+    if (!this.projectionGenerationClosed) this.projectionGenerationClosed = true;
+    return this.projectionGeneration.close();
   }
 }
 
@@ -403,6 +478,7 @@ function toDaemonRuntimeStatus(status: DaemonRepoRuntimeStatus): DaemonRuntimeSt
     rootDir: status.rootDir,
     ...(status.lockPath ? { lockPath: status.lockPath, lockOwnerToken: status.lockOwnerToken } : {}),
     queue: status.queue,
+    projectionGeneration: status.projectionGeneration,
     ...(status.lastRecovery ? { lastRecovery: status.lastRecovery } : {})
   };
 }
@@ -415,7 +491,8 @@ function mergeRepoDefaults(repo: DaemonRepoRuntimeOptions, options: MultiRepoDae
     ...(repo.interactiveMicroBatchMs !== undefined ? {} : options.interactiveMicroBatchMs !== undefined ? { interactiveMicroBatchMs: options.interactiveMicroBatchMs } : {}),
     ...(repo.maxInteractiveOpsPerCommit !== undefined ? {} : options.maxInteractiveOpsPerCommit !== undefined ? { maxInteractiveOpsPerCommit: options.maxInteractiveOpsPerCommit } : {}),
     ...(repo.materializerPollMs !== undefined ? {} : options.materializerPollMs !== undefined ? { materializerPollMs: options.materializerPollMs } : {}),
-    ...(repo.materializerMaxBranchesPerBatch !== undefined ? {} : options.materializerMaxBranchesPerBatch !== undefined ? { materializerMaxBranchesPerBatch: options.materializerMaxBranchesPerBatch } : {})
+    ...(repo.materializerMaxBranchesPerBatch !== undefined ? {} : options.materializerMaxBranchesPerBatch !== undefined ? { materializerMaxBranchesPerBatch: options.materializerMaxBranchesPerBatch } : {}),
+    ...(repo.projectionSourceFenceFactory ? {} : options.projectionSourceFenceFactory ? { projectionSourceFenceFactory: options.projectionSourceFenceFactory } : {})
   };
 }
 

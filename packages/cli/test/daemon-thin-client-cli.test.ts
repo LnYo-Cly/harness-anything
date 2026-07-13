@@ -1,6 +1,6 @@
 // harness-test-tier: integration
 import assert from "node:assert/strict";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -25,9 +25,16 @@ import {
   writeForcedCommandTeamRoster,
   writePeopleRoster
 } from "./helpers/forced-command-daemon.ts";
+import {
+  closeServer,
+  connectSocket,
+  connectSocketWhenReady,
+  listen,
+  runDaemonCliProcess,
+  spawnDaemonCli
+} from "./helpers/daemon-transport.ts";
 
 const expectedCliVersion = readCliPackageVersion();
-const cliEntry = path.resolve("packages/cli/src/index.ts");
 
 test("daemon client defaults to local while preserving an explicit direct bootstrap mode", () => {
   assert.equal(readDaemonClientConfig({}).mode, "local");
@@ -64,6 +71,37 @@ test("daemon connect reaches the already-running daemon instance", async () => {
     const data = details.data as Record<string, unknown>;
     assert.equal(data.daemonId, startStatus.daemonId);
     assert.equal(data.started, true);
+  });
+});
+
+test("persistent daemon connection prevents idle exit after a command settles", async () => {
+  await withTempRootAsync(async (rootDir) => {
+    const userRoot = defaultDaemonUserRoot(rootDir);
+    runRawJson(rootDir, ["init"], { HARNESS_DAEMON_MODE: "direct", HARNESS_DAEMON_USER_ROOT: userRoot });
+    const endpoint = path.join(rootDir, "idle-connection.sock");
+    const daemon = spawnDaemonCli(rootDir, ["daemon", "serve", "--socket", endpoint, "--idle-ms", "500"]);
+    const socket = await connectSocketWhenReady(endpoint);
+    const client = new JsonRpcLineClient(socket, socket);
+    try {
+      await client.request("protocol.hello", { protocolVersion: 1 });
+      const command = await client.request("repo.command.run", {
+        repo: { repoId: "canonical" },
+        payload: { command: { rootDir, json: true, action: { kind: "version" } } }
+      });
+      assert.equal(command.ok, true, JSON.stringify(command));
+
+      await delay(700);
+      const status = await client.request("repo.daemon.status", { repo: { repoId: "canonical" } });
+      assert.equal(status.ok, true, JSON.stringify(status));
+      assert.equal(((status.details as Record<string, unknown>).data as Record<string, unknown>).started, true);
+      const probe = await connectSocket(endpoint);
+      probe.destroy();
+    } finally {
+      client.close();
+      socket.destroy();
+      daemon.kill("SIGTERM");
+      stopDaemonQuietly(rootDir, userRoot);
+    }
   });
 });
 
@@ -624,53 +662,6 @@ function hermeticGitEnv(rootDir: string): NodeJS.ProcessEnv {
     HOME: path.join(rootDir, ".home"),
     GIT_CONFIG_GLOBAL: "/dev/null"
   };
-}
-
-function spawnDaemonCli(rootDir: string, args: ReadonlyArray<string>) {
-  return spawn(process.execPath, [cliEntry, "--root", rootDir, ...args], {
-    env: {
-      ...process.env,
-      HOME: path.join(rootDir, ".home"),
-      GIT_CONFIG_GLOBAL: "/dev/null",
-      HARNESS_DAEMON_MODE: "direct",
-      HARNESS_DAEMON_USER_ROOT: defaultDaemonUserRoot(rootDir)
-    },
-    stdio: ["pipe", "pipe", "pipe"]
-  });
-}
-
-function runDaemonCliProcess(
-  rootDir: string,
-  args: ReadonlyArray<string>,
-  stdin = ""
-): Promise<{ readonly code: number | null; readonly stdout: string; readonly stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawnDaemonCli(rootDir, args);
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
-    child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
-    child.once("error", reject);
-    child.once("close", (code) => resolve({ code, stdout, stderr }));
-    child.stdin.end(stdin);
-  });
-}
-
-function listen(server: net.Server, endpoint: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(endpoint, () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-}
-
-function closeServer(server: net.Server): Promise<void> {
-  if (!server.listening) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    server.close((error) => error ? reject(error) : resolve());
-  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
