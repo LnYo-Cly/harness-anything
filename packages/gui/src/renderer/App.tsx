@@ -1,107 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  Kanban,
-  FolderSimple,
-  SquaresFour,
-  Graph,
-  Scales,
-  Stack,
-  PlugsConnected,
-  GearSix,
-  CaretUpDown,
-  CloudSlash,
-  WarningCircle,
-  GitBranch,
-  FirstAidKit,
-  ClockCounterClockwise,
-  ClipboardText,
-} from "@phosphor-icons/react";
 import type { SnapshotStatus } from "./model/types.ts";
-import {
-  MOCK_PRESETS,
-  MOCK_ADAPTERS,
-  MOCK_EVENTS,
-} from "./model/mock.ts";
+import { MOCK_EVENTS } from "./model/mock.ts";
 import { ThemeProvider } from "./theme.tsx";
-import { HomeView } from "./views/HomeView.tsx";
-import { OverviewView } from "./views/OverviewView.tsx";
-import { BoardView } from "./views/BoardView.tsx";
-import { DecisionsView } from "./views/DecisionsView.tsx";
-import { DecisionPoolView } from "./views/DecisionPoolView.tsx";
-import { FactTriageView } from "./views/FactTriageView.tsx";
-import { ExecutionEvidenceView } from "./views/ExecutionEvidenceView.tsx";
-import { GraphView } from "./views/GraphView.tsx";
-import { GenealogyTimelineView } from "./views/GenealogyTimelineView.tsx";
-import { PresetsView } from "./views/PresetsView.tsx";
-import { AdaptersView } from "./views/AdaptersView.tsx";
-import { SettingsView } from "./views/SettingsView.tsx";
-import { TaskDetailView } from "./views/TaskDetailView.tsx";
 import { TaskPreviewDrawer } from "./components/TaskPreviewDrawer.tsx";
-import { ThemeToggle, NavButton, ProjectSummary, MockViewBanner } from "./components/shell-chrome.tsx";
+import { MockViewBanner } from "./components/shell-chrome.tsx";
+import { AppSidebar } from "./components/AppSidebar.tsx";
+import { ViewSwitch } from "./components/ViewSwitch.tsx";
 import {
   DEFAULT_TASK_FILTERS,
   applyTaskFilters,
   type TaskFilters,
 } from "./model/taskFilters.ts";
+import type { LaneGroupBy } from "./views/SwimlaneBoard.tsx";
 import { adaptProjectionRows, buildRealProject } from "./task-adapter.ts";
 import { useTasksQuery, useSetTaskStatusMutation } from "./task-data.ts";
 import { useTriadicProjectionQuery } from "./triadic-data.ts";
 import { useFavorites } from "./model/favorites.ts";
-import type { LaneGroupBy } from "./views/SwimlaneBoard.tsx";
-
-type ViewId =
-  | "home"
-  | "overview"
-  | "board"
-  | "decisions"
-  | "decisionPool"
-  | "factTriage"
-  | "executions"
-  | "graph"
-  | "genealogy"
-  | "presets"
-  | "adapters"
-  | "settings";
-
-// 这些视图的数据仍为 mock:preset/adapter 管理面无真实后端。进入时顶部显式挂 MOCK 横幅。
-const MOCK_BACKED_VIEWS: ReadonlySet<ViewId> = new Set([
-  "home",
-  "presets",
-  "adapters",
-]);
-
-// W2C:列表并入看板(第三种 layout),独立「列表」入口删除。
-const WORKSPACE_NAV: { id: ViewId; label: string; icon: React.ReactNode; isNew?: true }[] = [
-  { id: "overview", label: "总览", icon: <SquaresFour weight="duotone" /> },
-  { id: "board", label: "看板", icon: <Kanban weight="duotone" /> },
-  { id: "decisions", label: "决策批准", icon: <Scales weight="duotone" /> },
-  { id: "decisionPool", label: "决策池", icon: <GitBranch weight="duotone" /> },
-  { id: "factTriage", label: "事实分诊", icon: <FirstAidKit weight="duotone" /> },
-  { id: "executions", label: "执行证据", icon: <ClipboardText weight="duotone" />, isNew: true },
-  { id: "graph", label: "关系图", icon: <Graph weight="duotone" /> },
-  { id: "genealogy", label: "演化史", icon: <ClockCounterClockwise weight="duotone" /> },
-];
-
-const MANAGE_NAV: { id: ViewId; label: string; icon: React.ReactNode }[] = [
-  { id: "presets", label: "Preset / Vertical", icon: <Stack weight="duotone" /> },
-  { id: "adapters", label: "引擎 Adapter", icon: <PlugsConnected weight="duotone" /> },
-  { id: "settings", label: "设置", icon: <GearSix weight="duotone" /> },
-];
-
-const VIEW_LABEL: Record<ViewId, string> = {
-  home: "项目",
-  overview: "总览",
-  board: "看板",
-  decisions: "决策批准",
-  decisionPool: "决策池",
-  factTriage: "事实分诊",
-  executions: "执行证据",
-  graph: "关系图",
-  genealogy: "演化史",
-  presets: "Preset / Vertical",
-  adapters: "引擎 Adapter",
-  settings: "设置",
-};
+import { MOCK_BACKED_VIEWS, type ViewId } from "./shell-config.tsx";
 
 function AppShell() {
   const [view, setView] = useState<ViewId>("overview");
@@ -249,321 +164,60 @@ function AppShell() {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden md:flex-row">
-      <aside className="flex max-h-[42dvh] w-full shrink-0 flex-col overflow-y-auto border-b border-border bg-surface md:max-h-none md:w-56 md:overflow-visible md:border-r md:border-b-0">
-        <div className="flex items-center gap-2 px-3 pt-3 pb-1">
-          <span className="font-mono text-[11px] font-semibold tracking-wide text-text-muted">
-            HARNESS
-          </span>
-          <span
-            title="本地模式 · 未同步（V2：多端同步）"
-            className="inline-flex items-center gap-1 rounded border border-border px-1 py-px font-mono text-[10px] text-text-faint"
-          >
-            <CloudSlash weight="bold" />
-            本地
-          </span>
-          <div className="ml-auto">
-            <ThemeToggle />
-          </div>
-        </div>
-
-        <div className="px-3 pb-1">
-          {tasksQuery.isSuccess ? (
-            projectTasks.length > 0 ? (
-              <span
-                data-testid="real-task-summary"
-                className="block font-mono text-[11px] text-text-faint"
-              >
-                Active work · {activeCount} of {projectTasks.length} tasks
-              </span>
-            ) : (
-              <span
-                data-testid="task-empty-state"
-                className="block font-mono text-[11px] text-text-faint"
-              >
-                No task rows available from the local task bridge
-              </span>
-            )
-          ) : tasksQuery.isError ? (
-            <span className="block font-mono text-[11px] text-status-blocked">
-              台账桥读取失败
-            </span>
-          ) : (
-            <span className="block font-mono text-[11px] text-text-faint">
-              读取本地台账…
-            </span>
-          )}
-        </div>
-
-        <div className="px-3 pt-2 pb-2">
-          <div className="relative">
-            <button
-              onClick={() => setProjectSwitcherOpen((open) => !open)}
-              title="快速切换项目"
-              className={`flex w-full items-center gap-2 rounded-md border px-2 py-2 text-left text-sm font-medium hover:border-border-strong ${
-                projectSwitcherOpen || view === "home"
-                  ? "border-border-strong bg-surface-raised"
-                  : "border-border bg-surface-raised"
-              }`}
-            >
-              <FolderSimple weight="duotone" className="shrink-0 text-text-muted" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate">{project.name}</span>
-                <span className="block truncate font-mono text-[11px] text-text-faint">
-                  {project.preset}
-                </span>
-              </span>
-              <CaretUpDown weight="bold" className="shrink-0 text-text-faint" />
-            </button>
-
-            {projectSwitcherOpen && (
-              <div className="absolute left-0 right-0 z-30 mt-2 rounded-lg border border-border-strong bg-surface-raised p-2 shadow-2xl shadow-black/35 md:right-auto md:w-[320px]">
-                <div className="flex items-center justify-between px-1 pb-2">
-                  <span className="font-mono text-[11px] uppercase tracking-wide text-text-faint">
-                    快速切换
-                  </span>
-                  <span className="font-mono text-[11px] text-text-faint">
-                    {projects.length} projects
-                  </span>
-                </div>
-                <div className="flex max-h-[330px] flex-col gap-1.5 overflow-y-auto">
-                  {projects.map((p) => (
-                    <ProjectSummary
-                      key={p.id}
-                      project={p}
-                      tasks={tasks}
-                      active={p.id === projectId}
-                      onOpen={openProject}
-                    />
-                  ))}
-                </div>
-                <div className="mt-2 grid grid-cols-2 gap-1.5 border-t border-border pt-2">
-                  <button
-                    onClick={() => {
-                      setProjectSwitcherOpen(false);
-                      goto("home");
-                    }}
-                    className="rounded-md border border-border px-2 py-1.5 text-left text-[12px] font-medium text-text-muted hover:border-border-strong hover:text-text"
-                  >
-                    管理全部
-                  </button>
-                  <button
-                    disabled
-                    className="inline-flex items-center justify-center gap-1 rounded-md border border-border px-2 py-1.5 text-[12px] text-text-faint opacity-70"
-                  >
-                    <WarningCircle weight="bold" />
-                    本地模式
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="px-3 pt-1 pb-1 font-mono text-[12px] uppercase tracking-wide text-text-faint">
-          工作区
-        </div>
-        <nav className="flex gap-1 overflow-x-auto px-2 pb-1 md:flex-col md:gap-0.5 md:overflow-visible md:pb-0">
-          {WORKSPACE_NAV.map((item) => (
-            <NavButton
-              key={item.id}
-              active={view === item.id && !selected}
-              onClick={() => goto(item.id)}
-              icon={item.icon}
-              label={item.label}
-              badge={item.id === "decisions" ? inboxCount : undefined}
-              isNew={item.isNew}
-            />
-          ))}
-        </nav>
-
-        <div className="px-3 pt-3 pb-1 font-mono text-[12px] uppercase tracking-wide text-text-faint">
-          管理
-        </div>
-        <nav className="flex gap-1 overflow-x-auto px-2 pb-2 md:flex-col md:gap-0.5 md:overflow-visible md:pb-0">
-          {MANAGE_NAV.map((item) => (
-            <NavButton
-              key={item.id}
-              active={view === item.id && !selected}
-              onClick={() => goto(item.id)}
-              icon={item.icon}
-              label={item.label}
-            />
-          ))}
-        </nav>
-
-        <div className="mt-auto hidden border-t border-border px-3 py-2.5 md:block">
-          <button
-            disabled
-            title="V2 预览：账号登录后可多设备同步、远程访问项目"
-            className="flex w-full cursor-not-allowed items-center gap-2 text-left opacity-70"
-          >
-            <span className="grid size-6 shrink-0 place-items-center rounded-full bg-surface-raised font-mono text-[11px] font-semibold text-text-muted">
-              Z
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-xs text-text">本地模式</span>
-              <span className="block truncate text-[10px] text-text-faint">
-                账号与同步 · V2
-              </span>
-            </span>
-          </button>
-        </div>
-      </aside>
+      <AppSidebar
+        view={view}
+        selected={selected}
+        tasksQuery={tasksQuery}
+        projectTasks={projectTasks}
+        activeCount={activeCount}
+        project={project}
+        projects={projects}
+        projectId={projectId}
+        tasks={tasks}
+        projectSwitcherOpen={projectSwitcherOpen}
+        onProjectSwitcherToggle={() => setProjectSwitcherOpen((open) => !open)}
+        onManageAll={() => {
+          setProjectSwitcherOpen(false);
+          goto("home");
+        }}
+        openProject={openProject}
+        goto={goto}
+        inboxCount={inboxCount}
+      />
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {showMockBanner && <MockViewBanner />}
         <div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-            {!selected && (
-              <div
-                data-testid="multi-view-switcher"
-                className="flex items-center gap-2 border-b border-border bg-surface/60 px-4 py-1.5"
-              >
-                <span className="font-mono text-[10px] uppercase tracking-wide text-text-faint">
-                  多视图
-                </span>
-                <div className="flex items-center gap-0.5 rounded-md border border-border p-0.5">
-                  {([
-                    { id: "graph", label: "关系图" },
-                    { id: "genealogy", label: "演化史" },
-                  ] as const).map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => setView(item.id)}
-                      className={`rounded px-2 py-0.5 text-[12px] ${
-                        view === item.id
-                          ? "bg-surface-raised font-medium text-text"
-                          : "text-text-muted hover:text-text"
-                      }`}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-                <span className="text-[11px] text-text-faint">
-                  常驻切换 · 关系图看结构,演化史看 decision 谱系随时间的 refine/narrow/supersede
-                </span>
-              </div>
-            )}
-            {selected ? (
-              <TaskDetailView
-                task={selected}
-                tasks={tasks}
-                relations={relations}
-                decisions={decisions}
-                onBack={() => setSelectedId(null)}
-                onUpdate={updateTask}
-                onSelect={setSelectedId}
-                projectName={project.name}
-                fromViewLabel={VIEW_LABEL[view]}
-                onNavigateDecision={navigateToDecision}
-                onNavigateEntity={navigateToEntity}
-              />
-            ) : view === "home" ? (
-              <HomeView
-                projects={projects}
-                tasks={tasks}
-                events={MOCK_EVENTS}
-                currentProjectId={projectId}
-                onOpenProject={openProject}
-              />
-            ) : view === "overview" ? (
-              <OverviewView
-                project={project}
-                tasks={projectTasks}
-                decisions={decisions}
-                facts={facts}
-                relations={relations}
-                onSelect={openTaskPreview}
-                onDrill={drillToBoard}
-                onOpenInbox={() => goto("decisions")}
-                onOpenDecisionPool={() => goto("decisionPool")}
-              />
-            ) : view === "board" ? (
-              <BoardView
-                tasks={filteredProjectTasks}
-                allTasks={projectTasks}
-                filters={taskFilters}
-                onFiltersChange={setTaskFilters}
-                onSelect={openTaskPreview}
-                onUpdate={updateTask}
-                drill={drill}
-                relations={relations}
-                favorites={favorites}
-                onToggleFavorite={toggleFavorite}
-              />
-            ) : view === "graph" ? (
-              <GraphView
-                tasks={projectTasks}
-                relations={relations}
-                decisions={decisions}
-                facts={facts}
-                coverageRows={coverageRows}
-                factAnchors={factAnchors}
-                onNavigateEntity={navigateToEntity}
-                focusRef={focusedEntityRef}
-              />
-            ) : view === "genealogy" ? (
-              <GenealogyTimelineView
-                decisions={decisions}
-                relations={relations}
-                focusRef={focusedEntityRef}
-                onNavigateEntity={navigateToEntity}
-                onFocusGraph={focusEntityInGraph}
-              />
-            ) : view === "factTriage" ? (
-              <FactTriageView
-                facts={facts}
-                relations={relations}
-                decisions={decisions}
-                tasks={tasks}
-                coverageRows={coverageRows}
-                factAnchors={factAnchors}
-                onNavigateDecision={navigateToDecision}
-                onNavigateTask={navigateToTask}
-                focusedFactRef={
-                  focusedEntityRef?.startsWith("fact/") ? focusedEntityRef : null
-                }
-                onFocusGraph={focusEntityInGraph}
-              />
-            ) : view === "executions" ? (
-              <ExecutionEvidenceView />
-            ) : view === "decisions" ? (
-              <DecisionsView
-                decisions={decisions}
-                tasks={tasks}
-                relations={relations}
-                facts={facts}
-                onTraceSession={(sid) => {
-                  // 原型占位：真实由 coordinator 内置 conversation-mining 导出该 session 原文（E47）
-                  console.log("[prototype] trace session:", sid);
-                }}
-                onDecide={() => undefined}
-                readOnly
-                onNavigateDecision={navigateToDecision}
-                onNavigateTask={navigateToTask}
-                onFocusGraph={focusEntityInGraph}
-                coverageRows={coverageRows}
-              />
-            ) : view === "decisionPool" ? (
-              <DecisionPoolView
-                decisions={decisions}
-                facts={facts}
-                relations={relations}
-                focusedDecisionId={
-                  focusedEntityRef?.startsWith("decision/")
-                    ? focusedEntityRef.split("/")[1]
-                    : null
-                }
-                onFocusGraph={focusEntityInGraph}
-              />
-            ) : view === "presets" ? (
-              <PresetsView presets={MOCK_PRESETS} project={project} />
-            ) : view === "adapters" ? (
-              <AdaptersView adapters={MOCK_ADAPTERS} tasks={projectTasks} />
-            ) : (
-              <SettingsView />
-            )}
+            <ViewSwitch
+              view={view}
+              selected={selected}
+              filteredProjectTasks={filteredProjectTasks}
+              taskFilters={taskFilters}
+              drill={drill}
+              focusedEntityRef={focusedEntityRef}
+              project={project}
+              projectTasks={projectTasks}
+              tasks={tasks}
+              triadic={{ decisions, facts, relations, coverageRows, factAnchors }}
+              favorites={favorites}
+              events={MOCK_EVENTS}
+              projectName={project.name}
+              goto={goto}
+              onMultiViewSwitch={setView}
+              onOpenTaskPreview={openTaskPreview}
+              onDrillToBoard={drillToBoard}
+              onUpdateTask={updateTask}
+              onSelectTask={setSelectedId}
+              onClearSelection={() => setSelectedId(null)}
+              onNavigateEntity={navigateToEntity}
+              onNavigateDecision={navigateToDecision}
+              onNavigateTask={navigateToTask}
+              onFocusEntityInGraph={focusEntityInGraph}
+              onFiltersChange={setTaskFilters}
+              onToggleFavorite={toggleFavorite}
+              onOpenProject={openProject}
+            />
           </div>
         </div>
       </main>
