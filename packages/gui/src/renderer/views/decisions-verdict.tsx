@@ -501,13 +501,14 @@ export function VerdictCard({
         {t("views.decisionsVerdict.timestamps", { proposedAt: dateLabel(d.proposedAt), lastChanged: dateLabel(d.lastChangedAt) })}
       </div>
 
-      {/* 三操作视觉等权:accept 给 accent,但 reject/defer 同尺寸同可达,不藏菜单(反模式清单②) */}
+      {/* 三操作视觉等权:accept 给 accent,但 reject/defer 同尺寸同可达,不藏菜单(反模式清单②)。
+          readOnly 时降权:三按钮一律 disabled + opacity 减半 + cursor-not-allowed,明示写面未开。 */}
       <div className="mt-3 flex gap-2 border-t border-border pt-3">
         <button
           onClick={handleAccept}
           disabled={readOnly}
           title={readOnly ? t("views.decisionsVerdict.readOnlyApiConnectedDecisionMakingApproval") : t("views.decisionsVerdict.accept")}
-          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[12px] font-semibold text-accent-fg hover:bg-accent/90"
+          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[12px] font-semibold text-accent-fg hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <CheckCircle weight="bold" className="text-[13px]" />
           {t("views.decisionsVerdict.accept")}
@@ -518,7 +519,7 @@ export function VerdictCard({
           }}
           disabled={readOnly}
           title={readOnly ? t("views.decisionsVerdict.readOnlyApiConnectedDecisionMakingApproval") : t("views.decisionsVerdict.reject")}
-          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-[12px] font-semibold text-text hover:border-danger/50 hover:bg-danger/5 hover:text-danger"
+          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-[12px] font-semibold text-text hover:border-danger/50 hover:bg-danger/5 hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ProhibitInset weight="bold" className="text-[13px]" />
           {t("views.decisionsVerdict.reject")}
@@ -529,12 +530,19 @@ export function VerdictCard({
           }}
           disabled={readOnly}
           title={readOnly ? t("views.decisionsVerdict.readOnlyApiConnectedDecisionMakingApproval") : t("views.decisionsVerdict.defer")}
-          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-[12px] font-semibold text-text hover:border-stale/50 hover:bg-stale/5 hover:text-stale"
+          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-[12px] font-semibold text-text hover:border-stale/50 hover:bg-stale/5 hover:text-stale disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ClockClockwise weight="bold" className="text-[13px]" />
           {t("views.decisionsVerdict.defer")}
         </button>
       </div>
+
+      {/* readOnly 明示条:写面未开时在三按钮下方显示一行提示,不只靠 hover title */}
+      {readOnly && (
+        <p className="mt-1.5 text-[10px] leading-relaxed text-text-faint">
+          {t("views.decisionsVerdict.readOnlyApiConnectedDecisionMakingApproval")}
+        </p>
+      )}
 
       {/* 冲突红灯 accept 被拒后的结构化拒因渲染(E52 R3:coordinator 前置预检拒,非 alert) */}
       {rejection && (

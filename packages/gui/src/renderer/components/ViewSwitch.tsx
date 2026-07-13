@@ -193,9 +193,9 @@ export function ViewSwitch(props: ViewSwitchProps) {
           tasks={tasks}
           relations={relations}
           facts={facts}
-          onTraceSession={(sid) => {
-            // 原型占位：真实由 coordinator 内置 conversation-mining 导出该 session 原文（E47）
-            console.log("[prototype] trace session:", sid);
+          onTraceSession={() => {
+            // 写面未开:coordinator conversation-mining 导出(E47)尚未经 IPC 暴露。
+            // 保留 callback 签名以免 DecisionsView 改型,实际为 noop。
           }}
           onDecide={() => undefined}
           readOnly

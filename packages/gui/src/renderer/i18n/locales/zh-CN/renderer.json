@@ -34,5 +34,11 @@
   "renderer.workspaceShell.reviewChecklist": "审查清单",
   "renderer.workspaceShell.triageBoard": "分诊看板",
   "renderer.workspaceShell.taskList": "任务列表",
-  "renderer.workspaceShell.filtersAndTaskContext": "筛选与任务上下文"
+  "renderer.workspaceShell.filtersAndTaskContext": "筛选与任务上下文",
+  "renderer.mutation.taskStatusUpdated": "任务状态已更新",
+  "renderer.mutation.taskStatusUpdateFailed": "任务状态更新失败：{error}",
+  "renderer.mutation.reviewGateRequested": "已请求 review gate 机判",
+  "renderer.mutation.reviewGateRequestFailed": "机判请求失败：{error}",
+  "renderer.mutation.projectionReread": "投影缓存已重读",
+  "renderer.mutation.projectionRereadFailed": "投影重读失败：{error}"
 }
