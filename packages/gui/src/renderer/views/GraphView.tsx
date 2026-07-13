@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import {
   ReactFlow,
   MiniMap,
@@ -7,7 +7,6 @@ import {
   BackgroundVariant,
   ReactFlowProvider,
   Panel,
-  useReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -28,23 +27,7 @@ import {
   type AxisFilter,
   type GraphFilterInput,
 } from "../graph/graphLayout";
-import {
-  buildEgoGraph,
-  bfsShown,
-  neighborsOf,
-  type EgoGraph,
-} from "../graph/canvasEgoLayout";
-import { pickDefaultFocus } from "../graph/graphLayoutShared";
-import {
-  createFocusHistory,
-  currentFocus,
-  canGoBack as historyCanGoBack,
-  canGoForward as historyCanGoForward,
-  goBack as historyGoBack,
-  goForward as historyGoForward,
-  pushFocus,
-  type FocusHistoryState,
-} from "../graph/focusHistory";
+import { useEgoCanvas } from "../graph/useEgoCanvas";
 
 import { TaskNode } from "../graph/nodes/TaskNode";
 import { DecisionNode } from "../graph/nodes/DecisionNode";
@@ -79,9 +62,6 @@ const edgeTypes = {
 
 const EMPTY_LOOP = new Set<string>();
 
-// 换焦点时把焦点摆到视口正中所用的缩放:焦点卡片(360 宽)+ 左右各一列 chip 同屏可读。
-const FOCUS_ZOOM = 0.9;
-
 const MINIMAP_AXIS: Record<string, string> = {
   task: "var(--color-axis-execution)",
   decision: "var(--color-axis-authority)",
@@ -112,35 +92,16 @@ function GraphViewInner({
   onNavigateEntity?: (ref: string) => void;
   focusRef?: string | null;
 }) {
-  const { setCenter } = useReactFlow();
   const colorMode = useColorMode();
 
-  // 节点焦点(布局重算依赖)+ 边焦点(仅抽屉展示)。修 #3:此前用单一 focusId
-  // 同时承载节点和边,点边时把 edge id 当 focusNodeId 传给布局器,导致
-  // layoutSimpleEgo 拿不到节点 → 整张图塌成单个空节点。
-  //
-  // GUI 可用性补齐(dec_01KXA7811SVVT8P66HNDFZQ7DF):拆开「选中」与「聚焦」。
-  //   focusId    — 布局焦点(三泳道中心 / ego 中心)。受 FocusSwitcher / 双击 /
-  //                 抽屉「设为焦点」/ 跨视图 focusRef 驱动,所有变更入焦点历史。
-  //   selectedId — 抽屉里展示的节点(单击节点选中)。点空白 / Esc / 抽屉关闭即清空。
-  const [focusId, setFocusId] = useState<string | null>(null);
+  // 边焦点(仅抽屉展示)独立于节点焦点。修 #3:此前用单一 focusId 同时承载节点和边,
+  // 点边时把 edge id 当 focusNodeId 传给布局器,导致布局器拿不到节点 → 整张图塌成
+  // 单个空节点。节点焦点 / 画布累积态现在整块住在 useEgoCanvas 里。
+  //   selectedId — 抽屉里展示的节点。点空白 / Esc / 抽屉关闭即清空。
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusEdgeId, setFocusEdgeId] = useState<string | null>(null);
   const [resolvedFocusId, setResolvedFocusId] = useState<string | null>(null);
   const [expandedFacts] = useState<Set<string>>(new Set());
-  const [history, setHistory] = useState<FocusHistoryState>(createFocusHistory);
-
-  // 无限画布 ego 累积态(dec_01KXBGJQFQARSZHHQW1WADFDNC):
-  //   shown    — 累积可见集 node id → 距焦点跳数(openFocus 铺 ±2,展开时长邻居,收起不撤)。
-  //   expanded — 渲染为详情卡片的 node id(其余紧凑 chip)。
-  const [shown, setShown] = useState<Map<string, number>>(() => new Map());
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-
-  // 焦点切换统一入口:更新 focusId + 推历史。重复推同 id 会被 pushFocus 折叠。
-  const setFocusAndPushHistory = useCallback((id: string) => {
-    setFocusId(id);
-    setHistory((prev) => pushFocus(prev, id));
-  }, []);
 
   const [nodes, setNodes] = useState<any[]>([]);
   const [edges, setEdges] = useState<any[]>([]);
@@ -183,71 +144,29 @@ function GraphViewInner({
     [filters],
   );
 
-  // 统一图(byId + adj,含合成 task 父子边),供 openFocus/reveal 的 BFS 遍历复用。
-  const egoGraph: EgoGraph = useMemo(
-    () => buildEgoGraph(tasks, decisions ?? [], facts ?? [], relations),
-    [tasks, decisions, facts, relations],
-  );
-
-  // 重排画布到某焦点:铺开前后各 2 跳、只展开焦点自身(累积态重置)。
-  const resetCanvasTo = useCallback(
-    (id: string) => {
-      setShown(bfsShown(egoGraph, id, 2, filters.axes));
-      setExpanded(new Set([id]));
-    },
-    [egoGraph, filters.axes],
-  );
-
-  // 打开焦点(双击 / switcher / 抽屉 / 跨视图)= 设焦点 + 推历史 + 重排 ±2。
-  const openFocus = useCallback(
-    (id: string) => {
-      setFocusAndPushHistory(id);
-      resetCanvasTo(id);
-    },
-    [setFocusAndPushHistory, resetCanvasTo],
-  );
-  // 稳定引用:effect 只在 focusRef / 数据变时触发,不因 openFocus 身份变动而重排画布。
-  const openFocusRef = useRef(openFocus);
-  openFocusRef.current = openFocus;
-
-  // chip 就地展开成卡片,并把它通过轴过滤的一跳邻居加入 shown(长出下一环,累积)。
-  const expandNode = useCallback(
-    (id: string) => {
-      setExpanded((prev) => new Set(prev).add(id));
-      setShown((prev) => {
-        const next = new Map(prev);
-        const base = next.get(id) ?? 0;
-        for (const nb of neighborsOf(egoGraph, id, filters.axes)) {
-          if (!next.has(nb)) next.set(nb, base + 1);
-        }
-        return next;
-      });
-    },
-    [egoGraph, filters.axes],
-  );
-
-  // 收起卡片,保留已展开邻居(累计保留,单击/收起永不重排已展开画布)。
-  const collapseNode = useCallback((id: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  }, []);
-
-  // 跨视图带入的 focusRef → 打开该焦点(用户「跳到这张图」的足迹)。
-  useEffect(() => {
-    if (!focusRef) return;
-    const nodeId = endpointToNodeId(focusRef);
-    if (nodeId) openFocusRef.current(nodeId);
-  }, [focusRef]);
-
-  // 首次(数据到位而未聚焦、且无外部 focusRef)= 打开默认焦点,铺开 ±2。
-  useEffect(() => {
-    if (focusId || focusRef) return;
-    const def = pickDefaultFocus(decisions ?? [], tasks);
-    if (def) openFocusRef.current(def);
-  }, [focusId, focusRef, decisions, tasks]);
+  // 无限画布 ego 状态机(焦点 / 累积可见集 / 已展开卡片 / 焦点历史 / 换焦点即居中)。
+  const {
+    focusId,
+    shown,
+    expanded,
+    canBack,
+    canForward,
+    openFocus,
+    expandNode,
+    collapseNode,
+    clearFocus,
+    goBack,
+    goForward,
+  } = useEgoCanvas({
+    tasks,
+    decisions: decisions ?? [],
+    facts: facts ?? [],
+    relations,
+    axes: filters.axes,
+    focusRef,
+    nodes,
+    resolvedFocusId,
+  });
 
   useEffect(() => {
     const ac = new AbortController();
@@ -292,27 +211,6 @@ function GraphViewInner({
     shown,
     expanded,
   ]);
-
-  // 换焦点(openFocus)时把焦点节点摆进视口正中 —— 兑现「以它为中心」,同时躲开左上角
-  // Filters 面板(fitView 全景会按图 bbox 居中,下游更宽时焦点被推到左侧压在面板下)。
-  // 只在焦点变化时触发:累积展开 / 长邻居永不重排已有画布
-  // (dec_01KXBGJQFQARSZHHQW1WADFDNC「单击永不重排」)。用 ref 记住上次已居中的焦点。
-  const lastCenteredFocus = useRef<string | null>(null);
-  useEffect(() => {
-    if (!resolvedFocusId) return;
-    if (lastCenteredFocus.current === resolvedFocusId) return;
-    const focusNode = nodes.find((n) => n.id === resolvedFocusId);
-    if (!focusNode) return;
-    lastCenteredFocus.current = resolvedFocusId;
-    const w = Number(focusNode.style?.width ?? 0);
-    const h = Number(focusNode.style?.height ?? 0);
-    const cx = focusNode.position.x + w / 2;
-    const cy = focusNode.position.y + h / 2;
-    const frame = window.requestAnimationFrame(() => {
-      setCenter(cx, cy, { zoom: FOCUS_ZOOM, duration: 320 });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [resolvedFocusId, nodes, setCenter]);
 
   // 单击 chip = 就地展开成卡片并长出邻居(累积,永不重排已有画布)。
   // 卡片(已展开)单击不处理 —— 收起 / 详情 / 设为中心 走卡片自身按钮。
@@ -459,36 +357,6 @@ function GraphViewInner({
     openFocus(drawerNodeId);
   }, [drawerNodeId, openFocus]);
 
-  // 历史导航:back/forward。currentFocus 为 null 表示走到历史外(默认焦点),
-  // 此时仍把 focusId 同步到 null 让布局器挑默认。
-  // 历史前进/后退:切焦点 + 重排画布(resetCanvasTo,不重复推栈)。
-  const goBackStack = useCallback(() => {
-    setHistory((prev) => {
-      const next = historyGoBack(prev);
-      if (next === prev) return prev;
-      const f = currentFocus(next);
-      setFocusId(f);
-      if (f) resetCanvasTo(f);
-      return next;
-    });
-  }, [resetCanvasTo]);
-  const goForwardStack = useCallback(() => {
-    setHistory((prev) => {
-      const next = historyGoForward(prev);
-      if (next === prev) return prev;
-      const f = currentFocus(next);
-      setFocusId(f);
-      if (f) resetCanvasTo(f);
-      return next;
-    });
-  }, [resetCanvasTo]);
-  const clearFocus = useCallback(() => {
-    setFocusId(null);
-    setShown(new Map());
-    setExpanded(new Set());
-    // 不动历史:用户「退出聚焦」不脚印化。清空后 bootstrap 会重开默认焦点。
-  }, []);
-
   // Switcher 入口:点选 = 设为画布中心(openFocus 重排 ±2)。
   const switchFocusFromList = useCallback(
     (nodeId: string) => {
@@ -554,11 +422,11 @@ function GraphViewInner({
       />
 
       <FocusHistoryBar
-        canBack={historyCanGoBack(history)}
-        canForward={historyCanGoForward(history)}
+        canBack={canBack}
+        canForward={canForward}
         breadcrumb={breadcrumb}
-        onBack={goBackStack}
-        onForward={goForwardStack}
+        onBack={goBack}
+        onForward={goForward}
         onClear={clearFocus}
       />
 
@@ -579,10 +447,13 @@ function GraphViewInner({
           onEdgeClick={onEdgeClick}
           onPaneClick={onPaneClick}
           colorMode={colorMode}
-          fitView
-          fitViewOptions={{ padding: 0.1 }}
+          // 不用 fitView:画布视口由 useEgoCanvas 在换焦点时 setCenter 到焦点节点。
+          // 留着 fitView prop 会在节点测量完成后按整图 bbox 复位,把刚居中的焦点重新
+          // 推到一侧(下游更宽时压在左上角 Filters 面板底下),并把缩放改回 fit 值。
           minZoom={0.1}
           maxZoom={2}
+          // 双击 = 设为画布中心。默认的 d3 双击缩放会和 setCenter 抢同一次手势。
+          zoomOnDoubleClick={false}
           nodesDraggable={false}
           nodesConnectable={false}
           attributionPosition="bottom-right"
