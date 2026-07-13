@@ -8,7 +8,7 @@ import { readField, resolveEntityDocumentPath } from "../entity/declaration.ts";
 import type { EntityProjectionColumnDeclaration } from "../entity/registry.ts";
 import type { HarnessLayoutInput } from "../layout/index.ts";
 import { resolveHarnessLayout } from "../layout/index.ts";
-import { stablePayloadHash } from "../integrity/stable-hash.ts";
+import { sha256Text, stablePayloadHash } from "../integrity/stable-hash.ts";
 import {
   localLayoutFileSystem,
   localProjectionSourceFileSystem,
@@ -33,12 +33,30 @@ export interface DeclaredEntityDiscoveryStats {
 
 export interface DeclaredEntityDiscoveryResult {
   readonly rows: ReadonlyArray<DeclaredProjectionRow>;
+  readonly documents: ReadonlyArray<DeclaredEntityDocumentProjection>;
   readonly stats: DeclaredEntityDiscoveryStats;
+}
+
+export interface DeclaredEntityDocumentProjection {
+  readonly relativePath: string;
+  readonly sourceHash: string;
+  readonly statSignature: string;
+  readonly primaryKey: string;
+  readonly row: DeclaredProjectionRow;
 }
 
 export interface DeclaredEntitySourceInput {
   readonly relativePath: string;
-  readonly body: string;
+  readonly body?: string;
+  readonly statSignature: string;
+  readonly contentSha256: string;
+}
+
+export interface DeclaredEntitySourceHint {
+  readonly sourcePath: string;
+  readonly sourceKind: string;
+  readonly statSignature: string;
+  readonly contentSha256: string;
 }
 
 export interface DeclaredEntitySourceResult {
@@ -118,12 +136,23 @@ export function discoverDeclaredEntityProjection(
 
 export function readDeclaredEntitySource(
   rootInput: HarnessLayoutInput,
-  declaration: EntityDeclaration
+  declaration: EntityDeclaration,
+  hints: ReadonlyArray<DeclaredEntitySourceHint> = []
+): DeclaredEntitySourceResult {
+  return readDeclaredEntitySourceAttempt(rootInput, declaration, hints, 0);
+}
+
+function readDeclaredEntitySourceAttempt(
+  rootInput: HarnessLayoutInput,
+  declaration: EntityDeclaration,
+  hints: ReadonlyArray<DeclaredEntitySourceHint>,
+  attempt: number
 ): DeclaredEntitySourceResult {
   const layout = resolveHarnessLayout(rootInput);
   const cacheKey = `${layout.authoredRoot}\0${declaration.kind}\0${declaration.rootResolver.pathTemplate}`;
   const cached = declaredEntitySourceCache.get(cacheKey);
-  if (cached && sourceCacheEntryMatches(cached)) {
+  const cachedBodiesAvailable = cached?.result.inputs.every((input) => input.body !== undefined) ?? false;
+  if (cached && (hints.length > 0 || cachedBodiesAvailable) && sourceCacheEntryMatches(cached)) {
     declaredEntitySourceCache.delete(cacheKey);
     declaredEntitySourceCache.set(cacheKey, cached);
     return {
@@ -133,6 +162,9 @@ export function readDeclaredEntitySource(
   }
   const matcher = templateMatcher(declaration.rootResolver.pathTemplate);
   const discovered = listTemplateFiles(layout.authoredRoot, declaration.rootResolver.pathTemplate);
+  const hintsByPath = new Map(hints
+    .filter((hint) => hint.sourceKind === declaration.kind)
+    .map((hint) => [hint.sourcePath, hint]));
   const inputs: DeclaredEntitySourceInput[] = [];
   for (const relativePath of discovered.files) {
     const match = matcher.pattern.exec(relativePath);
@@ -140,14 +172,41 @@ export function readDeclaredEntitySource(
     const identity = Object.fromEntries(matcher.keys.map((key, index) => [key, match[index + 1]!]));
     resolveEntityDocumentPath(rootInput, declaration, identity);
     const documentPath = path.join(layout.authoredRoot, relativePath);
-    inputs.push({ relativePath, body: localLayoutFileSystem.readText(documentPath) });
+    const statSignature = localProjectionSourceFileSystem.statSignature(documentPath);
+    if (statSignature === null) return retryDeclaredEntitySource(rootInput, declaration, hints, cacheKey, attempt, relativePath);
+    const hint = hintsByPath.get(relativePath);
+    if (hint?.statSignature === statSignature) {
+      inputs.push({ relativePath, statSignature, contentSha256: hint.contentSha256 });
+      continue;
+    }
+    let stable: ReturnType<typeof localProjectionSourceFileSystem.readStableText>;
+    try {
+      stable = localProjectionSourceFileSystem.readStableText(documentPath);
+    } catch {
+      return retryDeclaredEntitySource(rootInput, declaration, hints, cacheKey, attempt, relativePath);
+    }
+    inputs.push({
+      relativePath,
+      body: stable.body,
+      statSignature: stable.signature,
+      contentSha256: sha256Text(stable.body)
+    });
+  }
+  const fileSignatures = new Map(inputs.map((input) => [
+    path.join(layout.authoredRoot, input.relativePath),
+    input.statSignature
+  ]));
+  if (!pathSignaturesMatch(discovered.directorySignatures) || !pathSignaturesMatch(fileSignatures)) {
+    declaredEntitySourceCache.delete(cacheKey);
+    if (attempt >= 2) throw new Error(`declared entity source did not stabilize: ${declaration.kind}`);
+    return readDeclaredEntitySourceAttempt(rootInput, declaration, hints, attempt + 1);
   }
   const result: DeclaredEntitySourceResult = {
     inputs,
     hash: stablePayloadHash({
       schema: "declared-entity-source/v1",
       kind: declaration.kind,
-      inputs
+      inputs: inputs.map(({ relativePath, contentSha256 }) => ({ relativePath, contentSha256 }))
     }),
     stats: {
       directoriesVisited: discovered.directoriesVisited,
@@ -156,9 +215,8 @@ export function readDeclaredEntitySource(
       cacheHit: false
     }
   };
-  const directorySignatures = readPathSignatures(discovered.directories);
-  const fileSignatures = readPathSignatures(inputs.map((input) => path.join(layout.authoredRoot, input.relativePath)));
-  if (directorySignatures && fileSignatures) {
+  const directorySignatures = discovered.directorySignatures;
+  if (directorySignatures.size > 0 || fileSignatures.size > 0) {
     declaredEntitySourceCache.delete(cacheKey);
     declaredEntitySourceCache.set(cacheKey, { result, directorySignatures, fileSignatures });
     evictDeclaredEntitySourceCache();
@@ -174,22 +232,93 @@ export function projectDeclaredEntitySource(
   source: DeclaredEntitySourceResult
 ): DeclaredEntityDiscoveryResult {
   const matcher = templateMatcher(declaration.rootResolver.pathTemplate);
-  const rows: DeclaredProjectionRow[] = [];
+  const documents: DeclaredEntityDocumentProjection[] = [];
+  const primaryKey = declaration.projection.columns.find((column) => column.primaryKey)!;
   for (const input of source.inputs) {
     const match = matcher.pattern.exec(input.relativePath);
     if (!match) continue;
     const identity = Object.fromEntries(matcher.keys.map((key, index) => [key, match[index + 1]!]));
     resolveEntityDocumentPath(rootInput, declaration, identity);
+    if (input.body === undefined) throw new Error(`declared entity source body was not loaded: ${input.relativePath}`);
     const raw = declaration.documentCodec.decode(input.body);
     if (raw === undefined) continue;
     const decoded = Schema.decodeUnknownSync(declaration.schema)(raw) as Readonly<Record<string, unknown>>;
-    rows.push(projectRow(decoded, declaration.projection.columns));
+    const row = projectRow(decoded, declaration.projection.columns);
+    const identityKey = declaration.rootResolver.identity.at(-1)!;
+    const expectedPrimaryKey = identity[identityKey];
+    const actualPrimaryKey = String(row[primaryKey.name]);
+    if (expectedPrimaryKey !== actualPrimaryKey) {
+      throw new Error(`declared entity path identity ${expectedPrimaryKey} does not match projected identity ${actualPrimaryKey}: ${input.relativePath}`);
+    }
+    documents.push({
+      relativePath: input.relativePath,
+      sourceHash: input.contentSha256,
+      statSignature: input.statSignature,
+      primaryKey: actualPrimaryKey,
+      row
+    });
   }
-  const primaryKey = declaration.projection.columns.find((column) => column.primaryKey)!;
+  documents.sort((left, right) => left.primaryKey.localeCompare(right.primaryKey));
   return {
-    rows: rows.sort((left, right) => String(left[primaryKey.name]).localeCompare(String(right[primaryKey.name]))),
+    rows: documents.map((document) => document.row),
+    documents,
     stats: source.stats
   };
+}
+
+function retryDeclaredEntitySource(
+  rootInput: HarnessLayoutInput,
+  declaration: EntityDeclaration,
+  hints: ReadonlyArray<DeclaredEntitySourceHint>,
+  cacheKey: string,
+  attempt: number,
+  relativePath: string
+): DeclaredEntitySourceResult {
+  declaredEntitySourceCache.delete(cacheKey);
+  if (attempt >= 2) throw new Error(`declared entity source did not stabilize: ${relativePath}`);
+  return readDeclaredEntitySourceAttempt(rootInput, declaration, hints, attempt + 1);
+}
+
+export function deleteDeclaredProjectionRows(
+  sql: SqlClient.SqlClient,
+  declaration: EntityDeclaration,
+  primaryKeys: ReadonlyArray<string>
+): Effect.Effect<void, unknown> {
+  const primaryKey = declaration.projection.columns.find((column) => column.primaryKey)!;
+  return Effect.gen(function* () {
+    for (const value of [...new Set(primaryKeys)]) {
+      yield* sql.unsafe(
+        `DELETE FROM ${quoteIdentifier(declaration.projection.table)} WHERE ${quoteIdentifier(primaryKey.name)} = ?`,
+        [value]
+      );
+    }
+  });
+}
+
+export function upsertDeclaredProjectionRows(
+  sql: SqlClient.SqlClient,
+  declaration: EntityDeclaration,
+  rows: ReadonlyArray<DeclaredProjectionRow>
+): Effect.Effect<void, unknown> {
+  const primaryKey = declaration.projection.columns.find((column) => column.primaryKey)!;
+  const columns = declaration.projection.columns.map((column) => quoteIdentifier(column.name));
+  const placeholders = columns.map(() => "?").join(", ");
+  const assignments = declaration.projection.columns
+    .filter((column) => !column.primaryKey)
+    .map((column) => `${quoteIdentifier(column.name)} = excluded.${quoteIdentifier(column.name)}`)
+    .join(", ");
+  const conflictClause = assignments.length > 0
+    ? `DO UPDATE SET ${assignments}`
+    : "DO NOTHING";
+  return Effect.gen(function* () {
+    for (const row of rows) {
+      const values = declaration.projection.columns.map((column) => row[column.name] ?? null);
+      yield* sql.unsafe(
+        `INSERT INTO ${quoteIdentifier(declaration.projection.table)} (${columns.join(", ")}) VALUES (${placeholders}) ON CONFLICT (${quoteIdentifier(primaryKey.name)}) ${conflictClause}`,
+        values
+      );
+    }
+  });
 }
 
 function projectRow(
@@ -258,20 +387,24 @@ function templateMatcher(template: string): { readonly pattern: RegExp; readonly
 function listTemplateFiles(rootPath: string, template: string): {
   readonly files: ReadonlyArray<string>;
   readonly directories: ReadonlyArray<string>;
+  readonly directorySignatures: ReadonlyMap<string, string>;
   readonly directoriesVisited: number;
   readonly entriesVisited: number;
 } {
-  if (!localLayoutFileSystem.exists(rootPath)) return { files: [], directories: [], directoriesVisited: 0, entriesVisited: 0 };
+  if (!localLayoutFileSystem.exists(rootPath)) return { files: [], directories: [], directorySignatures: new Map(), directoriesVisited: 0, entriesVisited: 0 };
   const segments = template.split("/");
   const segmentMatchers = segments.map(templateSegmentMatcher);
   const files: string[] = [];
   const directories: string[] = [];
+  const directorySignatures = new Map<string, string>();
   let directoriesVisited = 0;
   let entriesVisited = 0;
   function visit(directory: string, segmentIndex: number, relativeSegments: ReadonlyArray<string>): void {
     directoriesVisited += 1;
     directories.push(directory);
-    for (const entry of localLayoutFileSystem.readDirents(directory)) {
+    const stableDirectory = localProjectionSourceFileSystem.readStableDirents(directory);
+    directorySignatures.set(directory, stableDirectory.signature);
+    for (const entry of stableDirectory.entries) {
       entriesVisited += 1;
       if (!segmentMatchers[segmentIndex]!.test(entry.name)) continue;
       const fullPath = path.join(directory, entry.name);
@@ -284,7 +417,7 @@ function listTemplateFiles(rootPath: string, template: string): {
     }
   }
   visit(rootPath, 0, []);
-  return { files: files.sort(), directories, directoriesVisited, entriesVisited };
+  return { files: files.sort(), directories, directorySignatures, directoriesVisited, entriesVisited };
 }
 
 function sourceCacheEntryMatches(entry: DeclaredEntitySourceCacheEntry): boolean {
@@ -296,16 +429,6 @@ function pathSignaturesMatch(signatures: ReadonlyMap<string, string>): boolean {
     if (readPathSignature(inputPath) !== expected) return false;
   }
   return true;
-}
-
-function readPathSignatures(inputPaths: ReadonlyArray<string>): ReadonlyMap<string, string> | null {
-  const signatures = new Map<string, string>();
-  for (const inputPath of inputPaths) {
-    const signature = readPathSignature(inputPath);
-    if (signature === null) return null;
-    signatures.set(inputPath, signature);
-  }
-  return signatures;
 }
 
 function readPathSignature(inputPath: string): string | null {

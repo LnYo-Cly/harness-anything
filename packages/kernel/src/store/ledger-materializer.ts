@@ -5,7 +5,7 @@ import type { VersionControlSystem } from "../ports/version-control-system.ts";
 import { updateTaskProjectionIncrementally } from "../projection/sqlite-task-incremental-projection.ts";
 import { materializeAttributionProjection } from "../projection/sqlite-attribution-projection.ts";
 import { rebuildTaskProjection } from "../projection/sqlite-task-projection.ts";
-import { captureProjectionSourceSnapshot } from "../projection/projection-source-snapshot.ts";
+import { captureAuthoredProjectionFingerprint } from "../projection/projection-source-baseline.ts";
 import { makeLocalVersionControlSystem } from "./local-version-control-system.ts";
 import { resolveTrunkBranch } from "./write-journal-git.ts";
 import { withRepoLocks } from "./write-journal-locks.ts";
@@ -65,7 +65,7 @@ function materializeBranches(repoRoot: string, rootInput: HarnessLayoutInput, dr
   const warnings: string[] = [];
   let merged = 0;
   let processed = 0;
-  const projectionSourceFingerprintBeforeMerge = captureProjectionSourceSnapshot(rootInput).fingerprint;
+  const projectionSourceFingerprintBeforeMerge = captureAuthoredProjectionFingerprint(rootInput);
   const touchedPaths = new Set<string>();
 
   const trunkBranch = resolveTrunkBranch(repoRoot, undefined, vcs);

@@ -3,6 +3,7 @@ import path from "node:path";
 import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
+import { stablePayloadHash } from "../integrity/stable-hash.ts";
 import type { FactAnchorRow, RelationCoverageRow, RelationGraphEdgeRow } from "./relation-graph-projection.ts";
 import { unresolvedEntityAttribution } from "./entity-attribution-projection.ts";
 import {
@@ -20,7 +21,7 @@ import type {
   TaskProjectionRow
 } from "./types.ts";
 
-export const projectionVersion = "entity-projection/d4-v8";
+export const projectionVersion = "entity-projection/d4-v10";
 const baseTaskProjectionColumns = [
   "task_id",
   "title",
@@ -158,6 +159,11 @@ export function writeProjectionDatabase(
     yield* insertMeta(sql, "rowsHash", meta.rowsHash);
     yield* insertMeta(sql, "decisionRowsHash", meta.decisionRowsHash ?? "");
     yield* insertMeta(sql, "declaredRowsHash", meta.declaredRowsHash ?? "");
+    yield* insertMeta(sql, "declaredManifestHash", meta.declaredManifestHash ?? "");
+    yield* insertMeta(sql, "attributionRowsHash", meta.attributionRowsHash ?? "");
+    yield* insertMeta(sql, "attributionSourceHash", meta.attributionSourceHash ?? "");
+    yield* insertMeta(sql, "taskSourceHash", meta.taskSourceHash ?? "");
+    yield* insertMeta(sql, "legacyPersonIdsHash", meta.legacyPersonIdsHash ?? "");
     for (const row of rows) yield* insertTaskRow(sql, row, projectedTaskFieldExtensions);
     for (const row of decisionRows) yield* insertDecisionRow(sql, row);
     for (const edge of graphRows.relationEdges) yield* insertRelationEdge(sql, edge);
@@ -173,6 +179,8 @@ export function writeProjectionDatabase(
     yield* sql`CREATE INDEX relation_coverage_decision_ref ON relation_coverage (decision_ref)`;
     yield* sql`CREATE INDEX task_fact_anchors_task_id ON task_fact_anchors (task_id)`;
     if (materializeSupplemental) yield* materializeSupplemental(sql);
+    const attributionRowsHash = yield* hashAttributionProjectionState(sql);
+    yield* sql`UPDATE projection_meta SET value = ${attributionRowsHash} WHERE key = 'attributionRowsHash'`;
   });
   try {
     runSqlite(tempPath, writeEffect);
@@ -281,7 +289,12 @@ function readProjectionDatabase(
         sourceHash: meta.get("sourceHash") ?? "",
         rowsHash: meta.get("rowsHash") ?? "",
         decisionRowsHash: meta.get("decisionRowsHash") ?? "",
-        declaredRowsHash: meta.get("declaredRowsHash") ?? ""
+        declaredRowsHash: meta.get("declaredRowsHash") ?? "",
+        declaredManifestHash: meta.get("declaredManifestHash") ?? "",
+        attributionRowsHash: meta.get("attributionRowsHash") ?? "",
+        attributionSourceHash: meta.get("attributionSourceHash") ?? "",
+        taskSourceHash: meta.get("taskSourceHash") ?? "",
+        legacyPersonIdsHash: meta.get("legacyPersonIdsHash") ?? ""
       },
       rows: taskRecords.map((record) => recordToTaskRow(record, taskFieldExtensions)),
       decisionRows: decisionRecords.map(recordToDecisionRow)
@@ -334,15 +347,18 @@ export function insertTaskRow(
     JSON.stringify(row.attribution ?? unresolvedEntityAttribution()),
     ...taskFieldExtensions.map((extension) => row.fieldExtensions?.[extension.field] ?? extension.default)
   ];
+  const assignments = [...baseTaskProjectionColumns, ...extensionColumns]
+    .filter((column) => column !== "task_id" && column !== "attribution_json")
+    .map((column) => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`);
   return sql.unsafe(
-    `INSERT OR REPLACE INTO task_projection (${columns.join(", ")}) VALUES (${values.map(() => "?").join(", ")})`,
+    `INSERT INTO task_projection (${columns.join(", ")}) VALUES (${values.map(() => "?").join(", ")}) ON CONFLICT (task_id) DO UPDATE SET ${assignments.join(", ")}`,
     values
   );
 }
 
 export function insertDecisionRow(sql: SqlClient.SqlClient, row: DecisionProjectionRow): Effect.Effect<unknown, unknown> {
   return sql`
-    INSERT OR REPLACE INTO decision_projection (
+    INSERT INTO decision_projection (
       decision_id, legacy_id, legacy_number, state, title, question, chosen_json,
       rejected_json, path, module_keys_json, product_line_keys_json, risk_tier, urgency,
       vertical, preset, decision_class, proposed_at, provenance_json, decided_at, attribution_json
@@ -353,8 +369,74 @@ export function insertDecisionRow(sql: SqlClient.SqlClient, row: DecisionProject
       ${row.vertical ?? null}, ${row.preset ?? null}, ${row.decisionClass ?? null}, ${row.proposedAt ?? null},
       ${row.provenance ? JSON.stringify(row.provenance) : null}, ${row.decidedAt ?? null},
       ${JSON.stringify(row.attribution ?? unresolvedEntityAttribution())}
-    )
+    ) ON CONFLICT (decision_id) DO UPDATE SET
+      legacy_id = excluded.legacy_id,
+      legacy_number = excluded.legacy_number,
+      state = excluded.state,
+      title = excluded.title,
+      question = excluded.question,
+      chosen_json = excluded.chosen_json,
+      rejected_json = excluded.rejected_json,
+      path = excluded.path,
+      module_keys_json = excluded.module_keys_json,
+      product_line_keys_json = excluded.product_line_keys_json,
+      risk_tier = excluded.risk_tier,
+      urgency = excluded.urgency,
+      vertical = excluded.vertical,
+      preset = excluded.preset,
+      decision_class = excluded.decision_class,
+      proposed_at = excluded.proposed_at,
+      provenance_json = excluded.provenance_json,
+      decided_at = excluded.decided_at
   `;
+}
+
+export function readAttributionProjectionStateHash(projectionPath: string): string {
+  return runSqlite(projectionPath, Effect.flatMap(SqlClient.SqlClient, hashAttributionProjectionState));
+}
+
+export function hashAttributionProjectionState(sql: SqlClient.SqlClient): Effect.Effect<string, unknown> {
+  return Effect.gen(function* () {
+    const tableRecords = yield* sql<{ readonly name: unknown }>`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`;
+    const tableNames = tableRecords.map((record) => String(record.name));
+    const entities: Array<{
+      readonly table: string;
+      readonly rows: ReadonlyArray<{ readonly id: string; readonly attribution: string }>;
+    }> = [];
+    for (const table of tableNames) {
+      const columns = yield* sql.unsafe<{ readonly name: unknown; readonly pk: unknown }>(`PRAGMA table_info(${quoteIdentifier(table)})`);
+      if (!columns.some((column) => String(column.name) === "attribution_json")) continue;
+      const primaryKey = columns.find((column) => Number(column.pk) > 0);
+      if (!primaryKey) throw new Error(`attributed projection table ${table} has no primary key`);
+      const idColumn = String(primaryKey.name);
+      const records = yield* sql.unsafe<Record<string, unknown>>(
+        `SELECT ${quoteIdentifier(idColumn)} AS entity_id, attribution_json FROM ${quoteIdentifier(table)} ORDER BY ${quoteIdentifier(idColumn)}`
+      );
+      entities.push({
+        table,
+        rows: records.map((record) => ({ id: String(record.entity_id), attribution: String(record.attribution_json) }))
+      });
+    }
+    const events = tableNames.includes("attribution_events")
+      ? (yield* sql<Record<string, unknown>>`
+          SELECT event_id, op_id, subject_ref, operation, principal_person_id,
+                 executor_agent_id, occurred_at, recorded_at, source_json
+          FROM attribution_events
+          ORDER BY occurred_at, event_id
+        `).map((record) => ({
+          eventId: String(record.event_id),
+          opId: String(record.op_id),
+          subjectRef: String(record.subject_ref),
+          operation: String(record.operation),
+          principalPersonId: String(record.principal_person_id),
+          executorAgentId: record.executor_agent_id === null ? null : String(record.executor_agent_id),
+          occurredAt: String(record.occurred_at),
+          recordedAt: String(record.recorded_at),
+          source: String(record.source_json)
+        }))
+      : [];
+    return stablePayloadHash({ schema: "projection-attribution-state/v1", entities, events });
+  });
 }
 
 export function insertRelationEdge(sql: SqlClient.SqlClient, edge: RelationGraphEdgeRow): Effect.Effect<unknown, unknown> {

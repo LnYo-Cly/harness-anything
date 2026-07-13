@@ -5,6 +5,7 @@ import { isDomainStatus, isPackageDisposition, isPriorityTier, isTaskWorkKind, i
 import { sha256Text } from "../integrity/stable-hash.ts";
 import type { HarnessLayoutInput } from "../layout/index.ts";
 import { resolveHarnessLayout } from "../layout/index.ts";
+import { localProjectionSourceFileSystem } from "../local/local-layout-file-system.ts";
 import { readFrontmatter, readScalar } from "../markdown/frontmatter.ts";
 import {
   deriveRelationTaskAuthoredSources,
@@ -15,17 +16,131 @@ import type { ProjectionCanonicalStatus, CoordinationStatus, ProjectionWarning, 
 import { unresolvedEntityAttribution } from "./entity-attribution-projection.ts";
 import { readDirIfPresent, readDirNamesIfPresent, readTextFileIfPresent, statPathIfPresent } from "./toctou-safe-fs.ts";
 
+interface MarkdownSourceCacheEntry {
+  readonly result: ReturnType<typeof markdownSourceResult>;
+  readonly fileSignatures: ReadonlyMap<string, string>;
+  readonly directorySignatures: ReadonlyMap<string, string>;
+}
+
+const markdownSourceCache = new Map<string, MarkdownSourceCacheEntry>();
+const markdownSourceCacheLimit = 16;
+
 export function readMarkdownSource(rootInput: HarnessLayoutInput): {
   readonly entries: ReadonlyArray<TaskSourceEntry>;
   readonly hash: string;
   readonly warnings: ReadonlyArray<ProjectionWarning>;
 } {
+  const layout = resolveHarnessLayout(rootInput);
+  const cacheKey = layout.rootDir;
+  const cached = markdownSourceCache.get(cacheKey);
+  if (cached && markdownSourceCacheEntryMatches(cached)) {
+    markdownSourceCache.delete(cacheKey);
+    markdownSourceCache.set(cacheKey, cached);
+    return cached.result;
+  }
   const source = readTaskProjectionSource(rootInput);
+  const result = markdownSourceResult(source);
+  const cacheEntry = createMarkdownSourceCacheEntry(layout, source, result);
+  markdownSourceCache.delete(cacheKey);
+  if (cacheEntry) {
+    markdownSourceCache.set(cacheKey, cacheEntry);
+    while (markdownSourceCache.size > markdownSourceCacheLimit) {
+      const oldest = markdownSourceCache.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      markdownSourceCache.delete(oldest);
+    }
+  }
+  return result;
+}
+
+function markdownSourceResult(source: ReturnType<typeof readTaskProjectionSource>): {
+  readonly entries: ReadonlyArray<TaskSourceEntry>;
+  readonly hash: string;
+  readonly warnings: ReadonlyArray<ProjectionWarning>;
+} {
   return {
     entries: source.entries,
     hash: hashText(JSON.stringify(source.sourceInputs)),
     warnings: source.warnings
   };
+}
+
+function createMarkdownSourceCacheEntry(
+  layout: ReturnType<typeof resolveHarnessLayout>,
+  source: ReturnType<typeof readTaskProjectionSource>,
+  result: ReturnType<typeof markdownSourceResult>
+): MarkdownSourceCacheEntry | null {
+  const files = new Map(source.sourceInputs.map((input) => [
+    path.join(layout.rootDir, input.sourcePath),
+    input.body
+  ]));
+  const directories = new Set([
+    layout.authoredRoot,
+    layout.tasksRoot,
+    layout.decisionsRoot,
+    ...source.entries.map((entry) => path.dirname(entry.indexPath)),
+    ...[...files.keys()].map(path.dirname),
+    ...listSourceDirectoryPaths(layout.decisionsRoot)
+  ]);
+  const beforeFiles = capturePathSignatures(files.keys());
+  const beforeDirectories = captureExistingPathSignatures(directories);
+  if (beforeFiles === null) return null;
+  for (const [filePath, body] of files) {
+    if (readTextFileIfPresent(filePath) !== body) return null;
+  }
+  const afterFiles = capturePathSignatures(files.keys());
+  const afterDirectories = captureExistingPathSignatures(directories);
+  if (afterFiles === null ||
+      !samePathSignatures(beforeFiles, afterFiles) ||
+      !samePathSignatures(beforeDirectories, afterDirectories)) return null;
+  return { result, fileSignatures: afterFiles, directorySignatures: afterDirectories };
+}
+
+function markdownSourceCacheEntryMatches(entry: MarkdownSourceCacheEntry): boolean {
+  return cachedPathSignaturesMatch(entry.fileSignatures) && cachedPathSignaturesMatch(entry.directorySignatures);
+}
+
+function capturePathSignatures(paths: Iterable<string>): ReadonlyMap<string, string> | null {
+  const signatures = new Map<string, string>();
+  for (const filePath of new Set(paths)) {
+    const signature = localProjectionSourceFileSystem.statSignature(filePath);
+    if (signature === null) return null;
+    signatures.set(filePath, signature);
+  }
+  return signatures;
+}
+
+function captureExistingPathSignatures(paths: Iterable<string>): ReadonlyMap<string, string> {
+  const signatures = new Map<string, string>();
+  for (const filePath of new Set(paths)) {
+    const signature = localProjectionSourceFileSystem.statSignature(filePath);
+    if (signature !== null) signatures.set(filePath, signature);
+  }
+  return signatures;
+}
+
+function cachedPathSignaturesMatch(signatures: ReadonlyMap<string, string>): boolean {
+  for (const [filePath, expected] of signatures) {
+    if (localProjectionSourceFileSystem.statSignature(filePath) !== expected) return false;
+  }
+  return true;
+}
+
+function samePathSignatures(
+  left: ReadonlyMap<string, string>,
+  right: ReadonlyMap<string, string>
+): boolean {
+  return left.size === right.size && [...left].every(([filePath, signature]) => right.get(filePath) === signature);
+}
+
+function listSourceDirectoryPaths(rootPath: string): ReadonlyArray<string> {
+  const stat = statPathIfPresent(rootPath);
+  if (!stat?.isDirectory()) return [];
+  const entries = readDirIfPresent(rootPath);
+  if (entries === null) return [];
+  return [rootPath, ...entries
+    .filter((entry) => entry.isDirectory() && entry.name !== ".git" && entry.name !== "node_modules")
+    .flatMap((entry) => listSourceDirectoryPaths(path.join(rootPath, entry.name)))];
 }
 
 export function readTaskProjectionSourceHashInputs(rootInput: HarnessLayoutInput): ReadonlyArray<TaskProjectionSourceHashInput> {

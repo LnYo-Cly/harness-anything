@@ -21,7 +21,7 @@ import {
 } from "../layout/index.ts";
 import { updateTaskProjectionIncrementally } from "../projection/sqlite-task-incremental-projection.ts";
 import { hashTaskProjectionRows } from "../projection/sqlite-task-projection.ts";
-import { captureProjectionSourceSnapshot } from "../projection/projection-source-snapshot.ts";
+import { captureAuthoredProjectionFingerprint } from "../projection/projection-source-baseline.ts";
 import { appendJsonLineDurably, readDurableState, readPayloadRef, writeWatermarkDurably, writeFileDurably } from "./write-journal-durable.ts";
 import { assertCommitPlanAddable, commitTouchedPaths } from "./write-journal-git.ts";
 import { makeLocalVersionControlSystem } from "./local-version-control-system.ts";
@@ -292,7 +292,7 @@ function flushRecords(
 
   assertCommitPlanAddable(rootDir, plannedRecords.flatMap((record) => record.touchedPaths), rootInput, { versionControlSystem });
   const previousProjectionSourceFingerprint = records.length > 0
-    ? captureProjectionSourceSnapshot(rootInput).fingerprint
+    ? captureAuthoredProjectionFingerprint(rootInput)
     : undefined;
 
   for (const { record, touchedPaths: recordTouchedPaths } of plannedRecords) {
