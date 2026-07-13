@@ -25,6 +25,8 @@ export type {
   FactProjectionRow,
   LocalControllerResult,
   PeripheralDocumentListResult,
+  PeripheralDocumentPayload,
+  PeripheralDocumentResult,
   ProjectionJsonObject,
   ProjectionJsonValue,
   RelationCoverageRow,

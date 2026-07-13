@@ -1,5 +1,6 @@
 import type { Effect } from "effect";
 import type {
+  ArtifactDocumentKind,
   ArtifactStore,
   DomainStatus,
   EngineError,
@@ -223,6 +224,7 @@ export type {
 } from "./runtime-event-ledger-service.ts";
 export { makeLocalControllerService } from "./local-controller-service.ts";
 export {
+  readPeripheralDocumentPayload,
   readAppendProgressPayload,
   validateLocalControllerDecisionId,
   readSetStatusPayload,
@@ -302,6 +304,7 @@ export type TaskListResult = TaskListSuccess | LocalControllerFailure;
 
 export interface TaskDocumentDescriptor {
   readonly path: string;
+  readonly kind: ArtifactDocumentKind;
 }
 
 export interface TaskDetailSuccess extends LocalControllerSuccess {
@@ -312,10 +315,25 @@ export interface TaskDetailSuccess extends LocalControllerSuccess {
 export type TaskDetailResult = TaskDetailSuccess | LocalControllerFailure;
 
 export interface PeripheralDocumentListSuccess extends LocalControllerSuccess {
-  readonly documents: ReadonlyArray<TaskDocumentDescriptor>;
+  readonly documents: ReadonlyArray<PeripheralDocumentDescriptor>;
 }
 
 export type PeripheralDocumentListResult = PeripheralDocumentListSuccess | LocalControllerFailure;
+
+export interface PeripheralDocumentDescriptor {
+  readonly path: string;
+}
+
+export interface PeripheralDocumentPayload {
+  readonly path: string;
+}
+
+export interface PeripheralDocumentSuccess extends LocalControllerSuccess {
+  readonly path: string;
+  readonly body: string;
+}
+
+export type PeripheralDocumentResult = PeripheralDocumentSuccess | LocalControllerFailure;
 
 export interface DecisionProjectionRejected {
   readonly text: string;
@@ -578,6 +596,7 @@ export interface LocalControllerService {
   readonly getTaskDetail: (payload: TaskIdPayload) => Promise<TaskDetailResult>;
   readonly getTaskDocument: (payload: TaskDocumentPayload) => Promise<TaskDocumentResult>;
   readonly getPeripheralDocuments: () => Promise<PeripheralDocumentListResult>;
+  readonly getPeripheralDocument: (payload: PeripheralDocumentPayload) => Promise<PeripheralDocumentResult>;
   readonly getRelationGraph: () => RelationGraphReadResult;
   readonly getDecisions: () => DecisionListResult;
   readonly getDecisionDetail: (payload: DecisionIdPayload) => DecisionDetailResult;

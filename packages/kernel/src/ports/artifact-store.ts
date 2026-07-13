@@ -1,8 +1,11 @@
 import { Context, Effect, Option } from "effect";
 import type { ArtifactStoreError, EngineId, ExternalRef, PackageDisposition, TaskId } from "../domain/index.js";
 
+export type ArtifactDocumentKind = "document" | "attachment";
+
 export interface ArtifactDocument {
   readonly path: string;
+  readonly kind: ArtifactDocumentKind;
   readonly body: string;
   readonly sha256?: string;
 }

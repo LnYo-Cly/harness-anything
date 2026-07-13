@@ -52,6 +52,8 @@ export const apiSchemaContracts = [
   { id: "application.local-controller-error/v1", owner: "application", typeName: "LocalControllerError" },
   { id: "application.local-controller-result/v1", owner: "application", typeName: "LocalControllerResult" },
   { id: "application.peripheral-document-list-result/v1", owner: "application", typeName: "PeripheralDocumentListResult" },
+  { id: "application.peripheral-document-payload/v1", owner: "application", typeName: "PeripheralDocumentPayload" },
+  { id: "application.peripheral-document-result/v1", owner: "application", typeName: "PeripheralDocumentResult" },
   { id: "application.relation-graph-result/v1", owner: "application", typeName: "RelationGraphReadResult" },
   { id: "application.review-detail-result/v1", owner: "application", typeName: "ReviewDetailResult" },
   { id: "application.review-id-payload/v1", owner: "application", typeName: "ReviewIdPayload" },
@@ -120,6 +122,18 @@ export const apiRouteContracts = [
     serviceMethod: "getPeripheralDocuments",
     auth: "local-session-token",
     guiBridgeMethod: "getPeripheralDocuments"
+  },
+  {
+    id: "documents.peripheral.read",
+    method: "GET",
+    path: "/api/documents/:path",
+    inputSchemaId: "application.peripheral-document-payload/v1",
+    outputSchemaId: "application.peripheral-document-result/v1",
+    errorSchemaId: "application.local-controller-error/v1",
+    service: "LocalControllerService",
+    serviceMethod: "getPeripheralDocument",
+    auth: "local-session-token",
+    guiBridgeMethod: "getPeripheralDocument"
   },
   ...taskWriteApiRoutePolicies,
   {

@@ -17,6 +17,7 @@ type LocalControllerGuiMethod =
   | "getTaskDetail"
   | "getTaskDocument"
   | "getPeripheralDocuments"
+  | "getPeripheralDocument"
   | "getRelationGraph"
   | "getTriadicProjection"
   | "getDecisions"
@@ -37,6 +38,7 @@ interface GuiBridgeServiceProxy {
   readonly getTaskDetail: (payload: unknown) => Promise<unknown> | unknown;
   readonly getTaskDocument: (payload: unknown) => Promise<unknown> | unknown;
   readonly getPeripheralDocuments: () => Promise<unknown> | unknown;
+  readonly getPeripheralDocument: (payload: unknown) => Promise<unknown> | unknown;
   readonly getRelationGraph: () => Promise<unknown> | unknown;
   readonly getTriadicProjection: () => Promise<unknown> | unknown;
   readonly getDecisions: () => Promise<unknown> | unknown;
@@ -79,6 +81,10 @@ export const guiBridgeHandlerImplementations = {
   getPeripheralDocuments: {
     serviceMethod: "getPeripheralDocuments",
     invoke: ({ service }) => service.getPeripheralDocuments()
+  },
+  getPeripheralDocument: {
+    serviceMethod: "getPeripheralDocument",
+    invoke: ({ service, payload }) => service.getPeripheralDocument(payload)
   },
   getRelationGraph: {
     serviceMethod: "getRelationGraph",
@@ -193,6 +199,7 @@ function createDaemonServiceProxy(request: GuiDaemonRequester): GuiBridgeService
     getTaskDetail: (payload) => invokeDaemonGuiRoute(request, "getTaskDetail", payload),
     getTaskDocument: (payload) => invokeDaemonGuiRoute(request, "getTaskDocument", payload),
     getPeripheralDocuments: () => invokeDaemonGuiRoute(request, "getPeripheralDocuments", undefined),
+    getPeripheralDocument: (payload) => invokeDaemonGuiRoute(request, "getPeripheralDocument", payload),
     getRelationGraph: () => invokeDaemonGuiRoute(request, "getRelationGraph", undefined),
     getTriadicProjection: () => invokeDaemonGuiRoute(request, "getTriadicProjection", undefined),
     getDecisions: () => invokeDaemonGuiRoute(request, "getDecisions", undefined),
@@ -250,6 +257,8 @@ export function validateGuiRoutePayload(route: ApiRouteContract, payload: unknow
       return validateEntityIdPayload(payload, "reviewId");
     case "application.task-document-payload/v1":
       return validateTaskDocumentPayload(payload);
+    case "application.peripheral-document-payload/v1":
+      return validateDocumentPathPayload(payload);
     case "application.set-task-status-payload/v1":
       return validateSetStatusPayload(payload);
     case "application.append-task-progress-payload/v1":
@@ -280,6 +289,11 @@ function validateEntityIdPayload(payload: unknown, field: "executionId" | "revie
 function validateTaskDocumentPayload(payload: unknown): PayloadValidation {
   const taskPayload = validateTaskIdPayload(payload);
   if (!taskPayload.ok) return taskPayload;
+  if (!isServicePayloadRecord(payload) || typeof payload.path !== "string") return invalidPayload("path is required.");
+  return { ok: true, payload };
+}
+
+function validateDocumentPathPayload(payload: unknown): PayloadValidation {
   if (!isServicePayloadRecord(payload) || typeof payload.path !== "string") return invalidPayload("path is required.");
   return { ok: true, payload };
 }

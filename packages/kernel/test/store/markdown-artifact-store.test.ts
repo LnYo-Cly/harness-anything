@@ -25,6 +25,22 @@ test("markdown artifact store recursively lists authored Markdown paths only", (
   }
 });
 
+test("markdown artifact store classifies task package documents and attachments", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "ha-task-artifacts-"));
+  try {
+    writeDocument(rootDir, "harness/tasks/task-1/notes.md", "# Notes\n");
+    writeDocument(rootDir, "harness/tasks/task-1/diagram.png", "not really a png");
+
+    const taskPackage = Effect.runSync(makeMarkdownArtifactStore({ rootDir }).readTaskPackage("task-1"));
+    assert.deepEqual(taskPackage.documents.map(({ path: documentPath, kind }) => ({ path: documentPath, kind })), [
+      { path: "diagram.png", kind: "attachment" },
+      { path: "notes.md", kind: "document" }
+    ]);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 function writeDocument(rootDir: string, documentPath: string, body: string): void {
   const target = path.join(rootDir, documentPath);
   mkdirSync(path.dirname(target), { recursive: true });

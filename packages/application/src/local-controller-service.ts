@@ -1,6 +1,6 @@
 import path from "node:path";
 import { Effect } from "effect";
-import type { ArtifactStore, EngineError, FactRecord, WriteError } from "../../kernel/src/index.ts";
+import type { ArtifactStore, EngineError, FactRecord, HarnessLayout, WriteError } from "../../kernel/src/index.ts";
 import {
   parseFactFlowRecords,
   queryDecisionProjection,
@@ -15,6 +15,7 @@ import {
   resolveHarnessLayout
 } from "../../kernel/src/index.ts";
 import {
+  readPeripheralDocumentPayload,
   readTaskDocumentPayload,
   validateLocalControllerDecisionId,
   validateLocalControllerTaskId
@@ -25,7 +26,9 @@ import type {
   LocalControllerFailure,
   LocalControllerResult,
   LocalControllerService,
-  LocalControllerServiceOptions
+  LocalControllerServiceOptions,
+  PeripheralDocumentResult,
+  TaskDocumentDescriptor
 } from "./index.ts";
 import { makeTaskLifecycleOrchestrator } from "./task-lifecycle-orchestrator.ts";
 
@@ -63,16 +66,21 @@ export function makeLocalControllerService(options: LocalControllerServiceOption
     },
     getPeripheralDocuments: async () => {
       const layout = resolveHarnessLayout({ rootDir, layoutOverrides: options.layoutOverrides });
-      const tasksPrefix = path.relative(layout.authoredRoot, layout.tasksRoot).split(path.sep).join("/");
+      const boundary = peripheralDocumentBoundary(layout);
+      if (!boundary.ok) return boundary;
       const documents = await Effect.runPromise(options.artifactStore.listAuthoredDocuments().pipe(
-        Effect.map((authoredDocuments) => authoredDocuments.filter((document) =>
-          tasksPrefix.startsWith("../")
-          || (tasksPrefix !== ""
-            && document.path !== tasksPrefix
-            && !document.path.startsWith(`${tasksPrefix}/`)))),
+        Effect.map((authoredDocuments) => authoredDocuments.filter((document) => boundary.includes(document.path))),
         Effect.catchAll(() => Effect.succeed([]))
       ));
       return { ok: true, documents };
+    },
+    getPeripheralDocument: async (payload) => {
+      const parsed = readPeripheralDocumentPayload(payload);
+      if (!parsed.ok) return parsed;
+      const boundary = peripheralDocumentBoundary(resolveHarnessLayout({ rootDir, layoutOverrides: options.layoutOverrides }));
+      if (!boundary.ok) return boundary;
+      if (!boundary.includes(parsed.path)) return documentNotFound(parsed.path);
+      return Effect.runPromise(readControllerPeripheralDocument(options.artifactStore, parsed.path));
     },
     getRelationGraph: () => {
       const result = readRelationGraphProjection({ rootDir, layoutOverrides: options.layoutOverrides });
@@ -214,10 +222,10 @@ export function makeLocalControllerService(options: LocalControllerServiceOption
   };
 }
 
-function listTaskDocuments(artifactStore: Pick<ArtifactStore, "readTaskPackage">, taskId: string): Effect.Effect<ReadonlyArray<{ readonly path: string }>> {
+function listTaskDocuments(artifactStore: Pick<ArtifactStore, "readTaskPackage">, taskId: string): Effect.Effect<ReadonlyArray<TaskDocumentDescriptor>> {
   return artifactStore.readTaskPackage(taskId).pipe(
     Effect.map((taskPackage) => taskPackage.documents
-      .map((document) => ({ path: document.path }))
+      .map((document) => ({ path: document.path, kind: document.kind }))
       .sort((left, right) => left.path.localeCompare(right.path))),
     Effect.catchAll(() => Effect.succeed([]))
   );
@@ -229,6 +237,41 @@ function taskNotFound(taskId: string): LocalControllerFailure {
 
 function decisionNotFound(decisionId: string): LocalControllerFailure {
   return { ok: false, error: { code: "decision_not_found", hint: `decision not found: ${decisionId}` } };
+}
+
+function documentNotFound(documentPath: string): LocalControllerFailure {
+  return { ok: false, error: { code: "document_not_found", hint: documentPath } };
+}
+
+type PeripheralDocumentBoundary =
+  | { readonly ok: true; readonly includes: (documentPath: string) => boolean }
+  | LocalControllerFailure;
+
+function peripheralDocumentBoundary(layout: Pick<HarnessLayout, "authoredRoot" | "tasksRoot">): PeripheralDocumentBoundary {
+  const tasksPrefix = path.relative(layout.authoredRoot, layout.tasksRoot);
+  const authoredPrefix = path.relative(layout.tasksRoot, layout.authoredRoot);
+  if (tasksPrefix === "" || isContainedRelativePath(authoredPrefix)) {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_layout",
+        hint: "Peripheral documents require tasksRoot to differ from authoredRoot."
+      }
+    };
+  }
+  if (!isContainedRelativePath(tasksPrefix)) return { ok: true, includes: () => true };
+  const portableTasksPrefix = tasksPrefix.split(path.sep).join("/");
+  return {
+    ok: true,
+    includes: (documentPath) => documentPath !== portableTasksPrefix
+      && !documentPath.startsWith(`${portableTasksPrefix}/`)
+  };
+}
+
+function isContainedRelativePath(relativePath: string): boolean {
+  return relativePath === "" || (!path.isAbsolute(relativePath)
+    && relativePath !== ".."
+    && !relativePath.startsWith(`..${path.sep}`));
 }
 
 function entityNotFound(kind: string, id: string): LocalControllerFailure {
@@ -253,11 +296,28 @@ function toFactProjectionRow(taskId: string, fact: FactRecord): FactProjectionRo
 
 function readControllerTaskDocument(artifactStore: Pick<ArtifactStore, "readTaskPackage">, taskId: string, portablePath: string): Effect.Effect<LocalControllerResult & { readonly taskId?: string; readonly path?: string; readonly body?: string }> {
   return artifactStore.readTaskPackage(taskId).pipe(
-    Effect.map((taskPackage) => taskPackage.documents.find((document) => document.path === portablePath)?.body ?? null),
+    Effect.map((taskPackage) => taskPackage.documents.find((document) => document.path === portablePath) ?? null),
+    Effect.catchAll(() => Effect.succeed(null)),
+    Effect.map((document) => document === null
+      ? ({ ok: false, error: { code: "document_not_found", hint: portablePath } } satisfies LocalControllerFailure)
+      : document.kind === "attachment"
+        ? ({ ok: false, error: { code: "attachment_not_renderable", hint: portablePath } } satisfies LocalControllerFailure)
+        : ({ ok: true, taskId, path: portablePath, body: document.body }))
+  );
+}
+
+function readControllerPeripheralDocument(
+  artifactStore: Pick<ArtifactStore, "listAuthoredDocuments" | "readAuthoredDocument">,
+  portablePath: string
+): Effect.Effect<PeripheralDocumentResult> {
+  return artifactStore.listAuthoredDocuments().pipe(
+    Effect.flatMap((documents) => documents.some((document) => document.path === portablePath)
+      ? artifactStore.readAuthoredDocument(portablePath).pipe(Effect.map((document) => document.body))
+      : Effect.succeed(null)),
     Effect.catchAll(() => Effect.succeed(null)),
     Effect.map((body) => body === null
-      ? ({ ok: false, error: { code: "document_not_found", hint: portablePath } } satisfies LocalControllerFailure)
-      : ({ ok: true, taskId, path: portablePath, body }))
+      ? documentNotFound(portablePath)
+      : ({ ok: true, path: portablePath, body } satisfies PeripheralDocumentResult))
   );
 }
 

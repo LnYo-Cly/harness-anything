@@ -3,6 +3,7 @@ import path from "node:path";
 import { Effect, Option } from "effect";
 import type {
   ArtifactDocument,
+  ArtifactDocumentKind,
   ArtifactStore,
   AuthoredDocumentDescriptor,
   TaskPackageRead
@@ -75,7 +76,7 @@ function listAuthoredDocuments(rootInput: HarnessLayoutInput): ReadonlyArray<Aut
         visit(fullPath);
         continue;
       }
-      if (path.extname(entry.name).toLowerCase() !== ".md") continue;
+      if (classifyArtifactPath(entry.name) !== "document") continue;
       documents.push({ path: path.relative(authoredRoot, fullPath).split(path.sep).join("/") });
     }
   }
@@ -148,6 +149,7 @@ export function readAuthoredDocument(rootInput: HarnessLayoutInput, documentPath
   const body = readFileSync(fullPath, "utf8");
   return {
     path: safePath,
+    kind: classifyArtifactPath(safePath),
     body,
     sha256: sha256Text(body)
   };
@@ -182,6 +184,7 @@ function readDocuments(rootPath: string): ReadonlyArray<ArtifactDocument> {
       const body = readFileSync(fullPath, "utf8");
       documents.push({
         path: path.relative(rootPath, fullPath).split(path.sep).join("/"),
+        kind: classifyArtifactPath(entry.name),
         body,
         sha256: sha256Text(body)
       });
@@ -191,6 +194,10 @@ function readDocuments(rootPath: string): ReadonlyArray<ArtifactDocument> {
   visit(rootPath);
   assertNoPortablePathCollisions(documents.map((document) => document.path));
   return documents.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function classifyArtifactPath(documentPath: string): ArtifactDocumentKind {
+  return path.extname(documentPath).toLowerCase() === ".md" ? "document" : "attachment";
 }
 
 function documentPath(rootInput: HarnessLayoutInput, write: DocumentWrite): string {
