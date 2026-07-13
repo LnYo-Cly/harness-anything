@@ -1,6 +1,8 @@
 // harness-test-tier: integration
 import { testWriteAttribution } from "../test-attribution.ts";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import test from "node:test";
 import { mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -8,7 +10,7 @@ import { DatabaseSync } from "node:sqlite";
 import { Effect, Option } from "effect";
 import { auditTaskProvenance, checkTaskProjection, hashTaskProjectionRows, queryDecisionProjection, queryTaskExecutionTrace, readTaskProjection, rebuildTaskProjection } from "../../src/index.ts";
 import { makeJournaledWriteCoordinator, makeMarkdownArtifactStore } from "../../src/store/index.ts";
-import { docWrite, withTempStore } from "./helpers.ts";
+import { docWrite, withTempStore, withTempStoreAsync } from "./helpers.ts";
 
 test("markdown artifact store remains the rebuildable source of truth without SQLite", () => {
   withTempStore((rootDir) => {
@@ -152,6 +154,57 @@ test("SQLite projection reads discard tampered declared entity rows", () => {
 
     assert.equal(readEntityProjectionTables(projectionPath).executions[0]?.state, "submitted");
     assert.equal(result.warnings.some((warning) => warning.code === "projection_tampered"), true);
+  });
+});
+
+test("SQLite full rebuild atomically publishes complete declared entity generations", async () => {
+  await withTempStoreAsync(async (rootDir) => {
+    writeIndex(rootDir, "task_01J00000000000000000000000", "Projected entities", "in_review");
+    writeProjectionEntities(rootDir);
+    const executionRoot = path.join(rootDir, "harness/tasks/task_01J00000000000000000000000/executions");
+    const templatePath = path.join(executionRoot, "exe_01J00000000000000000000000.md");
+    const template = JSON.parse(readFileSync(templatePath, "utf8")) as Record<string, unknown>;
+    const expectedExecutions = 250;
+    for (let index = 1; index < expectedExecutions; index += 1) {
+      const executionId = `exe_${String(index).padStart(26, "0")}`;
+      writeFileSync(path.join(executionRoot, `${executionId}.md`), `${JSON.stringify({
+        ...template,
+        execution_id: executionId,
+        outputs: []
+      })}\n`);
+    }
+    rebuildTaskProjection({ rootDir });
+
+    const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
+    const reader = spawn(process.execPath, ["--input-type=module", "-e", atomicProjectionReaderScript], {
+      env: {
+        ...process.env,
+        HARNESS_PROJECTION_PATH: projectionPath,
+        HARNESS_EXPECTED_EXECUTIONS: String(expectedExecutions)
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+    reader.stdout.setEncoding("utf8");
+    reader.stderr.setEncoding("utf8");
+    reader.stdout.on("data", (chunk: string) => { stdout += chunk; });
+    reader.stderr.on("data", (chunk: string) => { stderr += chunk; });
+    await waitForOutput(() => stdout.includes("READY\n"));
+
+    for (let iteration = 0; iteration < 8; iteration += 1) {
+      rebuildTaskProjection({ rootDir });
+    }
+
+    const [exitCode] = await once(reader, "close") as [number];
+    assert.equal(exitCode, 0, stderr);
+    const result = JSON.parse(stdout.trim().split("\n").at(-1)!) as {
+      readonly reads: number;
+      readonly failures: number;
+      readonly partial: number;
+    };
+    assert.equal(result.reads > 0, true);
+    assert.deepEqual(result, { reads: result.reads, failures: 0, partial: 0 });
   });
 });
 
@@ -579,3 +632,37 @@ function readEntityProjectionTables(projectionPath: string): {
     db.close();
   }
 }
+
+async function waitForOutput(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("timed out waiting for projection reader");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+const atomicProjectionReaderScript = `
+import { DatabaseSync } from "node:sqlite";
+const projectionPath = process.env.HARNESS_PROJECTION_PATH;
+const expected = Number(process.env.HARNESS_EXPECTED_EXECUTIONS);
+let reads = 0;
+let failures = 0;
+let partial = 0;
+process.stdout.write("READY\\n");
+const deadline = Date.now() + 4_000;
+while (Date.now() < deadline) {
+  let db;
+  try {
+    db = new DatabaseSync(projectionPath, { readOnly: true });
+    const row = db.prepare("SELECT COUNT(*) AS count FROM execution_projection").get();
+    const meta = db.prepare("SELECT value FROM projection_meta WHERE key = 'declaredRowsHash'").get();
+    reads += 1;
+    if (Number(row.count) !== expected || typeof meta?.value !== "string" || meta.value.length === 0) partial += 1;
+  } catch {
+    failures += 1;
+  } finally {
+    db?.close();
+  }
+}
+process.stdout.write(JSON.stringify({ reads, failures, partial }) + "\\n");
+`;

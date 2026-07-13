@@ -20,7 +20,7 @@ import type {
   TaskProjectionRow
 } from "./types.ts";
 
-export const projectionVersion = "entity-projection/d4-v7";
+export const projectionVersion = "entity-projection/d4-v8";
 const baseTaskProjectionColumns = [
   "task_id",
   "title",
@@ -59,12 +59,13 @@ export function writeProjectionDatabase(
   decisionRows: ReadonlyArray<DecisionProjectionRow>,
   meta: ProjectionMeta,
   graphRows: ProjectionGraphRows = { relationEdges: [], coverageRows: [], factAnchors: [] },
-  taskFieldExtensions: ReadonlyArray<TaskFieldExtensionProjection> = []
+  taskFieldExtensions: ReadonlyArray<TaskFieldExtensionProjection> = [],
+  materializeSupplemental?: (sql: SqlClient.SqlClient) => Effect.Effect<void, unknown>
 ): void {
   mkdirSync(path.dirname(projectionPath), { recursive: true });
   const tempPath = `${projectionPath}.${process.pid}.${Date.now()}.tmp`;
   rmSync(tempPath, { force: true });
-  runSqlite(tempPath, Effect.gen(function* () {
+  const writeEffect = Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql`PRAGMA journal_mode = DELETE`;
     yield* sql`CREATE TABLE projection_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`;
@@ -156,6 +157,7 @@ export function writeProjectionDatabase(
     yield* insertMeta(sql, "sourceHash", meta.sourceHash);
     yield* insertMeta(sql, "rowsHash", meta.rowsHash);
     yield* insertMeta(sql, "decisionRowsHash", meta.decisionRowsHash ?? "");
+    yield* insertMeta(sql, "declaredRowsHash", meta.declaredRowsHash ?? "");
     for (const row of rows) yield* insertTaskRow(sql, row, projectedTaskFieldExtensions);
     for (const row of decisionRows) yield* insertDecisionRow(sql, row);
     for (const edge of graphRows.relationEdges) yield* insertRelationEdge(sql, edge);
@@ -170,7 +172,14 @@ export function writeProjectionDatabase(
     yield* sql`CREATE INDEX relation_edges_target_ref ON relation_edges (target_ref)`;
     yield* sql`CREATE INDEX relation_coverage_decision_ref ON relation_coverage (decision_ref)`;
     yield* sql`CREATE INDEX task_fact_anchors_task_id ON task_fact_anchors (task_id)`;
-  }));
+    if (materializeSupplemental) yield* materializeSupplemental(sql);
+  });
+  try {
+    runSqlite(tempPath, writeEffect);
+  } catch (error) {
+    rmSync(tempPath, { force: true });
+    throw error;
+  }
   renameSync(tempPath, projectionPath);
 }
 
@@ -271,7 +280,8 @@ function readProjectionDatabase(
         version: meta.get("version"),
         sourceHash: meta.get("sourceHash") ?? "",
         rowsHash: meta.get("rowsHash") ?? "",
-        decisionRowsHash: meta.get("decisionRowsHash") ?? ""
+        decisionRowsHash: meta.get("decisionRowsHash") ?? "",
+        declaredRowsHash: meta.get("declaredRowsHash") ?? ""
       },
       rows: taskRecords.map((record) => recordToTaskRow(record, taskFieldExtensions)),
       decisionRows: decisionRecords.map(recordToDecisionRow)

@@ -2,6 +2,10 @@ import { SqlClient } from "@effect/sql";
 import { Effect } from "effect";
 import type { ProjectionMeta, TaskFieldExtensionProjection, TaskProjectionRow, DecisionProjectionRow } from "./types.ts";
 import type { ProjectionGraphRows } from "./sqlite-projection-store.ts";
+import type { AttributionEvent } from "../schemas/attribution-event.ts";
+import type { DeclaredProjectionSnapshot } from "./projection-source-snapshot.ts";
+import { replaceDeclaredProjectionRows } from "./entity-declaration-projection.ts";
+import { materializeEntityAttributionBlocks, replaceAttributionProjectionRows } from "./sqlite-attribution-projection.ts";
 import {
   insertCoverageRow,
   insertDecisionRow,
@@ -21,6 +25,8 @@ export function updateProjectionDatabase(
     readonly upsertDecisionRows: ReadonlyArray<DecisionProjectionRow>;
     readonly meta: ProjectionMeta;
     readonly graphRows: ProjectionGraphRows;
+    readonly declaredTables: ReadonlyArray<DeclaredProjectionSnapshot>;
+    readonly attributionEvents: ReadonlyArray<AttributionEvent>;
     readonly taskFieldExtensions?: ReadonlyArray<TaskFieldExtensionProjection>;
   }
 ): void {
@@ -47,9 +53,15 @@ export function updateProjectionDatabase(
       for (const edge of change.graphRows.relationEdges) yield* insertRelationEdge(sql, edge);
       for (const row of change.graphRows.coverageRows) yield* insertCoverageRow(sql, row);
       for (const row of change.graphRows.factAnchors) yield* insertFactAnchor(sql, row);
+      for (const table of change.declaredTables) {
+        yield* replaceDeclaredProjectionRows(sql, table.declaration, table.rows);
+      }
+      yield* replaceAttributionProjectionRows(sql, change.attributionEvents);
+      yield* materializeEntityAttributionBlocks(sql, change.attributionEvents);
       yield* upsertMeta(sql, "sourceHash", change.meta.sourceHash);
       yield* upsertMeta(sql, "rowsHash", change.meta.rowsHash);
       yield* upsertMeta(sql, "decisionRowsHash", change.meta.decisionRowsHash ?? "");
+      yield* upsertMeta(sql, "declaredRowsHash", change.meta.declaredRowsHash ?? "");
       yield* sql`COMMIT`;
     } catch (error) {
       yield* sql`ROLLBACK`;

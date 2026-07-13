@@ -9,23 +9,30 @@ import { readRelationGraphRows, tryReadProjectionDatabase } from "./sqlite-proje
 import { updateProjectionDatabase } from "./sqlite-projection-update-store.ts";
 import { compareRows, hashExactRows, readMarkdownSource, sourcePath, taskEntryToRow } from "./sqlite-task-source.ts";
 import { rebuildTaskProjection } from "./sqlite-task-projection.ts";
+import {
+  captureProjectionSourceSnapshot,
+  hashDeclaredProjectionSnapshots,
+  readDeclaredProjectionSnapshots
+} from "./projection-source-snapshot.ts";
 import type { DecisionProjectionRow, ProjectionReadResult, TaskProjectionOptions, TaskProjectionRow } from "./types.ts";
 
 export function updateTaskProjectionIncrementally(options: TaskProjectionOptions & {
   readonly touchedPaths: ReadonlyArray<string>;
-  readonly previousSourceHash?: string;
+  readonly previousSourceFingerprint?: string;
 }): ProjectionReadResult & { readonly mode: "incremental" | "rebuild" | "unchanged" } {
   const rootDir = path.resolve(options.rootDir);
   const runtimeContext = createHarnessRuntimeContext(rootDir, options.layoutOverrides);
   const projectionPath = options.projectionPath ? path.resolve(options.projectionPath) : resolveHarnessLayout(runtimeContext).projectionPath;
-  const source = readMarkdownSource(runtimeContext);
+  const snapshot = captureProjectionSourceSnapshot(runtimeContext);
+  const source = snapshot.taskSource;
+  const sourceHash = snapshot.fingerprint;
 
   if (!existsSync(projectionPath)) {
     return { ...rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions }), mode: "rebuild" };
   }
 
   const existing = tryReadProjectionDatabase(projectionPath, options.taskFieldExtensions);
-  if (!existing.ok || !projectionRowsMatchMeta(existing)) {
+  if (!existing.ok || !projectionRowsMatchMeta(existing, projectionPath)) {
     return { ...rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions }), mode: "rebuild" };
   }
 
@@ -42,7 +49,7 @@ export function updateTaskProjectionIncrementally(options: TaskProjectionOptions
     newEdges: newGraph.edges
   });
 
-  if (existing.meta.sourceHash === source.hash && !hasAffectedProjectionEntities(affected)) {
+  if (existing.meta.sourceHash === sourceHash && !hasAffectedProjectionEntities(affected)) {
     return {
       rows: [...existing.rows].sort(compareRows),
       warnings: source.warnings,
@@ -50,7 +57,7 @@ export function updateTaskProjectionIncrementally(options: TaskProjectionOptions
     };
   }
 
-  if (existing.meta.sourceHash !== source.hash && options.previousSourceHash && existing.meta.sourceHash !== options.previousSourceHash) {
+  if (existing.meta.sourceHash !== sourceHash && options.previousSourceFingerprint && existing.meta.sourceHash !== options.previousSourceFingerprint) {
     return { ...rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions }), mode: "rebuild" };
   }
 
@@ -58,6 +65,7 @@ export function updateTaskProjectionIncrementally(options: TaskProjectionOptions
   const decisionChange = incrementalDecisionRows(runtimeContext, existing.decisionRows, affected.decisionIds, affected.decisionPaths);
   const rowsHash = hashExactRows(taskChange.rows);
   const decisionRowsHash = hashDecisionProjectionRows(decisionChange.rows);
+  const declaredRowsHash = hashDeclaredProjectionSnapshots(snapshot.declaredTables);
 
   updateProjectionDatabase(projectionPath, {
     deleteTaskIds: [...taskChange.deleteIds],
@@ -65,15 +73,18 @@ export function updateTaskProjectionIncrementally(options: TaskProjectionOptions
     deleteDecisionIds: [...decisionChange.deleteIds],
     upsertDecisionRows: decisionChange.currentRows,
     meta: {
-      sourceHash: source.hash,
+      sourceHash,
       rowsHash,
-      decisionRowsHash
+      decisionRowsHash,
+      declaredRowsHash
     },
     graphRows: {
       relationEdges: newGraph.edges,
       coverageRows: newGraph.coverageRows,
       factAnchors: newGraph.factAnchors
     },
+    declaredTables: snapshot.declaredTables,
+    attributionEvents: snapshot.attributionEvents,
     taskFieldExtensions: options.taskFieldExtensions
   });
 
@@ -95,10 +106,15 @@ function hasAffectedProjectionEntities(affected: {
 function projectionRowsMatchMeta(existing: {
   readonly rows: ReadonlyArray<TaskProjectionRow>;
   readonly decisionRows: ReadonlyArray<DecisionProjectionRow>;
-  readonly meta: { readonly rowsHash: string; readonly decisionRowsHash?: string };
-}): boolean {
-  return existing.meta.rowsHash === hashExactRows(existing.rows) &&
-    (existing.meta.decisionRowsHash ?? "") === hashDecisionProjectionRows(existing.decisionRows);
+  readonly meta: { readonly rowsHash: string; readonly decisionRowsHash?: string; readonly declaredRowsHash?: string };
+}, projectionPath: string): boolean {
+  try {
+    return existing.meta.rowsHash === hashExactRows(existing.rows) &&
+      (existing.meta.decisionRowsHash ?? "") === hashDecisionProjectionRows(existing.decisionRows) &&
+      (existing.meta.declaredRowsHash ?? "") === hashDeclaredProjectionSnapshots(readDeclaredProjectionSnapshots(projectionPath));
+  } catch {
+    return false;
+  }
 }
 
 function safeReadRelationGraphRows(projectionPath: string): {

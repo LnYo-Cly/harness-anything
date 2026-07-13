@@ -12,8 +12,113 @@ import {
   readTaskProjection,
   rebuildTaskProjection
 } from "../../src/projection/sqlite-task-projection.ts";
+import { readAttributionProjection } from "../../src/projection/sqlite-attribution-projection.ts";
 import { updateTaskProjectionIncrementally } from "../../src/projection/sqlite-task-incremental-projection.ts";
-import { readMarkdownSource } from "../../src/projection/sqlite-task-source.ts";
+import { captureProjectionSourceSnapshot } from "../../src/projection/projection-source-snapshot.ts";
+import {
+  discoverDeclaredEntityProjection,
+  readDeclaredEntitySource
+} from "../../src/projection/entity-declaration-projection.ts";
+import { executionDeclaration } from "../../src/entity/execution-declaration.ts";
+
+test("first task edit after a full rebuild stays incremental", () => {
+  withProjectionPair((rootDir) => {
+    seedHarness(rootDir);
+    rebuildTaskProjection({ rootDir });
+
+    const previousSourceFingerprint = captureProjectionSourceSnapshot(rootDir).fingerprint;
+    const touchedPath = writeIndex(rootDir, "task-a", "Task task-a updated", "done", []);
+    const result = updateTaskProjectionIncrementally({
+      rootDir,
+      touchedPaths: [touchedPath],
+      previousSourceFingerprint
+    });
+
+    assert.equal(result.mode, "incremental");
+    const fresh = readTaskProjection({ rootDir });
+    assert.equal(fresh.warnings.some((warning) => warning.code === "projection_stale"), false);
+    assert.equal(fresh.rows.find((row) => row.taskId === "task-a")?.canonicalStatus, "done");
+  });
+});
+
+test("task edit with a new attribution event stays incremental and immediately fresh", () => {
+  withProjectionPair((rootDir) => {
+    seedHarness(rootDir);
+    rebuildTaskProjection({ rootDir });
+
+    const previousSourceFingerprint = captureProjectionSourceSnapshot(rootDir).fingerprint;
+    const touchedPath = writeIndex(rootDir, "task-a", "Task task-a attributed", "done", []);
+    writeAttributionEvent(rootDir, "event-incremental", "task/task-a");
+    const result = updateTaskProjectionIncrementally({
+      rootDir,
+      touchedPaths: [touchedPath],
+      previousSourceFingerprint
+    });
+
+    assert.equal(result.mode, "incremental");
+    assert.equal(readAttributionProjection(rootDir).length, 1);
+    const fresh = readTaskProjection({ rootDir });
+    assert.equal(fresh.warnings.some((warning) => warning.code === "projection_stale"), false);
+    assert.equal(fresh.warnings.some((warning) => warning.severity === "hard-fail"), false);
+    assert.equal(fresh.rows.find((row) => row.taskId === "task-a")?.attribution.latestActor?.principal.personId, "person_test");
+  });
+});
+
+test("declared entity discovery follows path templates without crawling unrelated task artifacts", () => {
+  withProjectionPair((rootDir) => {
+    seedHarness(rootDir);
+    let unrelated = path.join(rootDir, "harness/tasks/task-a/artifacts");
+    for (let depth = 0; depth < 50; depth += 1) {
+      unrelated = path.join(unrelated, `level-${depth}`);
+      mkdirSync(unrelated, { recursive: true });
+      writeFileSync(path.join(unrelated, "trace.log"), "unrelated\n", "utf8");
+    }
+
+    const discovered = discoverDeclaredEntityProjection(rootDir, executionDeclaration);
+
+    assert.deepEqual(discovered.rows, []);
+    assert.equal(discovered.stats.directoriesVisited < 10, true, JSON.stringify(discovered.stats));
+  });
+});
+
+test("declared entity source fingerprinting does not decode entity documents", () => {
+  withProjectionPair((rootDir) => {
+    seedHarness(rootDir);
+    const executionPath = path.join(rootDir, "harness/tasks/task-a/executions/exe-malformed.md");
+    mkdirSync(path.dirname(executionPath), { recursive: true });
+    writeFileSync(executionPath, "not valid execution json\n", "utf8");
+
+    const source = readDeclaredEntitySource(rootDir, executionDeclaration);
+
+    assert.equal(source.inputs.length, 1);
+    assert.equal(source.inputs[0]?.relativePath, "tasks/task-a/executions/exe-malformed.md");
+    assert.equal(source.inputs[0]?.body, "not valid execution json\n");
+    assert.throws(() => discoverDeclaredEntityProjection(rootDir, executionDeclaration));
+  });
+});
+
+test("declared entity source cache reuses verified paths and invalidates same-size rewrites", () => {
+  withProjectionPair((rootDir) => {
+    seedHarness(rootDir);
+    const executionPath = path.join(rootDir, "harness/tasks/task-a/executions/exe-cache.md");
+    mkdirSync(path.dirname(executionPath), { recursive: true });
+    writeFileSync(executionPath, "source-a\n", "utf8");
+    const fixedAt = new Date("2026-07-01T00:00:00.000Z");
+    utimesSync(executionPath, fixedAt, fixedAt);
+
+    const first = readDeclaredEntitySource(rootDir, executionDeclaration);
+    const second = readDeclaredEntitySource(rootDir, executionDeclaration);
+    assert.equal(first.stats.cacheHit, false);
+    assert.equal(second.stats.cacheHit, true);
+
+    writeFileSync(executionPath, "source-b\n", "utf8");
+    utimesSync(executionPath, fixedAt, fixedAt);
+    const changed = readDeclaredEntitySource(rootDir, executionDeclaration);
+    assert.equal(changed.stats.cacheHit, false);
+    assert.equal(changed.inputs[0]?.body, "source-b\n");
+    assert.notEqual(changed.hash, first.hash);
+  });
+});
 
 test("incremental projection matches full rebuild across deterministic random write sequences", () => {
   for (const seed of [7, 19, 43, 71]) {
@@ -27,14 +132,14 @@ test("incremental projection matches full rebuild across deterministic random wr
       for (let step = 0; step < 36; step += 1) {
         const operation = Math.floor(random() * 5);
         const taskId = ["task-a", "task-b", "task-c"][Math.floor(random() * 3)] ?? "task-a";
-        const previousSourceHash = readMarkdownSource(incrementalRoot).hash;
+        const previousSourceFingerprint = captureProjectionSourceSnapshot(incrementalRoot).fingerprint;
         const touchedPaths = applyRandomProjectionWrite(incrementalRoot, operation, taskId, step, seed);
         applyRandomProjectionWrite(rebuildRoot, operation, taskId, step, seed);
 
         updateTaskProjectionIncrementally({
           rootDir: incrementalRoot,
           touchedPaths,
-          previousSourceHash
+          previousSourceFingerprint
         });
         rebuildTaskProjection({ rootDir: rebuildRoot });
 
@@ -53,14 +158,14 @@ test("incremental projection upserts task rows when package slug differs from ta
     rebuildTaskProjection({ rootDir: incrementalRoot });
     rebuildTaskProjection({ rootDir: rebuildRoot });
 
-    const previousSourceHash = readMarkdownSource(incrementalRoot).hash;
+    const previousSourceFingerprint = captureProjectionSourceSnapshot(incrementalRoot).fingerprint;
     const touchedPath = writeIndex(incrementalRoot, taskId, "Slugged Task Updated", "done", [], slug);
     writeIndex(rebuildRoot, taskId, "Slugged Task Updated", "done", [], slug);
 
     updateTaskProjectionIncrementally({
       rootDir: incrementalRoot,
       touchedPaths: [touchedPath],
-      previousSourceHash
+      previousSourceFingerprint
     });
     rebuildTaskProjection({ rootDir: rebuildRoot });
 
@@ -96,6 +201,39 @@ function seedHarness(rootDir: string): void {
   }
   writeFacts(rootDir, "task-a", true);
   writeDecision(rootDir, false);
+}
+
+function writeAttributionEvent(rootDir: string, eventId: string, entityId: string): string {
+  const eventRoot = path.join(rootDir, "harness/attribution-events");
+  mkdirSync(eventRoot, { recursive: true });
+  const eventPath = path.join(eventRoot, `${eventId}.jsonl`);
+  writeFileSync(eventPath, `${JSON.stringify({
+    schema: "attribution-event/v1",
+    eventId,
+    opId: `op-${eventId}`,
+    journalRecordSchema: "write-journal/v2",
+    entityId,
+    kind: "progress_append",
+    actor: {
+      principal: { kind: "person", personId: "person_test" },
+      executor: { kind: "agent", id: "agent_test" }
+    },
+    principalSource: {
+      kind: "local-configured",
+      authority: "harness.yaml",
+      authoritySha256: `sha256:${"0".repeat(64)}`
+    },
+    executorSource: "client-asserted",
+    at: "2026-07-07T00:00:00.000Z",
+    recordedAt: "2026-07-07T00:00:01.000Z",
+    payloadHash: `sha256:${"1".repeat(64)}`,
+    payloadRef: {
+      path: `.harness/payloads/${eventId}.json`,
+      sha256: `sha256:${"1".repeat(64)}`
+    }
+  })}\n`, "utf8");
+  stamp(eventPath);
+  return eventPath;
 }
 
 function applyRandomProjectionWrite(rootDir: string, operation: number, taskId: string, step: number, seed: number): ReadonlyArray<string> {

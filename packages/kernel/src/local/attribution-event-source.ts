@@ -6,17 +6,45 @@ import { stablePayloadHash } from "../integrity/stable-hash.ts";
 import { AttributionEventSchema, type AttributionEvent } from "../schemas/attribution-event.ts";
 import { localLayoutFileSystem } from "./local-layout-file-system.ts";
 
+export interface AttributionEventSourceInput {
+  readonly relativePath: string;
+  readonly body: string;
+}
+
+export interface AttributionEventSource {
+  readonly inputs: ReadonlyArray<AttributionEventSourceInput>;
+  readonly hash: string;
+}
+
 export function readAttributionEvents(rootInput: HarnessLayoutInput): ReadonlyArray<AttributionEvent> {
+  return readAttributionEventsFromSource(readAttributionEventSource(rootInput));
+}
+
+export function readAttributionEventSource(rootInput: HarnessLayoutInput): AttributionEventSource {
   const eventsRoot = resolveHarnessLayout(rootInput).attributionEventsRoot;
-  if (!localLayoutFileSystem.exists(eventsRoot)) return [];
-  return localLayoutFileSystem.readDirents(eventsRoot)
+  const inputs = localLayoutFileSystem.exists(eventsRoot)
+    ? localLayoutFileSystem.readDirents(eventsRoot)
     .filter((entry) => !entry.isDirectory() && entry.name.endsWith(".jsonl"))
-    .map((entry) => decodeAttributionEvent(localLayoutFileSystem.readText(path.join(eventsRoot, entry.name))))
+    .map((entry) => ({
+      relativePath: entry.name,
+      body: localLayoutFileSystem.readText(path.join(eventsRoot, entry.name))
+    }))
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath))
+    : [];
+  return {
+    inputs,
+    hash: stablePayloadHash({ schema: "attribution-event-source/v1", inputs })
+  };
+}
+
+export function readAttributionEventsFromSource(source: AttributionEventSource): ReadonlyArray<AttributionEvent> {
+  return source.inputs
+    .map((input) => decodeAttributionEvent(input.body))
     .sort((left, right) => left.eventId.localeCompare(right.eventId));
 }
 
 export function attributionEventSourceHash(rootInput: HarnessLayoutInput): string {
-  return stablePayloadHash(readAttributionEvents(rootInput));
+  return readAttributionEventSource(rootInput).hash;
 }
 
 function decodeAttributionEvent(body: string): AttributionEvent {

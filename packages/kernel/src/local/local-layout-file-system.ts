@@ -13,6 +13,17 @@ export const localEvidenceFileSystem = {
   realpath: (inputPath: string) => realpathSync(inputPath)
 };
 
+export const localProjectionSourceFileSystem = {
+  statSignature: (inputPath: string): string | null => {
+    try {
+      const stats = statSync(inputPath, { bigint: true });
+      return [stats.dev, stats.ino, stats.mode, stats.size, stats.mtimeNs, stats.ctimeNs].join(":");
+    } catch {
+      return null;
+    }
+  }
+};
+
 export const localRuntimeStateFileSystem = {
   createExclusiveText: (inputPath: string, value: string): boolean => {
     let descriptor: number;

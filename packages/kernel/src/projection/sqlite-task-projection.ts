@@ -1,21 +1,22 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { Effect } from "effect";
 import { createHarnessRuntimeContext } from "../layout/index.ts";
 import { resolveHarnessLayout } from "../layout/index.ts";
-import { executionDeclaration } from "../entity/execution-declaration.ts";
-import { reviewDeclaration } from "../entity/review-declaration.ts";
-import { sessionEntityDeclaration } from "../entity/session.ts";
-import { sha256Text } from "../integrity/stable-hash.ts";
-import { discoverDeclaredEntityRows, projectDeclaredEntities, readDeclaredProjectionRows } from "./entity-declaration-projection.ts";
+import { replaceDeclaredProjectionRows } from "./entity-declaration-projection.ts";
 import { buildCheckReport, hardFail, runPostMergeChecks, warning } from "./post-merge-checks.ts";
 import type { FactAnchorRow, RelationCoverageRow, RelationGraphEdgeRow } from "./relation-graph-projection.ts";
 import { buildRelationGraphProjection } from "./relation-graph-projection.ts";
 import { projectionVersion, queryDecisionProjectionRows, queryTaskChildrenRows, queryTaskProjectionRows, queryTaskSubtreeRows, readRelationGraphRows, writeProjectionDatabase, tryReadProjectionDatabase } from "./sqlite-projection-store.ts";
-import { compareDecisionRows, hashDecisionProjectionRows, readDecisionProjectionRows } from "./sqlite-decision-source.ts";
-import { materializeAttributionProjection } from "./sqlite-attribution-projection.ts";
-import { attributionEventSourceHash } from "../local/attribution-event-source.ts";
-import { readLegacyPersonIds } from "./entity-attribution-projection.ts";
-import { compareRows, hashExactRows, readMarkdownSource, taskEntryToRow } from "./sqlite-task-source.ts";
+import { compareDecisionRows, hashDecisionProjectionRows } from "./sqlite-decision-source.ts";
+import { materializeEntityAttributionBlocks, replaceAttributionProjectionRows } from "./sqlite-attribution-projection.ts";
+import { compareRows, hashExactRows, taskEntryToRow } from "./sqlite-task-source.ts";
+import {
+  captureProjectionSourceFingerprint,
+  captureProjectionSourceSnapshot,
+  hashDeclaredProjectionSnapshots,
+  readDeclaredProjectionSnapshots
+} from "./projection-source-snapshot.ts";
 export { hashTaskProjectionRows } from "./sqlite-task-source.ts";
 export type {
   CoordinationStatus,
@@ -54,26 +55,30 @@ export function rebuildTaskProjection(options: TaskProjectionOptions): Projectio
   const rootDir = path.resolve(options.rootDir);
   const runtimeContext = createHarnessRuntimeContext(rootDir, options.layoutOverrides);
   const projectionPath = options.projectionPath ? path.resolve(options.projectionPath) : resolveHarnessLayout(runtimeContext).projectionPath;
-  const source = readMarkdownSource(runtimeContext);
+  const snapshot = captureProjectionSourceSnapshot(runtimeContext);
+  const source = snapshot.taskSource;
   const rows = source.entries.map((entry) => taskEntryToRow(runtimeContext, entry, options.taskFieldExtensions)).sort(compareRows);
-  const decisionRows = readDecisionProjectionRows(runtimeContext);
+  const decisionRows = snapshot.decisionRows;
   const rowsHash = hashExactRows(rows);
   const decisionRowsHash = hashDecisionProjectionRows(decisionRows);
-  const sourceHash = projectionSourceHash(source.hash, runtimeContext);
+  const declaredRowsHash = hashDeclaredProjectionSnapshots(snapshot.declaredTables);
   const relationGraph = buildRelationGraphProjection(runtimeContext);
   writeProjectionDatabase(projectionPath, rows, decisionRows, {
-    sourceHash,
+    sourceHash: snapshot.fingerprint,
     rowsHash,
-    decisionRowsHash
+    decisionRowsHash,
+    declaredRowsHash
   }, {
     relationEdges: relationGraph.edges,
     coverageRows: relationGraph.coverageRows,
     factAnchors: relationGraph.factAnchors
-  }, options.taskFieldExtensions);
-  projectDeclaredEntities(runtimeContext, sessionEntityDeclaration, projectionPath);
-  projectDeclaredEntities(runtimeContext, executionDeclaration, projectionPath);
-  projectDeclaredEntities(runtimeContext, reviewDeclaration, projectionPath);
-  materializeAttributionProjection(runtimeContext, projectionPath);
+  }, options.taskFieldExtensions, (sql) => Effect.gen(function* () {
+    for (const table of snapshot.declaredTables) {
+      yield* replaceDeclaredProjectionRows(sql, table.declaration, table.rows);
+    }
+    yield* replaceAttributionProjectionRows(sql, snapshot.attributionEvents);
+    yield* materializeEntityAttributionBlocks(sql, snapshot.attributionEvents);
+  }));
   return {
     rows,
     warnings: source.warnings
@@ -84,7 +89,8 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
   const rootDir = path.resolve(options.rootDir);
   const runtimeContext = createHarnessRuntimeContext(rootDir, options.layoutOverrides);
   const projectionPath = options.projectionPath ? path.resolve(options.projectionPath) : resolveHarnessLayout(runtimeContext).projectionPath;
-  const source = readMarkdownSource(runtimeContext);
+  const snapshot = captureProjectionSourceFingerprint(runtimeContext);
+  const source = snapshot.taskSource;
   const warnings = [...source.warnings];
 
   if (!existsSync(projectionPath)) {
@@ -121,7 +127,7 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
     return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
   }
 
-  if (existing.meta.sourceHash !== projectionSourceHash(source.hash, runtimeContext)) {
+  if (existing.meta.sourceHash !== snapshot.fingerprint) {
     warnings.push(warning(
       "generated-cache",
       "projection_stale",
@@ -132,7 +138,8 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
     return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
   }
 
-  if (!declaredProjectionMatches(runtimeContext, projectionPath)) {
+  const actualDeclaredRowsHash = readDeclaredRowsHash(projectionPath);
+  if (actualDeclaredRowsHash === null || existing.meta.declaredRowsHash !== actualDeclaredRowsHash) {
     warnings.push(hardFail(
       "generated-cache",
       "projection_tampered",
@@ -156,45 +163,17 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
     return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
   }
 
-  const currentDecisionRowsHash = hashDecisionProjectionRows(readDecisionProjectionRows(runtimeContext));
-  if ((existing.meta.decisionRowsHash ?? "") !== currentDecisionRowsHash) {
-    warnings.push(warning(
-      "generated-cache",
-      "projection_stale",
-      "Projection decision cache was stale and has been rebuilt from markdown.",
-      "Run harness-anything governance rebuild after authored decision changes or merges."
-    ));
-    const rebuilt = rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions });
-    return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
-  }
-
   return {
     rows: [...existing.rows].sort(compareRows),
     warnings
   };
 }
 
-function projectionSourceHash(taskSourceHash: string, rootInput: ReturnType<typeof createHarnessRuntimeContext>): string {
-  const entityRows = [sessionEntityDeclaration, executionDeclaration, reviewDeclaration].map((declaration) => ({
-    table: declaration.projection.table,
-    rows: discoverDeclaredEntityRows(rootInput, declaration)
-  }));
-  return sha256Text(JSON.stringify({
-    taskSourceHash,
-    entityRows,
-    attributionEventSourceHash: attributionEventSourceHash(rootInput),
-    legacyPersonIds: [...readLegacyPersonIds(rootInput)].sort()
-  }));
-}
-
-function declaredProjectionMatches(rootInput: ReturnType<typeof createHarnessRuntimeContext>, projectionPath: string): boolean {
+function readDeclaredRowsHash(projectionPath: string): string | null {
   try {
-    return [sessionEntityDeclaration, executionDeclaration, reviewDeclaration].every((declaration) =>
-      JSON.stringify(readDeclaredProjectionRows(projectionPath, declaration)) ===
-      JSON.stringify(discoverDeclaredEntityRows(rootInput, declaration))
-    );
+    return hashDeclaredProjectionSnapshots(readDeclaredProjectionSnapshots(projectionPath));
   } catch {
-    return false;
+    return null;
   }
 }
 

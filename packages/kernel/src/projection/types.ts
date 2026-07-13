@@ -184,4 +184,5 @@ export interface ProjectionMeta {
   readonly sourceHash: string;
   readonly rowsHash: string;
   readonly decisionRowsHash?: string;
+  readonly declaredRowsHash?: string;
 }
