@@ -56,6 +56,10 @@ test("Electron shell opens its first BrowserWindow", { timeout: 90_000 }, async 
   });
   page.on("pageerror", (error) => consoleFailures.push(`${error.message}\n${error.stack ?? ""}`));
   await page.waitForLoadState("domcontentloaded");
+  // Keep the smoke test deterministic across developer and CI host locales.
+  // The assertions below intentionally exercise the zh-CN catalog.
+  await page.evaluate(() => globalThis.localStorage.setItem("harness-locale", "zh-CN"));
+  await page.reload({ waitUntil: "domcontentloaded" });
 
   assert.equal(await page.title(), "Harness Anything");
 
