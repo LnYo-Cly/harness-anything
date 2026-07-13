@@ -6,6 +6,7 @@ import { TaskPreviewDrawer } from "./components/TaskPreviewDrawer.tsx";
 import { MockViewBanner } from "./components/shell-chrome.tsx";
 import { AppSidebar } from "./components/AppSidebar.tsx";
 import { ViewSwitch } from "./components/ViewSwitch.tsx";
+import { NavigationHistoryBar } from "./components/NavigationHistoryBar.tsx";
 import {
   DEFAULT_TASK_FILTERS,
   applyTaskFilters,
@@ -17,9 +18,30 @@ import { useTasksQuery, useSetTaskStatusMutation } from "./task-data.ts";
 import { useTriadicProjectionQuery } from "./triadic-data.ts";
 import { useFavorites } from "./model/favorites.ts";
 import { MOCK_BACKED_VIEWS, type ViewId } from "./shell-config.tsx";
+import { useNavigationHistory } from "./navigation/useNavigationHistory.ts";
 
 function AppShell() {
-  const [view, setView] = useState<ViewId>("overview");
+  // 应用位置由导航历史栈持有:entries[index] 是唯一真源。
+  // 六个位置状态(view/selectedId/previewId/focusedEntityRef/taskFilters/drill)
+  // 全部从 location 派生,变更只走 navigate() / updateLocation() —— 这是
+  // 「所有导航都进历史栈」的结构性保证(没有独立 setter 可绕过)。
+  const {
+    location,
+    navigate,
+    updateLocation,
+    back,
+    forward,
+    canBack,
+    canForward,
+  } = useNavigationHistory({
+    view: "overview",
+    selectedId: null,
+    previewId: null,
+    focusedEntityRef: null,
+    taskFilters: DEFAULT_TASK_FILTERS,
+    drill: null,
+  });
+
   const tasksQuery = useTasksQuery();
   const triadicQuery = useTriadicProjectionQuery();
   const realTasks = useMemo(
@@ -42,17 +64,7 @@ function AppShell() {
   const relations = triadicQuery.relations;
   const coverageRows = triadicQuery.coverageRows;
   const factAnchors = triadicQuery.factAnchors;
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [previewId, setPreviewId] = useState<string | null>(null);
-  const [focusedEntityRef, setFocusedEntityRef] = useState<string | null>(null);
-  const [taskFilters, setTaskFilters] =
-    useState<TaskFilters>(DEFAULT_TASK_FILTERS);
   const [projectSwitcherOpen, setProjectSwitcherOpen] = useState(false);
-  const [drill, setDrill] = useState<{
-    lane: string;
-    status: SnapshotStatus;
-    groupBy: LaneGroupBy;
-  } | null>(null);
 
   const projectTasks = useMemo(
     () => tasks.filter((t) => t.projectId === projectId),
@@ -68,16 +80,16 @@ function AppShell() {
   ).length;
 
   const selected = useMemo(
-    () => tasks.find((t) => t.taskId === selectedId) ?? null,
-    [tasks, selectedId],
+    () => tasks.find((t) => t.taskId === location.selectedId) ?? null,
+    [tasks, location.selectedId],
   );
   const previewTask = useMemo(
-    () => tasks.find((t) => t.taskId === previewId) ?? null,
-    [previewId, tasks],
+    () => tasks.find((t) => t.taskId === location.previewId) ?? null,
+    [location.previewId, tasks],
   );
   const filteredProjectTasks = useMemo(
-    () => applyTaskFilters(projectTasks, taskFilters, favorites),
-    [projectTasks, taskFilters, favorites],
+    () => applyTaskFilters(projectTasks, location.taskFilters, favorites),
+    [projectTasks, location.taskFilters, favorites],
   );
 
   // 决策批准角标:proposed 决策数(唯一面向人的"待人处理"计数)
@@ -94,18 +106,30 @@ function AppShell() {
     }
   };
 
+  // ── 导航入口:全部汇流到 navigate() ──────────────────────────────
+  // 原来有四个入口绕过了 goto 直接改 state(drillToBoard / navigateToEntity /
+  // focusEntityInGraph / 多视图 switcher),历史栈会漏记。现在统一走 navigate。
+
   const goto = (v: ViewId) => {
-    setView(v);
-    setFocusedEntityRef(null);
-    setSelectedId(null);
-    setPreviewId(null);
-    if (v !== "board") setDrill(null);
+    navigate({
+      view: v,
+      focusedEntityRef: null,
+      selectedId: null,
+      previewId: null,
+      drill: v !== "board" ? null : location.drill,
+    });
   };
 
   const openProject = () => {
-    setTaskFilters(DEFAULT_TASK_FILTERS);
     setProjectSwitcherOpen(false);
-    goto("overview");
+    navigate({
+      view: "overview",
+      focusedEntityRef: null,
+      selectedId: null,
+      previewId: null,
+      drill: null,
+      taskFilters: DEFAULT_TASK_FILTERS,
+    });
   };
 
   const drillToBoard = (
@@ -115,21 +139,21 @@ function AppShell() {
   ) => {
     // 特殊占位 __all__ 表示不锁定 lane(只 drill 到状态维度)
     const groupBy: LaneGroupBy = dimension === "root" ? "root" : "module";
-    setDrill({ lane, status, groupBy });
-    setView("board");
-    setSelectedId(null);
-    setPreviewId(null);
+    navigate({
+      view: "board",
+      drill: { lane, status, groupBy },
+      selectedId: null,
+      previewId: null,
+    });
   };
 
+  // 抽屉开关是「精修」不是「导航」——不推栈,但快照保留最新值。
   const openTaskPreview = (id: string) => {
-    setSelectedId(null);
-    setPreviewId(id);
+    updateLocation({ selectedId: null, previewId: id });
   };
 
   const openTaskDetail = (id: string) => {
-    setFocusedEntityRef(`task/${id}`);
-    setPreviewId(null);
-    setSelectedId(id);
+    navigate({ focusedEntityRef: `task/${id}`, previewId: null, selectedId: id });
   };
 
   // W2B 活链接:跨实体跳转(task→详情, decision→决策池, fact→事实分诊)
@@ -139,33 +163,69 @@ function AppShell() {
       openTaskDetail(id);
     } else if (ref.startsWith("decision/")) {
       const decisionId = ref.split("/")[1];
-      setFocusedEntityRef(`decision/${decisionId}`);
-      setView("decisionPool");
-      setSelectedId(null);
-      setPreviewId(null);
+      navigate({
+        focusedEntityRef: `decision/${decisionId}`,
+        view: "decisionPool",
+        selectedId: null,
+        previewId: null,
+      });
     } else if (ref.startsWith("fact/")) {
-      setFocusedEntityRef(ref);
-      setView("factTriage");
-      setSelectedId(null);
-      setPreviewId(null);
+      navigate({
+        focusedEntityRef: ref,
+        view: "factTriage",
+        selectedId: null,
+        previewId: null,
+      });
     }
   };
   const navigateToDecision = (decisionId: string) =>
     navigateToEntity(`decision/${decisionId}`);
   const navigateToTask = (taskId: string) => openTaskDetail(taskId);
   const focusEntityInGraph = (ref: string) => {
-    setFocusedEntityRef(ref);
-    setView("graph");
-    setSelectedId(null);
-    setPreviewId(null);
+    navigate({
+      focusedEntityRef: ref,
+      view: "graph",
+      selectedId: null,
+      previewId: null,
+    });
   };
 
-  const showMockBanner = !selected && MOCK_BACKED_VIEWS.has(view);
+  // 全局快捷键:Cmd+[ / Cmd+] (Mac) / Ctrl+[ / Ctrl+] (Win/Linux)
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod) return;
+      if (event.key === "[") {
+        event.preventDefault();
+        back();
+      } else if (event.key === "]") {
+        event.preventDefault();
+        forward();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [back, forward]);
+
+  // 鼠标侧键:button 3 = 后退,button 4 = 前进(浏览器/Electron 惯例)
+  useEffect(() => {
+    const onMouseDown = (event: MouseEvent) => {
+      if (event.button === 3) {
+        back();
+      } else if (event.button === 4) {
+        forward();
+      }
+    };
+    window.addEventListener("mousedown", onMouseDown);
+    return () => window.removeEventListener("mousedown", onMouseDown);
+  }, [back, forward]);
+
+  const showMockBanner = !selected && MOCK_BACKED_VIEWS.has(location.view);
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden md:flex-row">
       <AppSidebar
-        view={view}
+        view={location.view}
         selected={selected}
         tasksQuery={tasksQuery}
         projectTasks={projectTasks}
@@ -187,15 +247,21 @@ function AppShell() {
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {showMockBanner && <MockViewBanner />}
+        <NavigationHistoryBar
+          canBack={canBack}
+          canForward={canForward}
+          onBack={back}
+          onForward={forward}
+        />
         <div className="flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <ViewSwitch
-              view={view}
+              view={location.view}
               selected={selected}
               filteredProjectTasks={filteredProjectTasks}
-              taskFilters={taskFilters}
-              drill={drill}
-              focusedEntityRef={focusedEntityRef}
+              taskFilters={location.taskFilters}
+              drill={location.drill}
+              focusedEntityRef={location.focusedEntityRef}
               project={project}
               projectTasks={projectTasks}
               tasks={tasks}
@@ -204,17 +270,19 @@ function AppShell() {
               events={MOCK_EVENTS}
               projectName={project.name}
               goto={goto}
-              onMultiViewSwitch={setView}
+              onMultiViewSwitch={(v: ViewId) => navigate({ view: v })}
               onOpenTaskPreview={openTaskPreview}
               onDrillToBoard={drillToBoard}
               onUpdateTask={updateTask}
-              onSelectTask={setSelectedId}
-              onClearSelection={() => setSelectedId(null)}
+              onSelectTask={(id: string) => navigate({ selectedId: id })}
+              onClearSelection={() => navigate({ selectedId: null })}
               onNavigateEntity={navigateToEntity}
               onNavigateDecision={navigateToDecision}
               onNavigateTask={navigateToTask}
               onFocusEntityInGraph={focusEntityInGraph}
-              onFiltersChange={setTaskFilters}
+              onFiltersChange={(filters: TaskFilters) =>
+                updateLocation({ taskFilters: filters })
+              }
               onToggleFavorite={toggleFavorite}
               onOpenProject={openProject}
             />
@@ -226,7 +294,7 @@ function AppShell() {
         tasks={projectTasks}
         relations={relations}
         events={projectEvents}
-        onClose={() => setPreviewId(null)}
+        onClose={() => updateLocation({ previewId: null })}
         onOpenDetail={openTaskDetail}
         onPreviewTask={openTaskPreview}
       />
