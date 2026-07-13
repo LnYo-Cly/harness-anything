@@ -199,7 +199,108 @@ describe("Genealogy cycle warning (修 #11)", () => {
     expect(layout.cycleWarning.count).toBeGreaterThan(0);
     expect(layout.cycleWarning.cycles.length).toBe(layout.cycleWarning.count);
   });
+});
 
+describe("Genealogy encoding modes (非线 x 轴)", () => {
+  function chainFixture() {
+    // 同日 3 点 + 隔日 1 点，复现成簇；线性轴会把 3 点叠成柱。
+    const decisions: DecisionRow[] = [
+      baseDecision({
+        decisionId: "dec_old",
+        title: "祖先决策标题足够长不应被截成一截省略号",
+        decidedAt: "2026-07-03T10:00:00.000Z",
+      }),
+      baseDecision({
+        decisionId: "dec_mid_a",
+        title: "同日细化 A",
+        decidedAt: "2026-07-03T12:00:00.000Z",
+      }),
+      baseDecision({
+        decisionId: "dec_mid_b",
+        title: "同日细化 B",
+        decidedAt: "2026-07-03T14:00:00.000Z",
+      }),
+      baseDecision({
+        decisionId: "dec_new",
+        title: "隔日收窄",
+        decidedAt: "2026-07-09T09:00:00.000Z",
+      }),
+    ];
+    const relations: RelationEdge[] = [
+      edge("decision/dec_mid_a", "decision/dec_old", "refines"),
+      edge("decision/dec_mid_b", "decision/dec_old", "refines"),
+      edge("decision/dec_new", "decision/dec_mid_a", "narrows"),
+    ];
+    const byId = new Map(decisions.map((d) => [d.decisionId, d]));
+    const edges = buildGenealogyEdges(relations, byId);
+    // 焦点放根祖先，BFS 才能把 mid_a/mid_b/new 全收进谱系。
+    return { decisions, byId, edges, focus: decisions[0]! };
+  }
+
+  it("ordinal：按事件序拉开，空白日不占宽（07-04..08 不出现空刻度）", () => {
+    const { byId, edges, focus } = chainFixture();
+    const layout = computeLayout(focus, edges, byId, 900, { encoding: "ordinal" });
+    expect(layout.encoding).toBe("ordinal");
+    expect(layout.nodes).toHaveLength(4);
+    // 序数轴上 x 应单调随时间
+    const ordered = [...layout.nodes].sort(
+      (a, b) => (a.timeMs ?? 0) - (b.timeMs ?? 0),
+    );
+    for (let i = 1; i < ordered.length; i += 1) {
+      expect(ordered[i]!.x).toBeGreaterThanOrEqual(ordered[i - 1]!.x);
+    }
+    // 刻度只在有事件的日
+    const labels = layout.ticks.map((t) => t.label);
+    expect(labels.some((l) => l.includes("07-03") || l === "07-03")).toBe(true);
+    expect(labels.every((l) => !l.includes("07-05"))).toBe(true);
+  });
+
+  it("day-cluster：同日折叠，展开后恢复成员卡", () => {
+    const { byId, edges, focus } = chainFixture();
+    const collapsed = computeLayout(focus, edges, byId, 900, {
+      encoding: "day-cluster",
+      expandedDays: new Set(),
+    });
+    expect(collapsed.encoding).toBe("day-cluster");
+    const clusters = collapsed.nodes.filter((n) => n.isCluster);
+    expect(clusters.length).toBeGreaterThanOrEqual(1);
+    const july3 = clusters.find((c) => c.dayKey === "2026-07-03");
+    expect(july3?.clusterSize).toBe(3);
+
+    const expanded = computeLayout(focus, edges, byId, 900, {
+      encoding: "day-cluster",
+      expandedDays: new Set(["2026-07-03"]),
+    });
+    expect(expanded.nodes.every((n) => !n.isCluster)).toBe(true);
+    expect(expanded.nodes).toHaveLength(4);
+  });
+
+  it("dag：祖先在左、后代在右（rank = depth 平移）", () => {
+    const { byId, edges, focus } = chainFixture();
+    const layout = computeLayout(focus, edges, byId, 900, { encoding: "dag" });
+    expect(layout.encoding).toBe("dag");
+    const old = layout.nodes.find((n) => n.id === "dec_old")!;
+    const mid = layout.nodes.find((n) => n.id === "dec_mid_a")!;
+    const neu = layout.nodes.find((n) => n.id === "dec_new")!;
+    expect(old.x).toBeLessThan(mid.x);
+    expect(mid.x).toBeLessThanOrEqual(neu.x);
+  });
+
+  it("视图 header 渲染三种编码 tab", () => {
+    const { decisions } = chainFixture();
+    const relations: RelationEdge[] = [
+      edge("decision/dec_mid_a", "decision/dec_old", "refines"),
+      edge("decision/dec_mid_b", "decision/dec_old", "refines"),
+      edge("decision/dec_new", "decision/dec_mid_a", "narrows"),
+    ];
+    const markup = renderToStaticMarkup(
+      createElement(GenealogyTimelineView, { decisions, relations }),
+    );
+    expect(markup).toContain('data-encoding-tab="ordinal"');
+    expect(markup).toContain('data-encoding-tab="day-cluster"');
+    expect(markup).toContain('data-encoding-tab="dag"');
+    expect(markup).toContain("序数轴");
+  });
   it("渲染时 header 显示「谱系环警告 · N」(SSR 快照)", () => {
     const decisions: DecisionRow[] = ["dec_a", "dec_b"].map((id) =>
       baseDecision({ decisionId: id, title: id }),
