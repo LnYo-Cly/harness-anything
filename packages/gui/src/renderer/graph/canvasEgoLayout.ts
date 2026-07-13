@@ -170,49 +170,90 @@ export function egoFocusIdOf(ref: string): string {
   return endpointToNodeId(ref);
 }
 
-// 节点尺寸(确定性布局用)。chip 紧凑一条;card 固定宽,高按内容估算并封顶。
+// 节点尺寸(确定性布局用)。chip 紧凑一条;card 按 kind 分档宽,高按内容估算 +
+// 竖优先地板 + 硬 cap。scrollable 写入 data,EgoNode 据此条件挂 overflow-y-auto。
 const CHIP_W = 216;
 const CHIP_H = 46;
-const CARD_W = 360;
+// 内容驱动宽:按 kind 分档(fact 窄 / task 中 / decision 宽),不再是一刀切 360。
+const CARD_W: Record<Entity, number> = { fact: 280, task: 300, decision: 320 };
 const GAP_X = 72;
-const GAP_Y = 26;
+const GAP_Y = 36;
+// 竖优先地板:W:H ≤ 0.85(防横条)。短内容也按此垫高,但不再强制统一比例。
+const W_H_FLOOR = 0.85;
+// 硬 cap:超出则内部滚动(DecisionBody 三段满载刚好留余地)。
+const H_CAP_ABS = 640;
+
+/** cpl = chars per line,从卡片宽派生(padding 24 + 字宽 8.5px)。 */
+function charsPerLine(w: number): number {
+  return Math.max(20, Math.floor((w - 24) / 8.5));
+}
 
 /**
- * 卡片高度:内容感知估算 + 封顶。节点即以此高渲染,分区溢出内滚 → 零重叠。
+ * 卡片高度:内容感知估算(无地板、无 cap)。layoutCanvasEgo 在此基础上叠地板与 cap。
  *
  * D4:task 高度修复前是常量 150(无视标题长度)—— 长标题被截、内容溢出。
  * 现在按标题行数 + body 徽章/新鲜度/meta 的固定开销估算,与 decision/fact 同源。
+ * decision 补上 rejected 段(types.ts:145 早已必填,但估高漏算 → 三段满载被压扁)。
  */
 export function estimateCardHeight(entity: Entity, row: TaskRow | DecisionRow | FactRef): number {
+  const w = CARD_W[entity];
+  const cpl = charsPerLine(w);
+  const LINE = 22;
   if (entity === "task") {
     const t = row as TaskRow;
     // header(32) + body(badges 24 + freshness 20 + meta 20 + gaps 16 ≈ 80) + footer(20) ≈ 130
-    // + title 每行 22px(卡片宽 360,padding 后 ~320,约 30 字符/行)
-    const titleLines = Math.max(1, Math.ceil((t.title ?? "").length / 30));
-    return Math.min(260, 130 + titleLines * 22);
+    // + title 每行 22px(按宽派生 cpl,约 32 字符/行 @ w=300)
+    const titleLines = Math.max(1, Math.ceil((t.title ?? "").length / cpl));
+    return 130 + titleLines * LINE;
   }
   if (entity === "fact") {
     const f = row as FactRef;
-    const obs = Math.min(160, 56 + Math.ceil((f.text?.length ?? 0) / 42) * 20);
+    // 卡片宽 280 时 cpl≈30;obs 段每行 20px,head 28 + 行数 × 20
+    const obs = Math.min(160, 56 + Math.ceil((f.text?.length ?? 0) / Math.max(20, cpl - 4)) * 20);
     return 108 + obs;
   }
   const d = row as DecisionRow;
   let h = 130;
-  if (d.question) h += Math.min(96, 34 + Math.ceil(d.question.length / 40) * 20);
+  if (d.question) h += Math.min(96, 34 + Math.ceil(d.question.length / Math.max(20, cpl - 6)) * 20);
   if (d.chosen && d.chosen.length) h += Math.min(120, 34 + d.chosen.length * 26);
+  // 补 rejected:types.ts:145 标注 ⚠ 必填非空,each entry 24px(head 30 + 行 × 24)。
+  if (d.rejected && d.rejected.length) h += Math.min(120, 30 + d.rejected.length * 24);
   if (d.claims && d.claims.length) h += Math.min(120, 30 + d.claims.length * 24);
-  return Math.min(476, h);
+  return h;
 }
 
+export interface CardDims {
+  w: number;
+  h: number;
+  /** true = 内容估高超出 H_CAP_ABS,body 区挂 overflow-y-auto。 */
+  scrollable: boolean;
+}
+
+/**
+ * 节点尺寸:override(用户拖拽)> 内容估高 + 地板 + cap > chip 默认。
+ *
+ * 地板 = round(w / 0.85):竖优先,防横条(W:H > 0.85)。短内容会被垫到此高度,
+ * 但不再强制统一比例(避免短 fact 撑成 9:16 的留白装腔)。
+ * cap = H_CAP_ABS(640):DecisionBody 三段满载 ≈ 586,留余地不滚;超出才滚。
+ */
 function nodeDims(
   entity: Entity,
   expanded: boolean,
   row: NodeMeta["row"] | undefined,
   override?: { w: number; h: number },
-): { w: number; h: number } {
-  if (override) return override;
-  if (expanded && row) return { w: CARD_W, h: estimateCardHeight(entity, row) };
-  return { w: CHIP_W, h: CHIP_H };
+): CardDims {
+  if (override) {
+    // 用户已拖拽:尊重其选择,不重算 scrollable(他们看到的就是真相)。
+    return { w: override.w, h: override.h, scrollable: false };
+  }
+  if (expanded && row) {
+    const w = CARD_W[entity];
+    const estimated = estimateCardHeight(entity, row);
+    const floored = Math.max(estimated, Math.round(w / W_H_FLOOR));
+    const scrollable = floored > H_CAP_ABS;
+    return { w, h: scrollable ? H_CAP_ABS : floored, scrollable };
+  }
+  return { w: CHIP_W, h: CHIP_H, scrollable: false };
 }
 
 export function layoutCanvasEgo(input: CanvasEgoInput): LayoutOutput {
@@ -320,7 +361,7 @@ export function layoutCanvasEgo(input: CanvasEgoInput): LayoutOutput {
     if (!meta) continue;
     const center = pos.get(id) ?? { x: 0, y: 0 };
     const isExpanded = expanded.has(id);
-    const { w, h } = nodeDims(meta.entity, isExpanded, meta.row, sizeOverrides?.get(id));
+    const { w, h, scrollable } = nodeDims(meta.entity, isExpanded, meta.row, sizeOverrides?.get(id));
     let hiddenCount = 0;
     for (const a of adj.get(id) ?? []) {
       if (
@@ -353,6 +394,9 @@ export function layoutCanvasEgo(input: CanvasEgoInput): LayoutOutput {
         hiddenCount,
         color: meta.entity === "task" ? statusColor(meta.row as TaskRow) : undefined,
         navRef,
+        // 内容驱动尺寸的副产物:body 区是否挂 overflow-y-auto。false 时 body 用
+        // overflow-hidden(短内容不滚、不晃),EgoNode 据此条件挂滚动条。
+        scrollable,
       },
       zIndex: id === focusId ? 6 : isExpanded ? 5 : 1,
     });

@@ -32,6 +32,7 @@ function location(overrides: Partial<AppLocation> = {}): AppLocation {
     selectedId: null,
     previewId: null,
     focusedEntityRef: null,
+    entityFacet: null,
     taskFilters: DEFAULT_TASK_FILTERS,
     drill: null,
     ...overrides,
@@ -67,7 +68,7 @@ describe("navigationHistory push", () => {
     expect(same.entries).toHaveLength(1);
   });
 
-  it("pushes when any field differs (view, selectedId, focusedEntityRef, drill)", () => {
+  it("pushes when any field differs (view, selectedId, focusedEntityRef, entityFacet, drill)", () => {
     const state = createNavigationHistory(location({ view: "overview" }));
 
     expect(pushLocation(state, location({ view: "board" })).entries).toHaveLength(2);
@@ -76,6 +77,10 @@ describe("navigationHistory push", () => {
     ).toHaveLength(2);
     expect(
       pushLocation(state, location({ focusedEntityRef: "decision/d1" })).entries,
+    ).toHaveLength(2);
+    // G3:entityFacet 是 AppLocation 的一部分 —— 切 facet(关系↔演化)推栈,Cmd+[ 能回。
+    expect(
+      pushLocation(state, location({ entityFacet: "lineage" })).entries,
     ).toHaveLength(2);
   });
 

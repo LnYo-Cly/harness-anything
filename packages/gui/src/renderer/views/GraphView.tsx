@@ -88,6 +88,7 @@ function GraphViewInner({
   coverageRows,
   factAnchors,
   onNavigateEntity,
+  onFocusEntityChange,
   focusRef,
 }: {
   tasks: TaskRow[];
@@ -97,6 +98,11 @@ function GraphViewInner({
   coverageRows?: ReadonlyArray<RelationCoverageRow>;
   factAnchors?: ReadonlyArray<FactAnchorRow>;
   onNavigateEntity?: (ref: string) => void;
+  /**
+   * 画布内焦点变更上行(G3 §④2)。openFocus 触发时调用,把 ego byId key(id 形态)
+   * 透传给上层,由 EntityWorkspace / App.tsx 翻译成 navRef 并写回 AppLocation。
+   */
+  onFocusEntityChange?: (id: string | null) => void;
   focusRef?: string | null;
 }) {
   const colorMode = useColorMode();
@@ -162,6 +168,7 @@ function GraphViewInner({
     relations,
     axes: filters.axes,
     focusRef,
+    onFocusChange: onFocusEntityChange,
   });
 
   // L1 领地总览状态机(territory ↔ spotlight 模式切换 + 骨架轴 + zone 折叠态)。

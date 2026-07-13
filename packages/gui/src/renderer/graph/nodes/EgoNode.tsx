@@ -163,8 +163,14 @@ export function EgoNode({ data, selected }: any) {
 
       {/* scrollable body */}
       {/* D4:nowheel 类让 React Flow 的 d3-zoom filter 把滚轮让给此容器(否则滚轮被拿去缩放画布,
-          overflow-y-auto 形同虚设)。noWheelClassName 默认就是 "nowheel",无需在 ReactFlow 上配置。*/}
-      <div className="nowheel mt-1.5 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain px-2.5 pb-2">
+          overflow-y-auto 形同虚设)。noWheelClassName 默认就是 "nowheel",无需在 ReactFlow 上配置。
+          G1:scrollable 来自内容驱动尺寸(nodeDims)。短内容(fact ≤200 字 / task 单行)scrollable=false,
+          用 overflow-hidden 防止恒挂空滚动条;长内容(decision 三段满载)才挂 overflow-y-auto。*/}
+      <div
+        className={`nowheel mt-1.5 flex min-h-0 flex-1 flex-col gap-2 overscroll-contain px-2.5 pb-2 ${
+          data.scrollable ? "overflow-y-auto" : "overflow-hidden"
+        }`}
+      >
         {entity === "task" && <TaskBody t={data.raw as TaskRow} />}
         {entity === "decision" && <DecisionBody d={data.raw as DecisionRow} />}
         {entity === "fact" && <FactBody f={data.raw as FactRef} />}
@@ -223,6 +229,23 @@ function DecisionBody({ d }: { d: DecisionRow }) {
           <div className="mt-0.5 flex flex-col gap-1">
             {d.chosen.map((c) => (
               <p key={c.id} className="ui-body text-text">{c.text}</p>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* rejected:types.ts:145 标注 ⚠ 必填非空、每条带 whyNot。决策中否决比选择更重要,
+          缺画 = 让审查者只看 chosen 半张图。danger 配色与 chosen 对位,强调对立。 */}
+      {d.rejected && d.rejected.length > 0 && (
+        <div className="rounded-md border border-danger/30 bg-danger/5 px-2 py-1.5">
+          <span className="font-mono text-[10px] uppercase tracking-wide text-danger">{t("graph.egoNode.rejected")}</span>
+          <div className="mt-0.5 flex flex-col gap-1">
+            {d.rejected.map((c) => (
+              <div key={c.id} className="text-text-muted">
+                <p className="ui-body">{c.text}</p>
+                {c.whyNot && (
+                  <p className="mt-0.5 text-[11px] leading-snug text-text-faint">↳ {c.whyNot}</p>
+                )}
+              </div>
             ))}
           </div>
         </div>

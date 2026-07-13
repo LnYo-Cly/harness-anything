@@ -107,6 +107,7 @@
   "graph.egoNode.riskUrgency": "{risk} risk · {urgency} urgency",
   "graph.egoNode.question": "Question",
   "graph.egoNode.chosen": "Chosen",
+  "graph.egoNode.rejected": "Rejected",
   "graph.egoNode.claims": "Claims",
   "graph.egoNode.factObservation": "Fact observation",
   "graph.egoNode.taskValue": "Task: {taskId}",

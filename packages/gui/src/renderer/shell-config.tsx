@@ -8,7 +8,6 @@ import {
   GearSix,
   GitBranch,
   FirstAidKit,
-  ClockCounterClockwise,
   ClipboardText,
 } from "@phosphor-icons/react";
 import { t } from "./i18n/index.tsx";
@@ -29,7 +28,6 @@ export type ViewId =
   | "factTriage"
   | "executions"
   | "graph"
-  | "genealogy"
   | "presets"
   | "adapters"
   | "settings";
@@ -48,7 +46,6 @@ export const WORKSPACE_NAV: { id: ViewId; label: string; icon: React.ReactNode; 
   { id: "factTriage", get label() { return t("renderer.shellConfig.factTriage"); }, icon: <FirstAidKit weight="duotone" /> },
   { id: "executions", get label() { return t("renderer.shellConfig.evidenceExecution"); }, icon: <ClipboardText weight="duotone" />, isNew: true },
   { id: "graph", get label() { return t("renderer.shellConfig.graph"); }, icon: <Graph weight="duotone" /> },
-  { id: "genealogy", get label() { return t("renderer.shellConfig.genealogy"); }, icon: <ClockCounterClockwise weight="duotone" /> },
 ];
 
 export const MANAGE_NAV: { id: ViewId; label: string; icon: React.ReactNode }[] = [
@@ -66,7 +63,6 @@ export const VIEW_LABEL: Record<ViewId, string> = {
   get factTriage() { return t("renderer.shellConfig.factTriage"); },
   get executions() { return t("renderer.shellConfig.evidenceExecution"); },
   get graph() { return t("renderer.shellConfig.graph"); },
-  get genealogy() { return t("renderer.shellConfig.genealogy"); },
   get presets() { return t("renderer.shellConfig.presetVertical"); },
   get adapters() { return t("renderer.shellConfig.engineAdapter"); },
   get settings() { return t("renderer.shellConfig.settings"); },

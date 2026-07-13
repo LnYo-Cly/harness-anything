@@ -130,12 +130,14 @@ test("Electron shell opens its first BrowserWindow", { timeout: 90_000 }, async 
   assert.equal(await page.locator(".react-flow__edge").count(), 2);
   assert.equal(await page.getByText("MOCK", { exact: true }).count(), 0, "triadic views must not be mock-backed");
 
-  // GUI usability (dec_01KXA7811SVVT8P66HNDFZQ7DF): the renderer ships a
-  // permanent multi-view switcher (graph/genealogy), a left FocusSwitcher
-  // sidebar (search + entity list), a focus history bar with back/forward,
-  // and the ReactFlow colorMode hookup so the MiniMap inherits dark theme
-  // instead of painting a white SVG box.
-  await page.getByTestId("multi-view-switcher").waitFor();
+  // GUI usability (dec_01KXA7811SVVT8P66HNDFZQ7DF): the renderer ships an
+  // entity workspace with a facet tab switcher (graph/genealogy, only shown
+  // when a decision is focused), a left FocusSwitcher sidebar (search +
+  // entity list), a focus history bar with back/forward, and the ReactFlow
+  // colorMode hookup so the MiniMap inherits dark theme instead of painting
+  // a white SVG box. The legacy permanent multi-view switcher was retired
+  // (G3 §③2): genealogy is now a facet of the entity workspace, not a
+  // separate top-level view.
   const focusSwitcher = page.getByTestId("focus-switcher");
   await focusSwitcher.waitFor();
   await focusSwitcher.getByRole("searchbox").waitFor();
@@ -259,13 +261,16 @@ test("Electron shell opens its first BrowserWindow", { timeout: 90_000 }, async 
   // Evidence: focus switched to a task node via the explicit button.
   await captureGraphEvidence(page, "06-set-as-focus-task");
 
-  const viewSwitcher = page.getByTestId("multi-view-switcher");
-  await viewSwitcher.getByRole("button", { name: "演化史", exact: true }).click();
-  await page.getByRole("heading", { name: "决策演化史", exact: true }).waitFor();
+  // G3 §③:Genealogy 现在是 EntityWorkspace 里 decision 的一个 facet(tab),不再是
+  // 顶栏常驻条。focusedEntityRef 是 decision 时,facet tabs 露出「演化史」按钮。
+  // 切到 lineage facet 后,基因面板接管主区;切回 relations facet,ego 画布回来。
+  // Cmd+[ 也能在两个 facet 之间后退(navigate 推栈,AppLocation.entityFacet 进历史)。
+  const facetTabs = page.getByTestId("entity-facet-tabs");
+  await facetTabs.getByRole("button", { name: "演化史", exact: true }).click();
   await page.getByText(/2 决策参与谱系 · 1 条演化边/u).waitFor();
   await page.locator("button.absolute").filter({ hasText: "Earlier GUI projection decision" }).waitFor();
   await page.locator("button.absolute").filter({ hasText: "Expose the triadic projection to the GUI" }).waitFor();
-  await viewSwitcher.getByRole("button", { name: "关系图", exact: true }).click();
+  await facetTabs.getByRole("button", { name: "关系图", exact: true }).click();
   await page.locator(".react-flow__node-decisionFocus").waitFor();
 
   // Fact triage consumes confidence + coverageRows/factAnchors. The covered

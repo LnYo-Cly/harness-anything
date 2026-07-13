@@ -107,6 +107,7 @@
   "graph.egoNode.riskUrgency": "{risk} 风险 · {urgency} 紧急度",
   "graph.egoNode.question": "问题",
   "graph.egoNode.chosen": "已选",
+  "graph.egoNode.rejected": "已否决",
   "graph.egoNode.claims": "论点",
   "graph.egoNode.factObservation": "事实观察",
   "graph.egoNode.taskValue": "任务：{taskId}",
