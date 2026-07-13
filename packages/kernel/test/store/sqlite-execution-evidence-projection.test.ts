@@ -1,20 +1,92 @@
 // harness-test-tier: integration
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, rmSync } from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import {
   queryExecutionEvidencePage,
   queryExecutionEvidencePageFromReadyGeneration
 } from "../../src/projection/sqlite-execution-evidence-reader.ts";
-import { ensureProjectionGenerationReady } from "../../src/projection/projection-generation-readiness.ts";
-import { captureProjectionSourceSnapshot } from "../../src/projection/projection-source-snapshot.ts";
-import { updateTaskProjectionIncrementally } from "../../src/projection/sqlite-task-incremental-projection.ts";
+import {
+  ensureExecutionEvidenceGenerationReady,
+  rebuildExecutionEvidenceProjection,
+  updateExecutionEvidenceProjectionIncrementally
+} from "../../src/projection/sqlite-execution-evidence-store.ts";
 import { rebuildTaskProjection } from "../../src/projection/sqlite-task-projection.ts";
+import {
+  checkerExecutionEvidenceOutput as checkerOutput,
+  fileExecutionEvidenceOutput as fileOutput,
+  ids,
+  inlineExecutionEvidenceOutput as inlineOutput,
+  openExecutionEvidenceProjection as openEvidenceProjection,
+  openFullProjection,
+  withExecutionEvidenceHarness as withHarness,
+  writeExecutionEvidence as writeExecution,
+  writeExecutionEvidenceTask as writeTask
+} from "./helpers/execution-evidence.ts";
 
-test("full projection normalizes execution outputs into queryable SQL rows", () => {
+test("execution evidence first page publishes an isolated facet without building the full repository projection", () => {
+  withHarness((rootDir) => {
+    const identity = ids(1);
+    writeTask(rootDir, identity.taskId, "Isolated Evidence facet");
+    writeExecution(rootDir, identity.taskId, identity.executionId, "2026-07-13T00:01:00.000Z", [
+      inlineOutput(identity, "ev-isolated", "Evidence without the full projection")
+    ]);
+
+    const page = queryExecutionEvidencePage({ rootDir, limit: 1 });
+
+    assert.equal(page.groups[0]?.title, "Isolated Evidence facet");
+    assert.equal(existsSync(path.join(rootDir, ".harness/cache/execution-evidence.sqlite")), true);
+    assert.equal(existsSync(path.join(rootDir, ".harness/cache/projections.sqlite")), false);
+  });
+});
+
+test("full repository projection does not duplicate the isolated Evidence tables", () => {
+  withHarness((rootDir) => {
+    const identity = ids(1);
+    writeTask(rootDir, identity.taskId, "No duplicated Evidence tables");
+    writeExecution(rootDir, identity.taskId, identity.executionId, "2026-07-13T00:01:00.000Z", [
+      inlineOutput(identity, "ev-isolated", "Only the facet owns this row")
+    ]);
+
+    rebuildTaskProjection({ rootDir });
+
+    const db = openFullProjection(rootDir);
+    try {
+      const tables = db.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type = 'table' AND name IN ('execution_evidence_projection', 'execution_output_projection')
+      `).all();
+      assert.deepEqual(tables, []);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+test("full repository projection rebuild does not invalidate an Evidence cursor or generation", () => {
+  withHarness((rootDir) => {
+    for (let index = 1; index <= 2; index += 1) {
+      const identity = ids(index);
+      writeTask(rootDir, identity.taskId, `Independent facet ${index}`);
+      writeExecution(rootDir, identity.taskId, identity.executionId, `2026-07-13T00:0${index}:00.000Z`, [
+        inlineOutput(identity, `ev-${index}`, `Evidence ${index}`)
+      ]);
+    }
+    const firstPage = queryExecutionEvidencePage({ rootDir, limit: 1 });
+    const before = ensureExecutionEvidenceGenerationReady({ rootDir }).ready;
+
+    rebuildTaskProjection({ rootDir });
+
+    const secondPage = queryExecutionEvidencePage({ rootDir, limit: 1, cursor: firstPage.nextCursor! });
+    const after = ensureExecutionEvidenceGenerationReady({ rootDir }).ready;
+    assert.equal(secondPage.groups[0]?.executions[0]?.executionId, ids(1).executionId);
+    assert.equal(after.sourceHash, before.sourceHash);
+    assert.equal(after.databaseSignature, before.databaseSignature);
+  });
+});
+
+test("isolated Evidence facet normalizes execution outputs into queryable SQL rows", () => {
   withHarness((rootDir) => {
     const first = ids(1);
     writeTask(rootDir, first.taskId, "First task");
@@ -23,9 +95,9 @@ test("full projection normalizes execution outputs into queryable SQL rows", () 
       checkerOutput(first, "ev-receipt", "ev-inline", "pass")
     ]);
 
-    rebuildTaskProjection({ rootDir });
+    rebuildExecutionEvidenceProjection({ rootDir });
 
-    const db = openProjection(rootDir);
+    const db = openEvidenceProjection(rootDir);
     try {
       assert.deepEqual(db.prepare(`
         SELECT execution_id, task_ref, executor_id, executor_kind,
@@ -83,9 +155,8 @@ test("incremental execution changes replace only that execution output rows", ()
     writeExecution(rootDir, second.taskId, second.executionId, "2026-07-13T00:02:00.000Z", [
       inlineOutput(second, "ev-second", "Untouched")
     ]);
-    rebuildTaskProjection({ rootDir });
-    const previousSourceFingerprint = captureProjectionSourceSnapshot(rootDir).fingerprint;
-    const db = openProjection(rootDir, false);
+    const previousSourceFingerprint = rebuildExecutionEvidenceProjection({ rootDir }).ready.sourceHash;
+    const db = openEvidenceProjection(rootDir, false);
     try {
       db.exec(`
         CREATE TRIGGER preserve_untouched_execution_outputs
@@ -99,6 +170,12 @@ test("incremental execution changes replace only that execution output rows", ()
         WHEN OLD.execution_id = '${second.executionId}'
         BEGIN SELECT RAISE(ABORT, 'untouched summary deleted'); END
       `);
+      db.exec(`
+        CREATE TRIGGER preserve_untouched_execution_integrity
+        BEFORE UPDATE ON facet_integrity_leaf
+        WHEN OLD.leaf_kind = 'execution' AND OLD.entity_id = '${second.executionId}'
+        BEGIN SELECT RAISE(ABORT, 'untouched integrity leaf updated'); END
+      `);
     } finally {
       db.close();
     }
@@ -106,14 +183,14 @@ test("incremental execution changes replace only that execution output rows", ()
       inlineOutput(first, "ev-first-updated", "After")
     ]);
 
-    const result = updateTaskProjectionIncrementally({
+    const result = updateExecutionEvidenceProjectionIncrementally({
       rootDir,
       touchedPaths: [changedPath],
       previousSourceFingerprint
     });
 
     assert.equal(result.mode, "incremental");
-    const updated = openProjection(rootDir);
+    const updated = openEvidenceProjection(rootDir);
     try {
       assert.deepEqual(updated.prepare(`
         SELECT execution_id, evidence_id, inline_text
@@ -133,6 +210,68 @@ test("incremental execution changes replace only that execution output rows", ()
   });
 });
 
+test("incremental task-title changes update the Evidence facet without rebuilding execution rows", () => {
+  withHarness((rootDir) => {
+    const identity = ids(1);
+    writeTask(rootDir, identity.taskId, "Before title");
+    writeExecution(rootDir, identity.taskId, identity.executionId, "2026-07-13T00:01:00.000Z", [
+      inlineOutput(identity, "ev-title", "Preserved evidence")
+    ]);
+    const previousSourceFingerprint = rebuildExecutionEvidenceProjection({ rootDir }).ready.sourceHash;
+    const db = openEvidenceProjection(rootDir, false);
+    try {
+      db.exec(`
+        CREATE TRIGGER preserve_execution_on_title_change
+        BEFORE DELETE ON execution_evidence_projection
+        BEGIN SELECT RAISE(ABORT, 'execution row deleted'); END
+      `);
+    } finally {
+      db.close();
+    }
+    writeTask(rootDir, identity.taskId, "After title");
+    const indexPath = path.join(rootDir, "harness/tasks", identity.taskId, "INDEX.md");
+
+    const result = updateExecutionEvidenceProjectionIncrementally({
+      rootDir,
+      touchedPaths: [indexPath],
+      previousSourceFingerprint
+    });
+
+    assert.equal(result.mode, "incremental");
+    const page = queryExecutionEvidencePageFromReadyGeneration(result.ready, { limit: 1 });
+    assert.equal(page.groups[0]?.title, "After title");
+    assert.equal(page.groups[0]?.executions[0]?.outputs[0]?.text, "Preserved evidence");
+  });
+});
+
+test("incremental execution source changes add and delete manifest-backed rows", () => {
+  withHarness((rootDir) => {
+    const first = ids(1);
+    const second = ids(2);
+    const added = { taskId: first.taskId, executionId: second.executionId };
+    writeTask(rootDir, first.taskId, "Execution manifest changes");
+    const deletedPath = writeExecution(rootDir, first.taskId, first.executionId, "2026-07-13T00:01:00.000Z", [
+      inlineOutput(first, "ev-deleted", "Deleted evidence")
+    ]);
+    const previousSourceFingerprint = rebuildExecutionEvidenceProjection({ rootDir }).ready.sourceHash;
+    rmSync(deletedPath);
+    const addedPath = writeExecution(rootDir, added.taskId, added.executionId, "2026-07-13T00:02:00.000Z", [
+      inlineOutput(added, "ev-added", "Added evidence")
+    ]);
+
+    const result = updateExecutionEvidenceProjectionIncrementally({
+      rootDir,
+      touchedPaths: [deletedPath, addedPath],
+      previousSourceFingerprint
+    });
+
+    assert.equal(result.mode, "incremental");
+    const page = queryExecutionEvidencePageFromReadyGeneration(result.ready, { limit: 2 });
+    assert.deepEqual(page.groups[0]?.executions.map((execution) => execution.executionId), [second.executionId]);
+    assert.equal(page.groups[0]?.executions[0]?.outputs[0]?.text, "Added evidence");
+  });
+});
+
 test("execution evidence uses stable execution keyset pages and SQL aggregate stats", () => {
   withHarness((rootDir) => {
     for (let index = 1; index <= 3; index += 1) {
@@ -147,7 +286,7 @@ test("execution evidence uses stable execution keyset pages and SQL aggregate st
     writeExecution(rootDir, newest.taskId, newest.executionId, "2026-07-13T00:04:00.000Z", [
       inlineOutput(newest, "ev-4", "Evidence 4")
     ]);
-    rebuildTaskProjection({ rootDir });
+    rebuildExecutionEvidenceProjection({ rootDir });
 
     const firstPage = queryExecutionEvidencePage({ rootDir, limit: 2 });
 
@@ -174,11 +313,11 @@ test("execution evidence uses stable execution keyset pages and SQL aggregate st
     assert.equal(secondPage.nextCursor, null);
     assert.deepEqual(secondPage.stats, firstPage.stats);
 
-    const previousSourceFingerprint = captureProjectionSourceSnapshot(rootDir).fingerprint;
+    const previousSourceFingerprint = ensureExecutionEvidenceGenerationReady({ rootDir }).ready.sourceHash;
     const movedPath = writeExecution(rootDir, ids(1).taskId, ids(1).executionId, "2026-07-13T00:05:00.000Z", [
       inlineOutput(ids(1), "ev-1", "Evidence 1")
     ]);
-    const updated = updateTaskProjectionIncrementally({
+    const updated = updateExecutionEvidenceProjectionIncrementally({
       rootDir,
       touchedPaths: [movedPath],
       previousSourceFingerprint
@@ -198,9 +337,9 @@ test("execution evidence rebuilds normalized SQL rows after generated-cache tamp
     writeExecution(rootDir, identity.taskId, identity.executionId, "2026-07-13T00:01:00.000Z", [
       inlineOutput(identity, "ev-original", "Original evidence")
     ]);
-    rebuildTaskProjection({ rootDir });
+    rebuildExecutionEvidenceProjection({ rootDir });
 
-    const db = openProjection(rootDir, false);
+    const db = openEvidenceProjection(rootDir, false);
     try {
       db.prepare("UPDATE execution_output_projection SET inline_text = 'TAMPERED'").run();
     } finally {
@@ -209,6 +348,35 @@ test("execution evidence rebuilds normalized SQL rows after generated-cache tamp
 
     const page = queryExecutionEvidencePage({ rootDir, limit: 1 });
     assert.equal(page.groups[0]?.executions[0]?.outputs[0]?.text, "Original evidence");
+  });
+});
+
+test("execution evidence rebuilds after integrity-leaf tampering", () => {
+  withHarness((rootDir) => {
+    const identity = ids(1);
+    writeTask(rootDir, identity.taskId, "Integrity leaf check");
+    writeExecution(rootDir, identity.taskId, identity.executionId, "2026-07-13T00:01:00.000Z", [
+      inlineOutput(identity, "ev-integrity", "Integrity evidence")
+    ]);
+    rebuildExecutionEvidenceProjection({ rootDir });
+    const db = openEvidenceProjection(rootDir, false);
+    try {
+      db.prepare("UPDATE facet_integrity_leaf SET row_hash = 'sha256:tampered'").run();
+    } finally {
+      db.close();
+    }
+
+    queryExecutionEvidencePage({ rootDir, limit: 1 });
+
+    const repaired = openEvidenceProjection(rootDir);
+    try {
+      assert.notEqual(
+        repaired.prepare("SELECT row_hash FROM facet_integrity_leaf LIMIT 1").get()?.row_hash,
+        "sha256:tampered"
+      );
+    } finally {
+      repaired.close();
+    }
   });
 });
 
@@ -227,7 +395,7 @@ test("execution evidence page caps output previews without losing total counts",
         ...Array.from({ length: 6 }, (_, index) => inlineOutput(identity, `ev-${index}`, `Evidence ${index}`))
       ]
     );
-    rebuildTaskProjection({ rootDir });
+    rebuildExecutionEvidenceProjection({ rootDir });
 
     const page = queryExecutionEvidencePage({ rootDir, limit: 1 });
     const execution = page.groups[0]?.executions[0];
@@ -255,14 +423,14 @@ test("execution evidence page pins generation rows outputs and stats to one SQLi
       "2026-07-13T00:01:00.000Z",
       [inlineOutput(identity, "ev-before", "Before")]
     );
-    rebuildTaskProjection({ rootDir });
-    const db = openProjection(rootDir, false);
+    rebuildExecutionEvidenceProjection({ rootDir });
+    const db = openEvidenceProjection(rootDir, false);
     try {
       db.exec("PRAGMA journal_mode = WAL");
     } finally {
       db.close();
     }
-    const ready = ensureProjectionGenerationReady({ rootDir }).ready;
+    const ready = ensureExecutionEvidenceGenerationReady({ rootDir }).ready;
     let writerCommitted = false;
     let pinnedPage: ReturnType<typeof queryExecutionEvidencePageFromReadyGeneration> | null = null;
 
@@ -272,7 +440,7 @@ test("execution evidence page pins generation rows outputs and stats to one SQLi
         { limit: 1 },
         {
           afterExecutionRowsRead: () => {
-            const writer = openProjection(rootDir, false);
+            const writer = openEvidenceProjection(rootDir, false);
             try {
               writer.exec("BEGIN IMMEDIATE");
               writer.prepare(`
@@ -304,7 +472,7 @@ test("execution evidence page pins generation rows outputs and stats to one SQLi
     assert.equal(pinnedPage?.groups[0]?.executions[0]?.outputs[0]?.text, "Before");
     assert.equal(pinnedPage?.groups[0]?.executions[0]?.outputCount, 1);
     assert.equal(pinnedPage?.stats.totalOutputs, 1);
-    const refreshed = openProjection(rootDir);
+    const refreshed = openEvidenceProjection(rootDir);
     try {
       assert.equal(refreshed.prepare("SELECT COUNT(*) AS count FROM execution_output_projection").get()?.count, 2);
       assert.equal(refreshed.prepare("SELECT inline_text FROM execution_output_projection ORDER BY ordinal").get()?.inline_text, "After");
@@ -322,24 +490,24 @@ test("ready generation handle rejects database changes that bypass generation va
     writeExecution(rootDir, identity.taskId, identity.executionId, "2026-07-13T00:01:00.000Z", [
       inlineOutput(identity, "ev-original", "Original")
     ]);
-    rebuildTaskProjection({ rootDir });
-    const journal = openProjection(rootDir, false);
+    rebuildExecutionEvidenceProjection({ rootDir });
+    const journal = openEvidenceProjection(rootDir, false);
     try {
       journal.exec("PRAGMA journal_mode = WAL");
     } finally {
       journal.close();
     }
-    const ready = ensureProjectionGenerationReady({ rootDir }).ready;
+    const ready = ensureExecutionEvidenceGenerationReady({ rootDir }).ready;
     assert.equal(Object.isFrozen(ready), true);
     const forged = Object.assign(Object.create(Object.getPrototypeOf(ready)) as object, ready) as typeof ready;
     assert.throws(
       () => queryExecutionEvidencePageFromReadyGeneration(forged, { limit: 1 }),
       /handle was not established by the projection validator/
     );
-    const pinnedReader = openProjection(rootDir);
+    const pinnedReader = openEvidenceProjection(rootDir);
     pinnedReader.exec("BEGIN");
     pinnedReader.prepare("SELECT value FROM projection_meta WHERE key = 'sourceHash'").get();
-    const db = openProjection(rootDir, false);
+    const db = openEvidenceProjection(rootDir, false);
     try {
       db.prepare("UPDATE execution_output_projection SET inline_text = 'TAMPERED'").run();
     } finally {
@@ -365,15 +533,15 @@ test("ready generation acquisition retries when the database changes after valid
     writeExecution(rootDir, identity.taskId, identity.executionId, "2026-07-13T00:01:00.000Z", [
       inlineOutput(identity, "ev-original", "Original")
     ]);
-    rebuildTaskProjection({ rootDir });
+    rebuildExecutionEvidenceProjection({ rootDir });
     let tampered = false;
 
-    const acquired = ensureProjectionGenerationReady(
+    const acquired = ensureExecutionEvidenceGenerationReady(
       { rootDir },
       {
         afterProjectionValidated: () => {
           if (tampered) return;
-          const db = openProjection(rootDir, false);
+          const db = openEvidenceProjection(rootDir, false);
           try {
             db.prepare("UPDATE execution_output_projection SET inline_text = 'TAMPERED'").run();
             tampered = true;
@@ -400,18 +568,18 @@ test("ready generation acquisition does not trust a cached validation across WAL
     writeExecution(rootDir, identity.taskId, identity.executionId, "2026-07-13T00:01:00.000Z", [
       inlineOutput(identity, "ev-original", "Original")
     ]);
-    rebuildTaskProjection({ rootDir });
-    const journal = openProjection(rootDir, false);
+    rebuildExecutionEvidenceProjection({ rootDir });
+    const journal = openEvidenceProjection(rootDir, false);
     try {
       journal.exec("PRAGMA journal_mode = WAL");
     } finally {
       journal.close();
     }
-    ensureProjectionGenerationReady({ rootDir });
-    const pinnedReader = openProjection(rootDir);
+    ensureExecutionEvidenceGenerationReady({ rootDir });
+    const pinnedReader = openEvidenceProjection(rootDir);
     pinnedReader.exec("BEGIN");
     pinnedReader.prepare("SELECT value FROM projection_meta WHERE key = 'sourceHash'").get();
-    const writer = openProjection(rootDir, false);
+    const writer = openEvidenceProjection(rootDir, false);
     try {
       writer.prepare("UPDATE execution_output_projection SET inline_text = 'TAMPERED'").run();
     } finally {
@@ -419,7 +587,7 @@ test("ready generation acquisition does not trust a cached validation across WAL
     }
 
     try {
-      const reacquired = ensureProjectionGenerationReady({ rootDir }).ready;
+      const reacquired = ensureExecutionEvidenceGenerationReady({ rootDir }).ready;
       assert.equal(
         queryExecutionEvidencePageFromReadyGeneration(reacquired, { limit: 1 })
           .groups[0]?.executions[0]?.outputs[0]?.text,
@@ -431,119 +599,3 @@ test("ready generation acquisition does not trust a cached validation across WAL
     }
   });
 });
-
-interface Identity {
-  readonly taskId: string;
-  readonly executionId: string;
-}
-
-function ids(index: number): Identity {
-  const suffix = String(index).padStart(26, "0");
-  return { taskId: `task_${suffix}`, executionId: `exe_${suffix}` };
-}
-
-function withHarness(run: (rootDir: string) => void): void {
-  const rootDir = mkdtempSync(path.join(tmpdir(), "ha-execution-evidence-"));
-  try {
-    run(rootDir);
-  } finally {
-    rmSync(rootDir, { recursive: true, force: true });
-  }
-}
-
-function writeTask(rootDir: string, taskId: string, title: string): void {
-  const taskRoot = path.join(rootDir, "harness/tasks", taskId);
-  mkdirSync(taskRoot, { recursive: true });
-  writeFileSync(path.join(taskRoot, "INDEX.md"), [
-    "---",
-    "schema: task-package/v2",
-    `task_id: ${taskId}`,
-    `title: ${title}`,
-    "lifecycle:",
-    "  bindingSchema: lifecycle-binding/v1",
-    "  engine: local",
-    "  status: active",
-    "  ref: ",
-    `  titleSnapshot: ${title}`,
-    "  url: ",
-    "  bindingCreatedAt: 2026-07-13T00:00:00.000Z",
-    "  bindingFingerprint: sha256:fixture",
-    "packageDisposition: active",
-    "vertical: default",
-    "preset: default",
-    "---",
-    "",
-    `# ${title}`,
-    ""
-  ].join("\n"), "utf8");
-}
-
-function writeExecution(
-  rootDir: string,
-  taskId: string,
-  executionId: string,
-  submittedAt: string,
-  outputs: ReadonlyArray<unknown>,
-  executorId = "codex"
-): string {
-  const executionRoot = path.join(rootDir, "harness/tasks", taskId, "executions");
-  mkdirSync(executionRoot, { recursive: true });
-  const executionPath = path.join(executionRoot, `${executionId}.md`);
-  writeFileSync(executionPath, `${JSON.stringify({
-    schema: "execution/v2",
-    execution_id: executionId,
-    task_ref: `task/${taskId}`,
-    state: "submitted",
-    primary_actor: {
-      principal: { personId: "person_test" },
-      executor: { kind: "agent", id: executorId },
-      responsibleHuman: "person_test"
-    },
-    claimed_at: submittedAt,
-    submitted_at: submittedAt,
-    closed_at: null,
-    session_bindings: [],
-    outputs,
-    submission: null
-  }, null, 2)}\n`, "utf8");
-  return executionPath;
-}
-
-function inlineOutput(identity: Identity, evidenceId: string, text: string): unknown {
-  return {
-    evidence_id: evidenceId,
-    execution_ref: `execution/${identity.taskId}/${identity.executionId}`,
-    locator: { substrate: "inline", text },
-    checker_receipt_ref: `${evidenceId.includes("first") ? "" : evidenceId === "ev-inline" ? "ev-receipt" : ""}` || undefined
-  };
-}
-
-function fileOutput(identity: Identity, evidenceId: string, filePath: string): unknown {
-  return {
-    evidence_id: evidenceId,
-    execution_ref: `execution/${identity.taskId}/${identity.executionId}`,
-    locator: { substrate: "file", path: filePath }
-  };
-}
-
-function checkerOutput(identity: Identity, evidenceId: string, targetEvidenceId: string, result: "pass" | "fail"): unknown {
-  return {
-    evidence_id: evidenceId,
-    execution_ref: `execution/${identity.taskId}/${identity.executionId}`,
-    locator: {
-      substrate: "checker_receipt",
-      receipt: {
-        checker_id: "test-checker",
-        checker_version: "1",
-        target_evidence_id: targetEvidenceId,
-        target_sha256: null,
-        checked_at: "2026-07-13T00:10:00.000Z",
-        result
-      }
-    }
-  };
-}
-
-function openProjection(rootDir: string, readOnly = true): DatabaseSync {
-  return new DatabaseSync(path.join(rootDir, ".harness/cache/projections.sqlite"), { readOnly });
-}

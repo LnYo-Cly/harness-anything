@@ -37,18 +37,63 @@ export function applyExecutionEvidenceProjectionDelta(
     for (const id of changedExecutionIds) {
       yield* sql`DELETE FROM execution_evidence_projection WHERE execution_id = ${id}`;
       yield* sql`DELETE FROM execution_output_projection WHERE execution_id = ${id}`;
+      yield* sql`DELETE FROM facet_integrity_leaf WHERE leaf_kind = 'execution' AND entity_id = ${id}`;
     }
     const summaries = executionChange.upsertRows.map(executionSummary);
     for (const rows of chunks(summaries, 250)) yield* insertExecutionSummaryRows(sql, rows);
     const outputs = executionChange.upsertRows.flatMap(executionOutputs);
     for (const rows of chunks(outputs, 250)) yield* insertExecutionOutputRows(sql, rows);
+    for (const row of executionChange.upsertRows) {
+      yield* upsertIntegrityLeaf(sql, executionIntegrityLeaf(row));
+    }
   });
 }
 
-export function hashExecutionEvidenceProjectionState(
+export function replaceExecutionEvidenceFacetIntegrity(
+  sql: SqlClient.SqlClient,
+  taskTitles: ReadonlyArray<{ readonly taskId: string; readonly title: string }>,
+  executionRows: ReadonlyArray<DeclaredProjectionRow>
+): Effect.Effect<void, unknown> {
+  return Effect.gen(function* () {
+    yield* sql`DELETE FROM facet_integrity_leaf`;
+    const leaves = [
+      ...taskTitles.map((row) => taskIntegrityLeaf(row.taskId, row.title)),
+      ...executionRows.map(executionIntegrityLeaf)
+    ];
+    for (const rows of chunks(leaves, 250)) yield* insertIntegrityLeaves(sql, rows);
+  });
+}
+
+export function hashExecutionEvidenceFacetIntegrityState(
   sql: SqlClient.SqlClient
 ): Effect.Effect<string, unknown> {
   return Effect.gen(function* () {
+    const rows = yield* sql<Record<string, unknown>>`
+      SELECT leaf_kind, entity_id, row_hash
+      FROM facet_integrity_leaf
+      ORDER BY leaf_kind, entity_id
+    `;
+    return integrityStateHash(rows.map((row) => ({
+      kind: String(row.leaf_kind),
+      id: String(row.entity_id),
+      rowHash: String(row.row_hash)
+    })));
+  });
+}
+
+export function hashExecutionEvidenceTaskIntegrityLeaf(taskId: string, title: string): string {
+  return taskIntegrityLeaf(taskId, title).rowHash;
+}
+
+export function hashExecutionEvidenceFacetState(
+  sql: SqlClient.SqlClient
+): Effect.Effect<string, unknown> {
+  return Effect.gen(function* () {
+    const taskTitles = yield* sql<Record<string, unknown>>`
+      SELECT task_id, title
+      FROM task_projection
+      ORDER BY task_id
+    `;
     const executions = yield* sql<Record<string, unknown>>`
       SELECT execution_id, task_ref, state, executor_id, executor_kind,
              responsible_human, claimed_at, submitted_at, closed_at, latest_at, archival
@@ -64,11 +109,24 @@ export function hashExecutionEvidenceProjectionState(
       FROM execution_output_projection
       ORDER BY execution_id, ordinal
     `;
-    return stablePayloadHash({
-      schema: "execution-evidence-projection-state/v1",
-      executions,
-      outputs
-    });
+    const outputsByExecution = new Map<string, Array<Record<string, unknown>>>();
+    for (const output of outputs) {
+      const executionId = String(output.execution_id);
+      const existing = outputsByExecution.get(executionId) ?? [];
+      existing.push(output);
+      outputsByExecution.set(executionId, existing);
+    }
+    return integrityStateHash([
+      ...taskTitles.map((row) => taskIntegrityLeaf(String(row.task_id), String(row.title))),
+      ...executions.map((row) => ({
+        kind: "execution",
+        id: String(row.execution_id),
+        rowHash: executionIntegrityHash(
+          executionSummaryValuesFromRecord(row),
+          (outputsByExecution.get(String(row.execution_id)) ?? []).map(executionOutputValuesFromRecord)
+        )
+      }))
+    ]);
   });
 }
 
@@ -114,6 +172,14 @@ function createExecutionEvidenceProjectionTables(sql: SqlClient.SqlClient): Effe
         checker_receipt_ref TEXT,
         PRIMARY KEY (execution_id, evidence_id),
         UNIQUE (execution_id, ordinal)
+      )
+    `;
+    yield* sql`
+      CREATE TABLE IF NOT EXISTS facet_integrity_leaf (
+        leaf_kind TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        row_hash TEXT NOT NULL,
+        PRIMARY KEY (leaf_kind, entity_id)
       )
     `;
     yield* sql`
@@ -176,6 +242,108 @@ interface ExecutionOutputInsertRow {
   readonly receiptResult: string | null;
   readonly evidenceSha256: string | null;
   readonly checkerReceiptRef: string | null;
+}
+
+interface IntegrityLeaf {
+  readonly kind: string;
+  readonly id: string;
+  readonly rowHash: string;
+}
+
+function taskIntegrityLeaf(taskId: string, title: string): IntegrityLeaf {
+  return {
+    kind: "task",
+    id: taskId,
+    rowHash: stablePayloadHash({ schema: "execution-evidence-task-integrity/v1", taskId, title })
+  };
+}
+
+function executionIntegrityLeaf(row: DeclaredProjectionRow): IntegrityLeaf {
+  const summary = executionSummary(row);
+  return {
+    kind: "execution",
+    id: summary.executionId,
+    rowHash: executionIntegrityHash(
+      executionSummaryValues(summary),
+      executionOutputs(row).map(executionOutputValues)
+    )
+  };
+}
+
+function executionIntegrityHash(
+  summary: ReadonlyArray<unknown>,
+  outputs: ReadonlyArray<ReadonlyArray<unknown>>
+): string {
+  return stablePayloadHash({
+    schema: "execution-evidence-execution-integrity/v1",
+    summary,
+    outputs
+  });
+}
+
+function integrityStateHash(leaves: ReadonlyArray<IntegrityLeaf>): string {
+  return stablePayloadHash({
+    schema: "execution-evidence-facet-integrity/v2",
+    leaves: [...leaves].sort((left, right) =>
+      left.kind.localeCompare(right.kind) || left.id.localeCompare(right.id))
+  });
+}
+
+function upsertIntegrityLeaf(
+  sql: SqlClient.SqlClient,
+  leaf: IntegrityLeaf
+): Effect.Effect<unknown, unknown> {
+  return sql`
+    INSERT INTO facet_integrity_leaf (leaf_kind, entity_id, row_hash)
+    VALUES (${leaf.kind}, ${leaf.id}, ${leaf.rowHash})
+    ON CONFLICT (leaf_kind, entity_id) DO UPDATE SET row_hash = excluded.row_hash
+  `;
+}
+
+function insertIntegrityLeaves(
+  sql: SqlClient.SqlClient,
+  leaves: ReadonlyArray<IntegrityLeaf>
+): Effect.Effect<unknown, unknown> {
+  return sql.unsafe(`
+    INSERT INTO facet_integrity_leaf (leaf_kind, entity_id, row_hash)
+    VALUES ${leaves.map(() => "(?, ?, ?)").join(", ")}
+  `, leaves.flatMap((leaf) => [leaf.kind, leaf.id, leaf.rowHash]));
+}
+
+function executionSummaryValues(row: ExecutionSummaryInsertRow): ReadonlyArray<unknown> {
+  return [
+    row.executionId, row.taskRef, row.state, row.executorId, row.executorKind,
+    row.responsibleHuman, row.claimedAt, row.submittedAt, row.closedAt,
+    row.latestAt, row.archival
+  ];
+}
+
+function executionSummaryValuesFromRecord(row: Record<string, unknown>): ReadonlyArray<unknown> {
+  return [
+    row.execution_id, row.task_ref, row.state, row.executor_id, row.executor_kind,
+    row.responsible_human, row.claimed_at, row.submitted_at, row.closed_at,
+    row.latest_at, row.archival
+  ];
+}
+
+function executionOutputValues(row: ExecutionOutputInsertRow): ReadonlyArray<unknown> {
+  return [
+    row.executionId, row.ordinal, row.evidenceId, row.executionRef, row.substrate,
+    row.inlineText, row.filePath, row.url, row.objectRef, row.objectSha256,
+    row.objectSize, row.objectMediaType, row.entityRef, row.checkerId,
+    row.checkerVersion, row.targetEvidenceId, row.targetSha256, row.checkedAt,
+    row.receiptResult, row.evidenceSha256, row.checkerReceiptRef
+  ];
+}
+
+function executionOutputValuesFromRecord(row: Record<string, unknown>): ReadonlyArray<unknown> {
+  return [
+    row.execution_id, row.ordinal, row.evidence_id, row.execution_ref, row.substrate,
+    row.inline_text, row.file_path, row.url, row.object_ref, row.object_sha256,
+    row.object_size, row.object_media_type, row.entity_ref, row.checker_id,
+    row.checker_version, row.target_evidence_id, row.target_sha256, row.checked_at,
+    row.receipt_result, row.evidence_sha256, row.checker_receipt_ref
+  ];
 }
 
 function executionSummary(row: DeclaredProjectionRow): ExecutionSummaryInsertRow {

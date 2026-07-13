@@ -6,12 +6,14 @@ import type {
   StableProjectionSourceFence
 } from "../ports/projection-source-fence.ts";
 import {
-  ensureProjectionGenerationReady,
   ProjectionGenerationChangedError,
-  type EnsureProjectionGenerationResult,
   type ReadyProjectionGeneration
 } from "../projection/projection-generation-readiness.ts";
-import { updateTaskProjectionIncrementally } from "../projection/sqlite-task-incremental-projection.ts";
+import {
+  ensureExecutionEvidenceGenerationReady,
+  updateExecutionEvidenceProjectionIncrementally,
+  type EnsureExecutionEvidenceGenerationResult
+} from "../projection/sqlite-execution-evidence-store.ts";
 import {
   queryExecutionEvidencePageFromReadyGeneration,
   type ExecutionEvidencePage,
@@ -63,7 +65,7 @@ export interface DaemonProjectionGenerationManagerOptions {
   readonly layoutOverrides?: HarnessLayoutOverrides;
   readonly prepare?: (
     request: DaemonProjectionPreparationRequest
-  ) => EnsureProjectionGenerationResult | Promise<EnsureProjectionGenerationResult>;
+  ) => EnsureExecutionEvidenceGenerationResult | Promise<EnsureExecutionEvidenceGenerationResult>;
   readonly onPreparation?: (event: DaemonProjectionPreparationEvent) => void;
   readonly sourceFence?: ProjectionSourceFenceReader;
   readonly reconcileIntervalMs?: number | false;
@@ -232,22 +234,22 @@ export function createDaemonProjectionGenerationManager(
 
   function prepareProjectionGeneration(
     request: DaemonProjectionPreparationRequest
-  ): EnsureProjectionGenerationResult & { readonly mode: Exclude<DaemonProjectionPreparationMode, "custom"> } {
-    let mode: Exclude<DaemonProjectionPreparationMode, "custom"> = "full-readiness";
+  ): EnsureExecutionEvidenceGenerationResult & { readonly mode: Exclude<DaemonProjectionPreparationMode, "custom"> } {
     if (request.touchedPaths.length > 0 && request.previousSourceFingerprint) {
-      mode = updateTaskProjectionIncrementally({
+      const updated = updateExecutionEvidenceProjectionIncrementally({
         rootDir: options.rootDir,
         ...(options.layoutOverrides ? { layoutOverrides: options.layoutOverrides } : {}),
         touchedPaths: request.touchedPaths,
         previousSourceFingerprint: request.previousSourceFingerprint
-      }).mode;
+      });
+      return updated;
     }
     return {
-      ...ensureProjectionGenerationReady({
+      ...ensureExecutionEvidenceGenerationReady({
         rootDir: options.rootDir,
         ...(options.layoutOverrides ? { layoutOverrides: options.layoutOverrides } : {})
       }),
-      mode
+      mode: "full-readiness"
     };
   }
 
@@ -370,7 +372,7 @@ const unknownProjectionSourceFenceReader: ProjectionSourceFenceReader = {
   capture: () => ({ kind: "unknown", reason: "git-unavailable" })
 };
 
-function preparationMode(result: EnsureProjectionGenerationResult): DaemonProjectionPreparationMode {
+function preparationMode(result: EnsureExecutionEvidenceGenerationResult): DaemonProjectionPreparationMode {
   if (!("mode" in result)) return "custom";
   const mode = result.mode;
   return mode === "full-readiness" || mode === "incremental" || mode === "rebuild" || mode === "unchanged"
