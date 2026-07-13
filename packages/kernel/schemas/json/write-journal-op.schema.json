@@ -25,21 +25,9 @@
       "anyOf": [
         {
           "type": "string",
-          "title": "`task/${string}`",
+          "title": "`${\"task\" | \"decision\" | \"fact\" | \"relation\" | \"module\" | \"session\" | \"execution\" | \"review\"}/${string}`",
           "description": "a template literal",
-          "pattern": "^task\\/[\\s\\S]*?$"
-        },
-        {
-          "type": "string",
-          "title": "`decision/${string}`",
-          "description": "a template literal",
-          "pattern": "^decision\\/[\\s\\S]*?$"
-        },
-        {
-          "type": "string",
-          "title": "`module/${string}`",
-          "description": "a template literal",
-          "pattern": "^module\\/[\\s\\S]*?$"
+          "pattern": "^(task|decision|fact|relation|module|session|execution|review)\\/[\\s\\S]*?$"
         },
         {
           "type": "string",

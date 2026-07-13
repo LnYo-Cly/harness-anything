@@ -1,4 +1,4 @@
-import type { WriteOp } from "../../../kernel/src/index.ts";
+import type { RegistryMutationPlanInput, StoragePlan, WriteOp } from "../../../kernel/src/index.ts";
 import {
   actorAxesBindingDigestV2,
   type ActorAxesBindingClaimsV2,
@@ -125,9 +125,8 @@ export interface AuthorizedOperationAttemptV2 {
 }
 
 export interface AuthoritySemanticCompilationV2 {
-  readonly mutationSet: SemanticMutationSetV2;
+  readonly mutationPlan: RegistryMutationPlanInput;
   readonly operation: WriteOp;
-  readonly touchedPaths: ReadonlyArray<string>;
   readonly decodedBytes: bigint;
 }
 
@@ -219,6 +218,22 @@ export function assertMutationClaimMatchesV2(
   const requestDigest = semanticRequestDigestV2(envelope);
   if (!bytesEqual(envelope.claimedSemanticRequestDigest, requestDigest)) {
     throw new SemanticAdmissionErrorV2("REQUEST_DIGEST_MISMATCH");
+  }
+}
+
+export function assertStoragePlanMatchesMutationSetV2(
+  mutationSet: SemanticMutationSetV2,
+  storagePlan: StoragePlan
+): void {
+  if (storagePlan.registryVersion !== mutationSet.registryVersion) {
+    throw new SemanticAdmissionErrorV2("STORAGE_PLAN_REGISTRY_VERSION_MISMATCH");
+  }
+  const plannedSet: SemanticMutationSetV2 = {
+    registryVersion: storagePlan.registryVersion,
+    mutations: storagePlan.mutations
+  };
+  if (!canonicalCborBytesEqual(semanticMutationSetBytesV2(mutationSet), semanticMutationSetBytesV2(plannedSet))) {
+    throw new SemanticAdmissionErrorV2("STORAGE_PLAN_MUTATION_SET_MISMATCH");
   }
 }
 

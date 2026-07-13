@@ -16,7 +16,7 @@ import {
   type EntityRegistration,
   type EntityRootResolverDeclaration,
   type EntityStorageForm
-} from "./registry.ts";
+} from "./registry-contract.ts";
 
 export type EntityDeclaration = Omit<
   EntityRegistration<string, string>,

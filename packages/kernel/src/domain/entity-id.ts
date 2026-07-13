@@ -1,13 +1,14 @@
 import type { TaskId } from "./task.ts";
+import { isCanonicalEntityKind, type CanonicalEntityKind } from "../entity/canonical-kinds.ts";
 
-export type EntityId = `task/${string}` | `decision/${string}` | `module/${string}` | `entity/${string}/${string}`;
+export type EntityId = `${CanonicalEntityKind}/${string}` | `entity/${string}/${string}`;
 
 export interface ParsedWriteEntityId {
-  readonly kind: "task" | "decision" | "module";
+  readonly kind: CanonicalEntityKind;
   readonly id: string;
 }
 
-const writeEntityIdPattern = /^(?<kind>task|decision|module)\/(?<id>[A-Za-z0-9._-]+)$/u;
+const writeEntityIdPattern = /^(?<kind>[a-z][a-z0-9-]*)\/(?<id>[A-Za-z0-9._-]+)$/u;
 
 export function taskEntityId(taskId: TaskId): EntityId {
   return `task/${taskId}`;
@@ -32,7 +33,7 @@ export function parseWriteEntityId(entityId: EntityId): ParsedWriteEntityId | nu
   const match = entityId.match(writeEntityIdPattern);
   const kind = match?.groups?.kind;
   const id = match?.groups?.id;
-  if ((kind !== "task" && kind !== "decision" && kind !== "module") || !id) return null;
+  if (!isCanonicalEntityKind(kind) || !id) return null;
   return { kind, id };
 }
 
