@@ -81,6 +81,7 @@ export interface ReadyProjectionFacet {
     readonly table: string;
     readonly idColumn: string;
     readonly identityField: string;
+    readonly materialization?: "existing-entity-table" | "mutation-index";
   };
 }
 

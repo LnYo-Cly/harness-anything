@@ -190,6 +190,7 @@ const publicRuntimeSurface = [
   "readDecisionFactCoverage",
   "readEntityCascadeImpact",
   "readFrontmatter",
+  "readModuleAttributionProjection",
   "readNestedScalar",
   "readRelationGraphAuthoredSourceKinds",
   "readRelationGraphProjection",
