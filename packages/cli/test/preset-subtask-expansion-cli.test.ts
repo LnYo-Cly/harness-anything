@@ -56,9 +56,11 @@ test("subtask-expansion missing parent reports ok false without writing tasksRoo
 
     assert.equal(result.ok, false);
     assert.equal(result.error.code, "preset_script_result_failed");
+    assert.equal(result.report.schema, "subtask-expansion-plan/v1");
     assert.equal(result.report.parentTaskId, "task_MISSING");
+    assert.deepEqual(result.generated, []);
     assert.equal(snapshotTasksRoot(rootDir), before);
-    assert.equal(existsSync(path.join(rootDir, "harness/tasks/task_MISSING/artifacts/preset-result.json")), true);
+    assert.equal(existsSync(path.join(rootDir, "harness/tasks/task_MISSING")), false);
   });
 });
 

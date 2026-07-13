@@ -5,11 +5,10 @@ import { fileURLToPath } from "node:url";
 import { buildLensBCandidates, evaluateDetectionResults } from "./detectors/detector-policy.mjs";
 import { runSeedDetectors } from "./detectors/seed-detectors.mjs";
 import {
-  canonicalRoot,
   collectProductFileHashes,
   diffFileHashes,
-  readGitHead,
-  selectPriorSnapshot
+  selectPriorSnapshot,
+  trustedCanonicalRoot
 } from "./snapshot.mjs";
 
 const contextPath = process.env.HARNESS_PRESET_CONTEXT;
@@ -22,8 +21,12 @@ const registry = JSON.parse(readFileSync(path.join(presetRoot, "registry", "arch
 const rootDir = context.paths.projectRoot ?? context.paths.rootDir;
 const artifactsDir = path.join(context.outputRoot, "artifacts");
 const generatedAt = new Date().toISOString();
-const git = readGitHead(rootDir);
-const previous = selectPriorSnapshot(context.paths.tasksRoot, context.taskId);
+const git = trustedCommit(context.repository?.commit);
+const previous = selectPriorSnapshot(
+  context.readScopes.filter((scope) => path.basename(scope) === "arch-rot.snapshot.json"),
+  context.taskId,
+  context.paths.rootDir
+);
 const detectorResults = runSeedDetectors(rootDir, registry.records);
 const evaluation = evaluateDetectionResults(registry.records, detectorResults);
 const fileHashes = collectProductFileHashes(rootDir);
@@ -61,11 +64,11 @@ const snapshot = {
   coordinationTaskId: context.taskId,
   registryId: registry.registryId,
   root: {
-    realpath: canonicalRoot(rootDir),
+    realpath: trustedCanonicalRoot(context.repository?.root),
     ...git
   },
   previousSnapshot: previous.snapshot ? {
-    sourcePath: toRootRelative(rootDir, previous.sourcePath),
+    sourcePath: toRootRelative(context.paths.rootDir, previous.sourcePath),
     generatedAt: previous.snapshot.generatedAt,
     coordinationTaskId: previous.snapshot.coordinationTaskId
   } : null,
@@ -154,4 +157,10 @@ function writeJson(filePath, value) {
 
 function toRootRelative(root, filePath) {
   return filePath ? path.relative(root, filePath).split(path.sep).join("/") : null;
+}
+
+function trustedCommit(commit) {
+  return commit?.verification === "verified" && /^[0-9a-f]{40,64}$/u.test(commit.sha)
+    ? { sourceHead: commit.sha, headVerification: "verified" }
+    : { sourceHead: "unverified", headVerification: "unverified" };
 }

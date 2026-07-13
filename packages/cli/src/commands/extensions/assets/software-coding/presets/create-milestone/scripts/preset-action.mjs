@@ -368,7 +368,7 @@ function artifactPathMatches(artifact, filePath) {
 function findTask(taskId) {
   const fromContext = (Array.isArray(context.taskIndex) ? context.taskIndex : []).find((task) => task.taskId === taskId);
   if (fromContext) return fromContext;
-  for (const indexPath of walk(paths.tasksRoot).filter((filePath) => path.basename(filePath) === "INDEX.md")) {
+  for (const indexPath of declaredTaskIndexPaths()) {
     const body = readOptional(indexPath);
     const foundTaskId = matchScalar(body, /task_id:\s*"?([^"\n]+)"?/u);
     if (foundTaskId !== taskId) continue;
@@ -382,7 +382,13 @@ function findTask(taskId) {
 }
 
 function findChildTasks(parentTaskId) {
-  return walk(paths.tasksRoot).filter((filePath) => path.basename(filePath) === "INDEX.md").flatMap((indexPath) => {
+  if (Array.isArray(context.taskIndex)) {
+    return context.taskIndex
+      .filter((task) => task.parent === parentTaskId)
+      .map((task) => task.taskId)
+      .filter(Boolean);
+  }
+  return declaredTaskIndexPaths().flatMap((indexPath) => {
     const body = readOptional(indexPath);
     const parent = matchScalar(body, /parent:\s*"?([^"\n]+)"?/u);
     if (parent !== parentTaskId) return [];
@@ -391,11 +397,28 @@ function findChildTasks(parentTaskId) {
   });
 }
 
+function declaredTaskIndexPaths() {
+  return [...new Set((Array.isArray(context.readScopes) ? context.readScopes : [])
+    .filter((scope) => isSameOrInside(paths.tasksRoot, scope))
+    .flatMap((scope) => walk(scope))
+    .filter((filePath) => path.basename(filePath) === "INDEX.md"))].sort();
+}
+
+function isSameOrInside(root, candidate) {
+  const relativePath = path.relative(path.resolve(root), path.resolve(candidate));
+  return relativePath === "" || (
+    relativePath !== ".." &&
+    !relativePath.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relativePath)
+  );
+}
+
 function findDecision(decisionId) {
   return decisionDocuments().some((decision) => decision.decisionId === decisionId);
 }
 
 function decisionDocuments() {
+  if (Array.isArray(context.decisions)) return context.decisions;
   return walk(paths.decisionsRoot).filter((filePath) => path.basename(filePath) === "decision.md").map((filePath) => {
     const body = readOptional(filePath);
     return {

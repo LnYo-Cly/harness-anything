@@ -1126,6 +1126,10 @@
           "command": "git"
         },
         {
+          "file": "packages/cli/src/commands/extensions/script-repository-context.ts",
+          "command": "git"
+        },
+        {
           "file": "packages/cli/src/commands/doctor.ts",
           "command": "git"
         },
@@ -1141,6 +1145,7 @@
       "evidence": [
         "packages/adapters/local/src/projection-source-fence.ts:219",
         "packages/cli/src/commands/core/worktree.ts:183",
+        "packages/cli/src/commands/extensions/script-repository-context.ts:37",
         "packages/kernel/src/store/local-version-control-system.ts:21"
       ],
       "freshness": "git-ref"

@@ -1,20 +1,32 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { HarnessLayoutInput, WriteOp } from "../../../../kernel/src/index.ts";
 import { resolveHarnessLayout } from "../../../../kernel/src/index.ts";
 import { cliError, CliErrorCode } from "../../cli/error-codes.ts";
 import type { CliResult } from "../../cli/types.ts";
 import { resolveScriptPolicy, type PresetPolicyResolution } from "./preset-policy.ts";
+import { buildPresetContextProjections } from "./preset-script-context.ts";
+import { scriptChildEnvironment, type ScriptEnvironmentCapabilities } from "./script-environment.ts";
 import { executeScript } from "./script-executor.ts";
+import { trustedScriptRepositoryContext } from "./script-repository-context.ts";
 import { discoverPresets } from "./state.ts";
 import {
   isPathInside,
-  permissionPathsForScope,
+  resolvedScopeSetIsSafe,
   resolveDeclaredReadScopes,
-  resolveDeclaredWriteScopes
+  resolveDeclaredWriteScopes,
+  scriptPackageIsSafe,
+  scriptPackageReadPermissions
 } from "./script-scope.ts";
-import { canonicalGeneratedPaths, canonicalizeScriptResult, createCanonicalScriptStage, remapScope, scriptIngestOp } from "./script-staging.ts";
+import {
+  canonicalGeneratedPaths,
+  canonicalizeScriptResult,
+  createCanonicalScriptStage,
+  remapScope,
+  ScriptStageScopeError,
+  scriptIngestOp
+} from "./script-staging.ts";
 export type ScriptSource = "user" | "vertical" | "preset";
 export type ScriptPurpose = "scaffold" | "generate" | "transform" | "audit";
 export type ScriptKind = "action" | "check";
@@ -42,6 +54,8 @@ export interface ResolvedScriptEntry {
   readonly manifestRoot: string;
   readonly owner?: unknown;
   readonly context?: Record<string, unknown>;
+  readonly environmentCapabilities?: ScriptEnvironmentCapabilities;
+  readonly trustedPackageReadPermissions?: ReadonlyArray<string>;
 }
 
 export interface ScriptHostSuccess {
@@ -75,10 +89,16 @@ export function runScriptHost(options: {
     presetId: typeof options.script.context?.presetId === "string" ? options.script.context.presetId : undefined
   });
   if (!validation.ok || !policy.ok) return invalidScriptOrPolicy(options.commandName, validation, policy);
-
   const scriptPath = path.resolve(options.script.manifestRoot, options.script.entry.command);
   if (!isPathInside(options.script.manifestRoot, scriptPath) || !existsSync(scriptPath)) {
     return scriptFailure(options.commandName, CliErrorCode.ScriptNotFound, "Script command was not found inside its manifest package.");
+  }
+  if (!scriptPackageIsSafe(scriptPath, options.script.manifestRoot)) {
+    return scriptFailure(
+      options.commandName,
+      CliErrorCode.ScriptScopeInvalidRead,
+      "Script manifest packages must contain only regular files and directories, never symbolic links."
+    );
   }
 
   const outputRoot = options.outputRoot ?? path.join(layout.authoredRoot, "context");
@@ -98,24 +118,47 @@ export function runScriptHost(options: {
 
   mkdirSync(runDir, { recursive: true });
 
-  const stage = !options.dryRun && writeScope.roots.length > 0
-    ? createCanonicalScriptStage(options.rootInput, runDir, outputRoot)
-    : undefined;
+  let stage: ReturnType<typeof createCanonicalScriptStage> | undefined;
+  try {
+    stage = !options.dryRun && writeScope.roots.length > 0
+      ? createCanonicalScriptStage(options.rootInput, runDir, outputRoot, {
+        protectedScopes: [
+          { mode: "read", scope: readScope },
+          { mode: "write", scope: writeScope }
+        ]
+      })
+      : undefined;
+  } catch (error) {
+    if (!(error instanceof ScriptStageScopeError)) throw error;
+    return scriptFailure(
+      options.commandName,
+      error.scopeMode === "read" ? CliErrorCode.ScriptScopeInvalidRead : CliErrorCode.ScriptScopeInvalidWrite,
+      "Script staging scopes must not contain symbolic links."
+    );
+  }
   const executionLayout = stage?.layout ?? layout;
   const executionOutputRoot = stage?.outputRoot ?? outputRoot;
   const executionReadScope = stage
     ? remapScope(stage, readScope)
     : readScope;
   const executionWriteScope = stage
-    ? remapScope(stage, writeScope)
+    ? remapScope(stage, writeScope, { retainOriginalPermissions: false })
     : writeScope;
   if (!executionReadScope.ok || !executionWriteScope.ok) {
     return scriptFailure(options.commandName, CliErrorCode.ScriptScopeInvalidWrite, "Script staging scopes could not be resolved.");
   }
 
   const mergedInputs = { ...options.script.entry.inputs, ...(options.inputs ?? {}) };
+  const presetContextProjections = options.script.entry.source === "preset"
+    ? buildPresetContextProjections({
+      layout: executionLayout,
+      outputRoot: executionOutputRoot,
+      readRoots: executionReadScope.roots
+    })
+    : {};
   writeFileSync(contextPath, JSON.stringify({
     ...(options.script.context ?? {}),
+    ...presetContextProjections,
     schema: options.script.entry.source === "preset" ? "preset-context/v1" : "script-context/v1",
     scriptId: options.script.entry.id,
     source: options.script.entry.source,
@@ -132,6 +175,7 @@ export function runScriptHost(options: {
       generatedRoot: executionLayout.generatedRoot,
       localRoot: executionLayout.localRoot
     },
+    repository: trustedScriptRepositoryContext(layout.rootDir),
     inputs: mergedInputs,
     readScopes: executionReadScope.roots,
     writeScopes: executionWriteScope.roots,
@@ -155,15 +199,31 @@ export function runScriptHost(options: {
     };
   }
 
+  if (!scriptPackageIsSafe(scriptPath, options.script.manifestRoot)) {
+    return scriptFailure(
+      options.commandName,
+      CliErrorCode.ScriptScopeInvalidRead,
+      "Script manifest package changed to an unsafe filesystem shape before execution."
+    );
+  }
+  const executionBoundaries = stage
+    ? [executionLayout.rootDir, layout.rootDir]
+    : [layout.rootDir];
+  if (!resolvedScopeSetIsSafe(executionReadScope, executionBoundaries, "read")) {
+    return scriptFailure(options.commandName, CliErrorCode.ScriptScopeInvalidRead, "Script read scope changed to an unsafe filesystem shape before execution.");
+  }
+  if (!resolvedScopeSetIsSafe(executionWriteScope, executionBoundaries, "write")) {
+    return scriptFailure(options.commandName, CliErrorCode.ScriptScopeInvalidWrite, "Script write scope changed to an unsafe filesystem shape before execution.");
+  }
   const execution = executeScript({
-    scriptPath,
+    scriptPath: realpathSync.native(scriptPath),
     cwd: options.script.manifestRoot,
     evidenceDir: runDir,
     outputRoot: executionOutputRoot,
     allowAddons: options.script.entry.metadata.kind === "check",
     readPermissions: [
-      ...ancestorDirectories(scriptPath),
-      ...permissionPathsForScope(options.script.manifestRoot, true),
+      ...scriptPackageReadPermissions(scriptPath, options.script.manifestRoot),
+      ...(options.script.trustedPackageReadPermissions ?? []),
       contextPath,
       ...checkScriptPackageReadPermissions(options.script.entry.metadata.kind, options.script.manifestRoot, scriptPath, layout),
       ...executionReadScope.permissions
@@ -173,11 +233,11 @@ export function runScriptHost(options: {
       ...executionWriteScope.permissions,
       ...checkScriptLocalWritePermissions(options.script.entry.metadata.kind, layout)
     ],
-    env: {
+    env: scriptChildEnvironment({
       HARNESS_SCRIPT_CONTEXT: contextPath,
       HARNESS_SCRIPT_RESULT: resultPath,
       HARNESS_PRESET_CONTEXT: contextPath
-    },
+    }, options.script.environmentCapabilities),
     artifactRoots: executionWriteScope.roots,
     outputBoundary: { kind: "patterns", patterns: options.script.entry.metadata.produces, substitutions: producePatternSubstitutions(executionLayout, executionOutputRoot) }
   });
@@ -217,10 +277,23 @@ export function runScriptHost(options: {
   if (!scriptedResult.ok) return scriptFailure(options.commandName, CliErrorCode.ScriptResultInvalid, scriptedResult.hint, runDir, layout.rootDir);
   const generatedPaths = stage ? canonicalGeneratedPaths(stage, execution.generated) : execution.generated;
   const ingestOp = stage ? scriptIngestOp(stage, executionWriteScope.roots, runId) : undefined;
+  const canonicalResult = stage ? canonicalizeScriptResult(stage, scriptedResult.value) : scriptedResult.value;
   if (scriptedResult.value.ok !== true && options.allowFailedScriptResult !== true) {
+    const failure = scriptFailure(options.commandName, CliErrorCode.ScriptResultFailed, "Script reported a failed result.", runDir, layout.rootDir);
+    const failedAuditIngestOp = options.script.entry.metadata.purpose === "audit" ? ingestOp : undefined;
     return {
-      ...scriptFailure(options.commandName, CliErrorCode.ScriptResultFailed, "Script reported a failed result.", runDir, layout.rootDir),
-      ...(ingestOp ? { ingestOp } : {})
+      ok: false,
+      result: {
+        ...failure.result,
+        runId,
+        generated: failedAuditIngestOp
+          ? generatedPaths.map((filePath) => relativeToRoot(layout.rootDir, filePath))
+          : [],
+        warnings: Array.isArray(canonicalResult.warnings) ? canonicalResult.warnings : undefined,
+        rows: typeof canonicalResult.rows === "number" ? canonicalResult.rows : undefined,
+        report: canonicalResult.report ?? canonicalResult
+      },
+      ...(failedAuditIngestOp ? { ingestOp: failedAuditIngestOp } : {})
     };
   }
   return {
@@ -228,7 +301,7 @@ export function runScriptHost(options: {
     runId,
     runDir,
     generated: generatedPaths.map((filePath) => relativeToRoot(layout.rootDir, filePath)),
-    scriptedResult: stage ? canonicalizeScriptResult(stage, scriptedResult.value) : scriptedResult.value,
+    scriptedResult: canonicalResult,
     ...(ingestOp ? { ingestOp } : {})
   };
 }
@@ -362,17 +435,6 @@ function producePatternSubstitutions(
 
 function relativeToRoot(rootDir: string, filePath: string): string {
   return path.relative(rootDir, filePath).split(path.sep).join("/");
-}
-
-function ancestorDirectories(filePath: string): ReadonlyArray<string> {
-  const ancestors: string[] = [];
-  let current = path.dirname(path.resolve(filePath));
-  while (current !== path.dirname(current)) {
-    ancestors.push(current);
-    current = path.dirname(current);
-  }
-  ancestors.push(current);
-  return ancestors;
 }
 
 function checkScriptPackageReadPermissions(

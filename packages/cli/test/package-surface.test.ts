@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,7 +11,7 @@ import {
   findPortablePathCollisions,
   normalizeRelativeDocumentPath
 } from "../../kernel/src/index.ts";
-import { ensureTestHarnessIdentity } from "./helpers/git-fixtures.ts";
+import { initializeNestedHarnessRepo } from "./helpers/git-fixtures.ts";
 import { unwrapCommandReceipt } from "./helpers/receipt.ts";
 
 const cliEntry = path.resolve("packages/cli/src/index.ts");
@@ -431,7 +431,12 @@ test("architecture-rot-audit registry formalizes seven categories and fixed anch
 
 test("architecture-rot-audit check action writes snapshot and non-blocking triage", () => {
   withTempRoot((rootDir) => {
-    ensureTestHarnessIdentity(rootDir);
+    initializeNestedHarnessRepo(rootDir, { writeOuterGitignore: true });
+    writeFixture(rootDir, "harness/tasks/task-prior/artifacts/arch-rot.snapshot.json", JSON.stringify(snapshotFixture("task-prior")));
+    writeFixture(rootDir, "harness/tasks/task-invalid/artifacts/arch-rot.snapshot.json", "{bad json");
+    writeFixture(rootDir, "harness/tasks/task-ordinary/INDEX.md", "# Ordinary task\n");
+    execFileSync("git", ["-C", path.join(rootDir, "harness"), "add", "tasks"]);
+    execFileSync("git", ["-C", path.join(rootDir, "harness"), "commit", "-q", "-m", "seed prior task evidence"]);
     writeFixture(rootDir, "packages/cli/src/cli/command-spec/command-spec-fixture.ts", [
       "const specs = [",
       "  { \"kind\": \"one\", \"options\": [{\"flag\":\"--mode\",\"description\":\"First mode.\"}], \"parse\": parseOne, \"run\": runOne },",
@@ -447,6 +452,12 @@ test("architecture-rot-audit check action writes snapshot and non-blocking triag
       ""
     ].join("\n"));
     writeFixture(rootDir, "packages/cli/src/commands/extensions/script-executor.ts", "import { spawnSync } from \"node:child_process\";\nvoid spawnSync;\n");
+    execFileSync("git", ["-C", rootDir, "init", "-q"]);
+    execFileSync("git", ["-C", rootDir, "config", "user.email", "harness@example.test"]);
+    execFileSync("git", ["-C", rootDir, "config", "user.name", "Harness Test"]);
+    execFileSync("git", ["-C", rootDir, "add", ".gitignore", "packages"]);
+    execFileSync("git", ["-C", rootDir, "commit", "-q", "-m", "seed product repository"]);
+    const sourceHead = execFileSync("git", ["-C", rootDir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 
     const checked = runJson(rootDir, [
       "preset", "action", "architecture-rot-audit", "check", "--task", "task-rot", "--allow-scripts"
@@ -458,7 +469,14 @@ test("architecture-rot-audit check action writes snapshot and non-blocking triag
     assert.equal(checked.report.status, "passed");
     assert.deepEqual(snapshot.lensA.passes.sort(), ["ROT-002", "ROT-006", "ROT-008"]);
     assert.deepEqual(snapshot.lensA.recurrences, []);
-    assert.equal(snapshot.root.sourceHead, "unverified");
+    assert.equal(snapshot.root.sourceHead, sourceHead);
+    assert.equal(snapshot.root.headVerification, "verified");
+    assert.equal(snapshot.root.realpath, realpathSync.native(rootDir));
+    assert.equal(snapshot.previousSnapshot.sourcePath, "harness/tasks/task-prior/artifacts/arch-rot.snapshot.json");
+    assert.equal(snapshot.warnings.some((warning: string) =>
+      warning.includes("harness/tasks/task-invalid/artifacts/arch-rot.snapshot.json")), true);
+    assert.equal(snapshot.warnings.some((warning: string) =>
+      warning.includes("/staging/") || warning.includes(".harness/script-runs")), false);
     assert.equal(existsSync(path.join(rootDir, "harness/tasks/task-rot/artifacts/arch-rot.triage.json")), true);
   });
 });
@@ -506,7 +524,12 @@ test("architecture rot snapshots ignore bad inputs and break timestamp ties by t
     writeFixture(rootDir, "harness/tasks/task_CURRENT/artifacts/arch-rot.snapshot.json", JSON.stringify(snapshotFixture("task_CURRENT", "2099-01-01T00:00:00.000Z")));
     writeFixture(rootDir, "harness/tasks/task_BAD/artifacts/arch-rot.snapshot.json", "{bad json");
 
-    const selected = snapshotHelpers.selectPriorSnapshot(tasksRoot, "task_CURRENT");
+    const selected = snapshotHelpers.selectPriorSnapshot([
+      path.join(tasksRoot, "task_A/artifacts/arch-rot.snapshot.json"),
+      path.join(tasksRoot, "task_B/artifacts/arch-rot.snapshot.json"),
+      path.join(tasksRoot, "task_CURRENT/artifacts/arch-rot.snapshot.json"),
+      path.join(tasksRoot, "task_BAD/artifacts/arch-rot.snapshot.json")
+    ], "task_CURRENT");
 
     assert.equal(selected.snapshot.coordinationTaskId, "task_B");
     assert.equal(selected.warnings.length, 1);
