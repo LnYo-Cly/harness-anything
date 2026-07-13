@@ -13,7 +13,6 @@ import { canonicalEntityKinds, type CanonicalEntityKind } from "./canonical-kind
 import { executionDeclaration } from "./execution-declaration.ts";
 import { reviewDeclaration } from "./review-declaration.ts";
 import {
-  deferredRegistryFacet,
   readyIdentityProjectionFacets,
   readyStorageLocator,
   typedOnlySemanticDiff
@@ -93,8 +92,8 @@ export const entityRegistry = {
         };
       }
     }),
-    mutationContract: deferredRegistryFacet("W3", "OQ-3 action vocabulary is not registered"),
-    semanticDiff: deferredRegistryFacet("W5", "managed decision semanticDiff is not installed"),
+    mutationContract: { status: "ready", actions: ["propose", "state", "amend", "relation"] },
+    semanticDiff: typedOnlySemanticDiff("W3 enables typed commands only; managed decision semanticDiff remains owned by W5"),
   },
   task: {
     kind: "task",
@@ -117,13 +116,21 @@ export const entityRegistry = {
       table: "task_projection", idColumn: "task_id", identityField: "taskId"
     }),
     storageLocator: readyStorageLocator({
-      locate: (identity) => ({
-        targets: [{ kind: "document", path: `tasks/${identity.taskId}`, access: "prefix" }],
-        consistencyScope: `entity:task/${identity.taskId}`
-      })
+      locate: (identity, context) => {
+        const packagePath = `tasks/${identity.taskId}`;
+        const documentPath = context.documentPath;
+        return {
+          targets: [{
+            kind: "document",
+            path: documentPath ? `${packagePath}/${validateRegistryDocumentPath(documentPath)}` : packagePath,
+            access: documentPath ? "exact" : "prefix"
+          }],
+          consistencyScope: `entity:task/${identity.taskId}`
+        };
+      }
     }),
-    mutationContract: deferredRegistryFacet("W3", "OQ-3 action vocabulary is not registered"),
-    semanticDiff: deferredRegistryFacet("W5", "managed task semanticDiff is not installed"),
+    mutationContract: { status: "ready", actions: ["create", "transition", "append", "document"] },
+    semanticDiff: typedOnlySemanticDiff("W3 enables typed commands only; managed task semanticDiff remains owned by W5"),
   },
   fact: {
     kind: "fact",
@@ -194,15 +201,20 @@ export const entityRegistry = {
       unsupported("D4", "hard-delete", "module registry history is retained")
     ]),
     storageForm: "schema",
-    ...readyIdentityProjectionFacets("module", ["moduleKey"]),
+    ...readyIdentityProjectionFacets("module", ["moduleKey"], {
+      table: "module_attribution_projection",
+      idColumn: "module_key",
+      identityField: "moduleKey",
+      materialization: "mutation-index"
+    }),
     storageLocator: readyStorageLocator({
       locate: () => ({
         targets: [{ kind: "document", path: "modules.json", access: "exact" }],
         consistencyScope: "path:modules.json"
       })
     }),
-    mutationContract: deferredRegistryFacet("W3", "OQ-3 action vocabulary is not registered"),
-    semanticDiff: deferredRegistryFacet("W5", "module registry semanticDiff is not installed"),
+    mutationContract: { status: "ready", actions: ["register", "unregister", "step"] },
+    semanticDiff: typedOnlySemanticDiff("W3 enables typed commands only; module registry semanticDiff remains owned by W5"),
   },
   session: sessionEntityRegistration,
   execution: executionDeclaration,
@@ -262,4 +274,15 @@ function decodeCanonicalSegment(value: string): string {
     throw new Error(`INVALID_CANONICAL_ENTITY_SEGMENT:${value}`);
   }
   return decoded;
+}
+
+function validateRegistryDocumentPath(value: string): string {
+  if (!value || value.startsWith("/") || value.endsWith("/") || value.includes("\\")) {
+    throw new Error(`INVALID_REGISTRY_DOCUMENT_PATH:${value}`);
+  }
+  const segments = value.split("/");
+  if (segments.some((segment) => !segment || segment === "." || segment === ".." || segment.includes("\0"))) {
+    throw new Error(`INVALID_REGISTRY_DOCUMENT_PATH:${value}`);
+  }
+  return value;
 }

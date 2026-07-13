@@ -52,6 +52,11 @@ export interface AttributionProjectionRow {
   readonly digestStatus: AttributionDigestStatus;
 }
 
+export interface ModuleAttributionProjectionRow {
+  readonly moduleKey: string;
+  readonly attribution: EntityAttributionProjection;
+}
+
 export function materializeAttributionProjection(
   rootInput: HarnessLayoutInput,
   projectionPath = resolveHarnessLayout(rootInput).projectionPath
@@ -70,6 +75,30 @@ export function materializeAttributionProjectionFromEvents(
     yield* materializeEntityAttributionBlocks(sql, events);
   })));
   return events.flatMap(eventToProjectionRows);
+}
+
+export function readModuleAttributionProjection(
+  projectionPath: string,
+  moduleKey?: string
+): ReadonlyArray<ModuleAttributionProjectionRow> {
+  const facet = entityRegistry.module.projectionFacet;
+  if (facet.status !== "ready" || !facet.attributionTarget
+    || facet.attributionTarget.materialization !== "mutation-index") {
+    throw new Error("MODULE_ATTRIBUTION_PROJECTION_FACET_NOT_READY");
+  }
+  const target = facet.attributionTarget;
+  return runSqlite(projectionPath, Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const where = moduleKey === undefined ? "" : ` WHERE ${target.idColumn} = ?`;
+    const rows = yield* sql.unsafe<Record<string, unknown>>(
+      `SELECT ${target.idColumn}, attribution_json FROM ${target.table}${where} ORDER BY ${target.idColumn}`,
+      moduleKey === undefined ? [] : [moduleKey]
+    );
+    return rows.map((row) => ({
+      moduleKey: String(row[target.idColumn]),
+      attribution: JSON.parse(String(row.attribution_json)) as EntityAttributionProjection
+    }));
+  }));
 }
 
 export function replaceAttributionProjectionRows(
@@ -143,6 +172,12 @@ export function materializeEntityAttributionBlocks(
     const existing = new Set((yield* sql<{ readonly name: string }>`SELECT name FROM sqlite_master WHERE type = 'table'`)
       .map((row) => String(row.name)));
     for (const target of registryAttributionTargets()) {
+      if (target.materialization === "mutation-index") {
+        const hasIndexedRows = rows.some((row) => row.entityKind === target.kind);
+        if (!hasIndexedRows && !existing.has(target.table)) continue;
+        yield* ensureMutationIndexTarget(sql, target, rows, true);
+        existing.add(target.table);
+      }
       if (!existing.has(target.table)) continue;
       yield* sql.unsafe(`UPDATE ${target.table} SET attribution_json = ?`, [JSON.stringify(unresolvedEntityAttribution())]);
       const records = yield* sql.unsafe<Record<string, unknown>>(`SELECT ${target.idColumn} FROM ${target.table}`);
@@ -168,6 +203,9 @@ export function materializeEntityAttributionTargets(
     for (const target of uniqueTargets.values()) {
       const declaration = registryAttributionTargets().find((candidate) => candidate.table === target.table);
       if (!declaration) throw new Error(`unknown attributed projection table: ${target.table}`);
+      if (declaration.materialization === "mutation-index") {
+        yield* ensureMutationIndexTarget(sql, declaration, [], false, [target.id]);
+      }
       yield* sql.unsafe(`UPDATE ${declaration.table} SET attribution_json = ? WHERE ${declaration.idColumn} = ?`, [
         JSON.stringify(unresolvedEntityAttribution()), target.id
       ]);
@@ -190,6 +228,9 @@ export function materializeEntityAttributionSubjects(
       for (const subjectRef of new Set(subjectRefs)) {
         const id = resolveTargetId(subjectRef, target.kind) ?? legacyTargetId(subjectRef, target.kind);
         if (!id) continue;
+        if (target.materialization === "mutation-index") {
+          yield* ensureMutationIndexTarget(sql, target, [], false, [id]);
+        }
         const records = yield* sql.unsafe<Record<string, unknown>>(
           `SELECT ${target.idColumn} AS entity_id FROM ${target.table} WHERE ${target.idColumn} = ?`, [id]
         );
@@ -400,12 +441,42 @@ function registryAttributionTargets(): ReadonlyArray<{
   readonly table: string;
   readonly idColumn: string;
   readonly identityField: string;
+  readonly materialization: "existing-entity-table" | "mutation-index";
 }> {
   return canonicalEntityKinds.flatMap((kind) => {
     const facet = entityRegistry[kind].projectionFacet;
     return facet.status === "ready" && facet.attributionTarget
-      ? [{ kind, ...facet.attributionTarget }]
+      ? [{ kind, materialization: "existing-entity-table" as const, ...facet.attributionTarget }]
       : [];
+  });
+}
+
+function ensureMutationIndexTarget(
+  sql: SqlClient.SqlClient,
+  target: ReturnType<typeof registryAttributionTargets>[number],
+  rows: ReadonlyArray<AttributionProjectionRow>,
+  replace: boolean,
+  explicitIds: ReadonlyArray<string> = []
+): Effect.Effect<void, unknown> {
+  return Effect.gen(function* () {
+    yield* sql.unsafe(
+      `CREATE TABLE IF NOT EXISTS ${target.table} (`
+      + `${target.idColumn} TEXT PRIMARY KEY, `
+      + "attribution_json TEXT NOT NULL DEFAULT '{\"originator\":null,\"latestActor\":null,\"trailCount\":0,\"completeness\":\"unresolved\"}')"
+    );
+    if (replace) yield* sql.unsafe(`DELETE FROM ${target.table}`);
+    const ids = new Set(explicitIds);
+    for (const row of rows) {
+      if (row.entityKind !== target.kind) continue;
+      const id = resolveTargetId(row.subjectRef, target.kind);
+      if (id) ids.add(id);
+    }
+    for (const id of ids) {
+      yield* sql.unsafe(
+        `INSERT INTO ${target.table} (${target.idColumn}) VALUES (?) ON CONFLICT (${target.idColumn}) DO NOTHING`,
+        [id]
+      );
+    }
   });
 }
 

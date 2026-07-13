@@ -101,6 +101,7 @@ export * from "./publish/index.ts";
 export * from "./projection/sqlite-task-projection.ts";
 export {
   materializeAttributionProjectionFromEvents,
+  readModuleAttributionProjection,
   readAttributionProjection
 } from "./projection/sqlite-attribution-projection.ts";
 export type { EntityAttributionProjection } from "./projection/types.ts";
