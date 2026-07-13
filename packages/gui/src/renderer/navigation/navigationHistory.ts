@@ -2,6 +2,16 @@ import type { TaskFilters } from "../model/taskFilters.ts";
 import type { SnapshotStatus } from "../model/types.ts";
 import type { LaneGroupBy } from "../views/SwimlaneBoard.tsx";
 import type { ViewId } from "../shell-config.tsx";
+import {
+  canGoBack,
+  canGoForward,
+  current,
+  goBack,
+  goForward,
+  patch,
+  push,
+  type HistoryState,
+} from "./historyStack.ts";
 
 /**
  * AppShell 级全局导航历史(泛化自 graph/focusHistory.ts)。
@@ -11,8 +21,10 @@ import type { ViewId } from "../shell-config.tsx";
  * 「我在哪」的全部六个状态(view / selectedId / previewId / focusedEntityRef /
  * taskFilters / drill),让后退/前进能跨视图还原用户的位置。
  *
- * 语义与 focusHistory 完全一致:
- *   - push 截断 forward 栈(经典浏览器语义):从历史中间换位置后,旧 future 作废。
+ * 迁移逻辑(back/forward/前向截断/原地更新)与 focusHistory 共用同一个泛型核心
+ * historyStack.ts —— 两者只在「条目类型」与「两个条目算不算同一个」上不同,
+ * 不各写一遍。本模块只提供 AppLocation 这一种特化:
+ *   - pushLocation 截断 forward 栈(经典浏览器语义):从历史中间换位置后,旧 future 作废。
  *   - 重复推相同位置视为 no-op,避免把栈灌满。
  *   - patchCurrent 原地更新当前位置(不推栈)——用于过滤器微调、抽屉开关等
  *     非导航性变更,不单独占一个历史条目,但快照里保留最新值。
@@ -35,27 +47,18 @@ export interface AppLocation {
   drill: DrillState | null;
 }
 
-export interface NavigationHistoryState {
-  /** 完整足迹;back 从 [0,index-1] 取,forward 从 [index+,index]。 */
-  entries: AppLocation[];
-  /** 当前位置在 entries 中的下标。 */
-  index: number;
-}
+export type NavigationHistoryState = HistoryState<AppLocation>;
+
+export { canGoBack, canGoForward, goBack, goForward };
 
 export function createNavigationHistory(initial: AppLocation): NavigationHistoryState {
   return { entries: [initial], index: 0 };
 }
 
 export function currentLocation(state: NavigationHistoryState): AppLocation {
-  return state.entries[state.index];
-}
-
-export function canGoBack(state: NavigationHistoryState): boolean {
-  return state.index > 0;
-}
-
-export function canGoForward(state: NavigationHistoryState): boolean {
-  return state.index < state.entries.length - 1;
+  const head = current(state);
+  if (head === null) throw new Error("navigation history is always seeded with an initial location");
+  return head;
 }
 
 /** 结构化比较两个应用位置是否等价(taskFilters / drill 含嵌套结构,走 JSON 序列化)。 */
@@ -78,11 +81,7 @@ export function pushLocation(
   state: NavigationHistoryState,
   next: AppLocation,
 ): NavigationHistoryState {
-  if (locationsEqual(currentLocation(state), next)) return state;
-  const nextIndex = state.index + 1;
-  const truncated = state.entries.slice(0, nextIndex);
-  truncated.push(next);
-  return { entries: truncated, index: nextIndex };
+  return push(state, next, locationsEqual);
 }
 
 /**
@@ -91,22 +90,7 @@ export function pushLocation(
  */
 export function patchCurrent(
   state: NavigationHistoryState,
-  patch: Partial<AppLocation>,
+  fields: Partial<AppLocation>,
 ): NavigationHistoryState {
-  const current = currentLocation(state);
-  const updated: AppLocation = { ...current, ...patch };
-  if (locationsEqual(current, updated)) return state;
-  const entries = state.entries.slice();
-  entries[state.index] = updated;
-  return { entries, index: state.index };
-}
-
-export function goBack(state: NavigationHistoryState): NavigationHistoryState {
-  if (!canGoBack(state)) return state;
-  return { ...state, index: state.index - 1 };
-}
-
-export function goForward(state: NavigationHistoryState): NavigationHistoryState {
-  if (!canGoForward(state)) return state;
-  return { ...state, index: state.index + 1 };
+  return patch(state, { ...currentLocation(state), ...fields }, locationsEqual);
 }
