@@ -1,7 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
-import path from "node:path";
-import { resolveHarnessLayout, type HarnessLayoutOverrides } from "../layout/index.ts";
-import { defaultTaskProjectionPath, readTaskProjection } from "./sqlite-task-projection.ts";
+import type { HarnessLayoutOverrides } from "../layout/index.ts";
+import {
+  assertReadyProjectionDatabaseUnchanged,
+  assertReadyProjectionGeneration,
+  ensureProjectionGenerationReady,
+  projectionDatabaseSignature,
+  ProjectionGenerationChangedError,
+  type ReadyProjectionGeneration
+} from "./projection-generation-readiness.ts";
 
 export interface ExecutionEvidenceCursor {
   readonly generation: string;
@@ -57,39 +63,90 @@ export interface ExecutionEvidencePage {
   readonly nextCursor: ExecutionEvidenceCursor | null;
 }
 
-interface ExecutionEvidencePageOptions {
+interface ExecutionEvidencePageOptions extends ExecutionEvidencePageQuery {
   readonly rootDir: string;
   readonly layoutOverrides?: HarnessLayoutOverrides;
+}
+
+export interface ExecutionEvidencePageQuery {
   readonly limit: number;
   readonly cursor?: ExecutionEvidenceCursor;
+}
+
+export interface ExecutionEvidenceReadObserver {
+  readonly afterExecutionRowsRead?: () => void;
+  readonly afterSnapshotRead?: (page: ExecutionEvidencePage) => void;
 }
 
 export function queryExecutionEvidencePage(
   options: ExecutionEvidencePageOptions
 ): ExecutionEvidencePage {
-  const db = openFreshExecutionEvidenceProjection(options);
+  const ready = ensureProjectionGenerationReady({
+    rootDir: options.rootDir,
+    layoutOverrides: options.layoutOverrides
+  }).ready;
   try {
-    return readExecutionEvidencePage(db, options);
-  } finally {
-    db.close();
+    return queryExecutionEvidencePageFromReadyGeneration(ready, options);
+  } catch (error) {
+    if (options.cursor || !(error instanceof ProjectionGenerationChangedError)) throw error;
+    const reacquired = ensureProjectionGenerationReady({
+      rootDir: options.rootDir,
+      layoutOverrides: options.layoutOverrides
+    }).ready;
+    return queryExecutionEvidencePageFromReadyGeneration(reacquired, options);
   }
 }
 
-// Internal benchmark/daemon seam. Callers must establish projection freshness first.
-export function queryExecutionEvidencePageFromReadyProjection(
-  options: ExecutionEvidencePageOptions
+// Internal daemon/benchmark seam. The opaque handle proves freshness was established first.
+export function queryExecutionEvidencePageFromReadyGeneration(
+  ready: ReadyProjectionGeneration,
+  query: ExecutionEvidencePageQuery,
+  observer?: ExecutionEvidenceReadObserver
 ): ExecutionEvidencePage {
-  const db = new DatabaseSync(executionEvidenceProjectionPath(options), { readOnly: true });
+  assertReadyProjectionDatabaseUnchanged(ready);
+  const before = ready.databaseSignature;
+  const db = new DatabaseSync(ready.projectionPath, { readOnly: true });
   try {
-    return readExecutionEvidencePage(db, options);
+    const page = readExecutionEvidencePage(db, ready, query, observer);
+    const after = projectionDatabaseSignature(ready.projectionPath);
+    if (after !== before) throw new ProjectionGenerationChangedError("projection database changed while reading its generation");
+    return page;
   } finally {
     db.close();
   }
 }
 
-function readExecutionEvidencePage(db: DatabaseSync, options: ExecutionEvidencePageOptions): ExecutionEvidencePage {
-  const limit = executionEvidencePageLimit(options.limit);
-  const cursor = options.cursor;
+function readExecutionEvidencePage(
+  db: DatabaseSync,
+  ready: ReadyProjectionGeneration,
+  query: ExecutionEvidencePageQuery,
+  observer?: ExecutionEvidenceReadObserver
+): ExecutionEvidencePage {
+  db.exec("BEGIN");
+  try {
+    assertReadyProjectionGeneration(ready);
+    const version = readProjectionMeta(db, "version");
+    const sourceHash = readProjectionMeta(db, "sourceHash");
+    if (version !== ready.version || sourceHash !== ready.sourceHash) {
+      throw new ProjectionGenerationChangedError();
+    }
+    const page = readExecutionEvidenceSnapshot(db, query, observer);
+    observer?.afterSnapshotRead?.(page);
+    db.exec("COMMIT");
+    return page;
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function readExecutionEvidenceSnapshot(
+  db: DatabaseSync,
+  query: ExecutionEvidencePageQuery,
+  observer?: ExecutionEvidenceReadObserver
+): ExecutionEvidencePage {
+  const limit = executionEvidencePageLimit(query.limit);
+  const cursor = query.cursor;
   if (cursor) validateExecutionEvidenceCursor(cursor);
   const generation = readExecutionEvidenceGeneration(db);
   if (cursor && cursor.generation !== generation) {
@@ -118,6 +175,7 @@ function readExecutionEvidencePage(db: DatabaseSync, options: ExecutionEvidenceP
   ) as Array<Record<string, unknown>>;
   const hasNextPage = executionRows.length > limit;
   const visibleExecutionRows = executionRows.slice(0, limit);
+  observer?.afterExecutionRowsRead?.();
   const executionIds = visibleExecutionRows.map((row) => String(row.execution_id));
   const outputRows = executionIds.length === 0 ? [] : db.prepare(`
       SELECT * FROM (
@@ -184,18 +242,6 @@ function readExecutionEvidencePage(db: DatabaseSync, options: ExecutionEvidenceP
       executionId: String(last.execution_id)
     } : null
   };
-}
-
-function openFreshExecutionEvidenceProjection(options: ExecutionEvidencePageOptions): DatabaseSync {
-  const rootDir = path.resolve(options.rootDir);
-  readTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides });
-  return new DatabaseSync(executionEvidenceProjectionPath(options), { readOnly: true });
-}
-
-function executionEvidenceProjectionPath(options: ExecutionEvidencePageOptions): string {
-  return options.layoutOverrides
-    ? resolveHarnessLayout({ rootDir: path.resolve(options.rootDir), layoutOverrides: options.layoutOverrides }).projectionPath
-    : defaultTaskProjectionPath(path.resolve(options.rootDir));
 }
 
 function toExecutionEvidence(
@@ -298,9 +344,13 @@ function validateExecutionEvidenceCursor(cursor: ExecutionEvidenceCursor): void 
 }
 
 function readExecutionEvidenceGeneration(db: DatabaseSync): string {
-  const row = db.prepare("SELECT value FROM projection_meta WHERE key = 'sourceHash'").get() as { readonly value?: unknown } | undefined;
+  return readProjectionMeta(db, "sourceHash");
+}
+
+function readProjectionMeta(db: DatabaseSync, key: string): string {
+  const row = db.prepare("SELECT value FROM projection_meta WHERE key = ?").get(key) as { readonly value?: unknown } | undefined;
   if (!row || typeof row.value !== "string" || row.value.length === 0) {
-    throw new Error("execution evidence projection generation is missing");
+    throw new ProjectionGenerationChangedError(`execution evidence projection metadata is missing ${key}`);
   }
   return row.value;
 }

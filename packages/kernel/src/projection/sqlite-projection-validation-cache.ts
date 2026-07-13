@@ -1,5 +1,5 @@
-import { localProjectionSourceFileSystem } from "../local/local-layout-file-system.ts";
 import type { DeclaredSourceManifestRow } from "./sqlite-declared-source-manifest.ts";
+import { projectionDatabaseFileSignature } from "./sqlite-projection-database-signature.ts";
 
 export interface ProjectionValidationCacheEntry {
   readonly signature: string;
@@ -11,7 +11,7 @@ const projectionValidationCacheLimit = 16;
 
 export function readCachedProjectionValidation(projectionPath: string): ProjectionValidationCacheEntry | null {
   const cached = projectionValidationCache.get(projectionPath);
-  if (!cached || localProjectionSourceFileSystem.statSignature(projectionPath) !== cached.signature) return null;
+  if (!cached || projectionDatabaseFileSignature(projectionPath) !== cached.signature) return null;
   projectionValidationCache.delete(projectionPath);
   projectionValidationCache.set(projectionPath, cached);
   return cached;
@@ -21,7 +21,7 @@ export function rememberProjectionValidation(
   projectionPath: string,
   declaredManifest: ReadonlyArray<DeclaredSourceManifestRow>
 ): void {
-  const signature = localProjectionSourceFileSystem.statSignature(projectionPath);
+  const signature = projectionDatabaseFileSignature(projectionPath);
   if (signature === null) return;
   projectionValidationCache.delete(projectionPath);
   projectionValidationCache.set(projectionPath, { signature, declaredManifest });
