@@ -36,6 +36,9 @@ export const localProjectionSourceFileSystem = {
   },
   statSignature: (inputPath: string): string | null => {
     return projectionSourceStatSignature(inputPath);
+  },
+  statSignatureIfNonEmpty: (inputPath: string): string | null => {
+    return projectionSourceStatSignature(inputPath, true);
   }
 };
 
@@ -50,9 +53,10 @@ export function listProjectionSourceDirectoryPaths(rootPath: string): ReadonlyAr
   }
 }
 
-function projectionSourceStatSignature(inputPath: string): string | null {
+function projectionSourceStatSignature(inputPath: string, requireNonEmpty = false): string | null {
   try {
     const stats = statSync(inputPath, { bigint: true });
+    if (requireNonEmpty && stats.size === 0n) return null;
     return [stats.dev, stats.ino, stats.mode, stats.size, stats.mtimeNs, stats.ctimeNs].join(":");
   } catch {
     return null;

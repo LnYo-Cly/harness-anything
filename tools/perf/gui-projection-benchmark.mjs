@@ -4,7 +4,8 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { aggregateExecutions } from "../../packages/gui/src/renderer/execution-data.ts";
 import { queryExecutionEvidencePage, queryExecutions, rebuildTaskProjection } from "../../packages/kernel/src/index.ts";
-import { queryExecutionEvidencePageFromReadyProjection } from "../../packages/kernel/src/projection/sqlite-execution-evidence-reader.ts";
+import { ensureProjectionGenerationReady } from "../../packages/kernel/src/projection/projection-generation-readiness.ts";
+import { queryExecutionEvidencePageFromReadyGeneration } from "../../packages/kernel/src/projection/sqlite-execution-evidence-reader.ts";
 import { captureProjectionSourceFingerprint } from "../../packages/kernel/src/projection/projection-source-snapshot.ts";
 import { readDeclaredSourceManifestRows } from "../../packages/kernel/src/projection/sqlite-declared-source-manifest.ts";
 import { updateTaskProjectionIncrementally } from "../../packages/kernel/src/projection/sqlite-task-incremental-projection.ts";
@@ -31,7 +32,8 @@ try {
   const warmQueryP95 = percentile(querySamples.samples, 0.95);
   const evidencePageSamples = sample(20, () => queryExecutionEvidencePage({ rootDir, limit: 25 }));
   const evidencePage = evidencePageSamples.value;
-  const readyEvidencePageSamples = sample(20, () => queryExecutionEvidencePageFromReadyProjection({ rootDir, limit: 25 }));
+  const readyGeneration = ensureProjectionGenerationReady({ rootDir }).ready;
+  const readyEvidencePageSamples = sample(20, () => queryExecutionEvidencePageFromReadyGeneration(readyGeneration, { limit: 25 }));
   const readyEvidencePageP95 = percentile(readyEvidencePageSamples.samples, 0.95);
   const evidencePagePayloadBytes = Buffer.byteLength(JSON.stringify(evidencePage), "utf8");
   const evidencePageVisibleItems = evidencePage.groups.length +
@@ -65,7 +67,7 @@ try {
       rebuild: rounded(rebuildMs),
       queryExecutions: summarize(querySamples.samples),
       queryExecutionEvidencePage: summarize(evidencePageSamples.samples),
-      queryExecutionEvidencePageFromReadyProjection: summarize(readyEvidencePageSamples.samples),
+      queryExecutionEvidencePageFromReadyGeneration: summarize(readyEvidencePageSamples.samples),
       aggregateExecutions: summarize(aggregateSamples.samples),
       incrementalExecution: rounded(incrementalExecutionMs)
     },

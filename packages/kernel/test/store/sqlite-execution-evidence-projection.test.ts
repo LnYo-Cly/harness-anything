@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { queryExecutionEvidencePage } from "../../src/projection/sqlite-execution-evidence-reader.ts";
+import {
+  queryExecutionEvidencePage,
+  queryExecutionEvidencePageFromReadyGeneration
+} from "../../src/projection/sqlite-execution-evidence-reader.ts";
+import { ensureProjectionGenerationReady } from "../../src/projection/projection-generation-readiness.ts";
 import { captureProjectionSourceSnapshot } from "../../src/projection/projection-source-snapshot.ts";
 import { updateTaskProjectionIncrementally } from "../../src/projection/sqlite-task-incremental-projection.ts";
 import { rebuildTaskProjection } from "../../src/projection/sqlite-task-projection.ts";
@@ -237,6 +241,194 @@ test("execution evidence page caps output previews without losing total counts",
     assert.equal(execution?.hasMoreOutputs, true);
     assert.equal(page.stats.totalOutputs, 8);
     assert.ok(Buffer.byteLength(JSON.stringify(page), "utf8") < 250 * 1024);
+  });
+});
+
+test("execution evidence page pins generation rows outputs and stats to one SQLite snapshot", () => {
+  withHarness((rootDir) => {
+    const identity = ids(1);
+    writeTask(rootDir, identity.taskId, "Snapshot evidence");
+    writeExecution(
+      rootDir,
+      identity.taskId,
+      identity.executionId,
+      "2026-07-13T00:01:00.000Z",
+      [inlineOutput(identity, "ev-before", "Before")]
+    );
+    rebuildTaskProjection({ rootDir });
+    const db = openProjection(rootDir, false);
+    try {
+      db.exec("PRAGMA journal_mode = WAL");
+    } finally {
+      db.close();
+    }
+    const ready = ensureProjectionGenerationReady({ rootDir }).ready;
+    let writerCommitted = false;
+    let pinnedPage: ReturnType<typeof queryExecutionEvidencePageFromReadyGeneration> | null = null;
+
+    assert.throws(
+      () => queryExecutionEvidencePageFromReadyGeneration(
+        ready,
+        { limit: 1 },
+        {
+          afterExecutionRowsRead: () => {
+            const writer = openProjection(rootDir, false);
+            try {
+              writer.exec("BEGIN IMMEDIATE");
+              writer.prepare(`
+                UPDATE execution_output_projection
+                SET evidence_id = 'ev-after', inline_text = 'After'
+                WHERE execution_id = ?
+              `).run(identity.executionId);
+              writer.prepare(`
+                INSERT INTO execution_output_projection (
+                  execution_id, ordinal, evidence_id, execution_ref, substrate, inline_text
+                ) VALUES (?, 1, 'ev-added', ?, 'inline', 'Added')
+              `).run(identity.executionId, `execution/${identity.taskId}/${identity.executionId}`);
+              writer.prepare("UPDATE projection_meta SET value = 'generation-after' WHERE key = 'sourceHash'").run();
+              writer.exec("COMMIT");
+              writerCommitted = true;
+            } finally {
+              writer.close();
+            }
+          },
+          afterSnapshotRead: (page) => {
+            pinnedPage = page;
+          }
+        }
+      ),
+      /projection database changed while reading/
+    );
+
+    assert.equal(writerCommitted, true);
+    assert.equal(pinnedPage?.groups[0]?.executions[0]?.outputs[0]?.text, "Before");
+    assert.equal(pinnedPage?.groups[0]?.executions[0]?.outputCount, 1);
+    assert.equal(pinnedPage?.stats.totalOutputs, 1);
+    const refreshed = openProjection(rootDir);
+    try {
+      assert.equal(refreshed.prepare("SELECT COUNT(*) AS count FROM execution_output_projection").get()?.count, 2);
+      assert.equal(refreshed.prepare("SELECT inline_text FROM execution_output_projection ORDER BY ordinal").get()?.inline_text, "After");
+      assert.equal(refreshed.prepare("SELECT value FROM projection_meta WHERE key = 'sourceHash'").get()?.value, "generation-after");
+    } finally {
+      refreshed.close();
+    }
+  });
+});
+
+test("ready generation handle rejects database changes that bypass generation validation", () => {
+  withHarness((rootDir) => {
+    const identity = ids(1);
+    writeTask(rootDir, identity.taskId, "Ready handle tamper");
+    writeExecution(rootDir, identity.taskId, identity.executionId, "2026-07-13T00:01:00.000Z", [
+      inlineOutput(identity, "ev-original", "Original")
+    ]);
+    rebuildTaskProjection({ rootDir });
+    const journal = openProjection(rootDir, false);
+    try {
+      journal.exec("PRAGMA journal_mode = WAL");
+    } finally {
+      journal.close();
+    }
+    const ready = ensureProjectionGenerationReady({ rootDir }).ready;
+    assert.equal(Object.isFrozen(ready), true);
+    const forged = Object.assign(Object.create(Object.getPrototypeOf(ready)) as object, ready) as typeof ready;
+    assert.throws(
+      () => queryExecutionEvidencePageFromReadyGeneration(forged, { limit: 1 }),
+      /handle was not established by the projection validator/
+    );
+    const pinnedReader = openProjection(rootDir);
+    pinnedReader.exec("BEGIN");
+    pinnedReader.prepare("SELECT value FROM projection_meta WHERE key = 'sourceHash'").get();
+    const db = openProjection(rootDir, false);
+    try {
+      db.prepare("UPDATE execution_output_projection SET inline_text = 'TAMPERED'").run();
+    } finally {
+      db.close();
+    }
+
+    try {
+      assert.throws(
+        () => queryExecutionEvidencePageFromReadyGeneration(ready, { limit: 1 }),
+        /ready projection generation changed/
+      );
+    } finally {
+      pinnedReader.exec("ROLLBACK");
+      pinnedReader.close();
+    }
+  });
+});
+
+test("ready generation acquisition retries when the database changes after validation", () => {
+  withHarness((rootDir) => {
+    const identity = ids(1);
+    writeTask(rootDir, identity.taskId, "Acquire race");
+    writeExecution(rootDir, identity.taskId, identity.executionId, "2026-07-13T00:01:00.000Z", [
+      inlineOutput(identity, "ev-original", "Original")
+    ]);
+    rebuildTaskProjection({ rootDir });
+    let tampered = false;
+
+    const acquired = ensureProjectionGenerationReady(
+      { rootDir },
+      {
+        afterProjectionValidated: () => {
+          if (tampered) return;
+          const db = openProjection(rootDir, false);
+          try {
+            db.prepare("UPDATE execution_output_projection SET inline_text = 'TAMPERED'").run();
+            tampered = true;
+          } finally {
+            db.close();
+          }
+        }
+      }
+    );
+
+    assert.equal(tampered, true);
+    assert.equal(
+      queryExecutionEvidencePageFromReadyGeneration(acquired.ready, { limit: 1 })
+        .groups[0]?.executions[0]?.outputs[0]?.text,
+      "Original"
+    );
+  });
+});
+
+test("ready generation acquisition does not trust a cached validation across WAL changes", () => {
+  withHarness((rootDir) => {
+    const identity = ids(1);
+    writeTask(rootDir, identity.taskId, "Cached WAL validation");
+    writeExecution(rootDir, identity.taskId, identity.executionId, "2026-07-13T00:01:00.000Z", [
+      inlineOutput(identity, "ev-original", "Original")
+    ]);
+    rebuildTaskProjection({ rootDir });
+    const journal = openProjection(rootDir, false);
+    try {
+      journal.exec("PRAGMA journal_mode = WAL");
+    } finally {
+      journal.close();
+    }
+    ensureProjectionGenerationReady({ rootDir });
+    const pinnedReader = openProjection(rootDir);
+    pinnedReader.exec("BEGIN");
+    pinnedReader.prepare("SELECT value FROM projection_meta WHERE key = 'sourceHash'").get();
+    const writer = openProjection(rootDir, false);
+    try {
+      writer.prepare("UPDATE execution_output_projection SET inline_text = 'TAMPERED'").run();
+    } finally {
+      writer.close();
+    }
+
+    try {
+      const reacquired = ensureProjectionGenerationReady({ rootDir }).ready;
+      assert.equal(
+        queryExecutionEvidencePageFromReadyGeneration(reacquired, { limit: 1 })
+          .groups[0]?.executions[0]?.outputs[0]?.text,
+        "Original"
+      );
+    } finally {
+      pinnedReader.exec("ROLLBACK");
+      pinnedReader.close();
+    }
   });
 });
 
