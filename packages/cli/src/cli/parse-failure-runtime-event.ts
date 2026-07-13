@@ -28,8 +28,9 @@ export async function appendParseFailureRuntimeEvent(
     await (dependencies.append ?? appendOperationalParseFailureRuntimeEvent)(argv, error);
   } catch (diagnosticError) {
     try {
+      const detail = diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError);
       (dependencies.warn ?? console.error)(
-        `warning: unable to append CLI parse-failure diagnostic: ${errorMessage(diagnosticError)}`
+        `warning: unable to append CLI parse-failure diagnostic: ${detail}`
       );
     } catch {
       // A broken stderr must not turn best-effort diagnostics into the primary failure.
@@ -95,8 +96,4 @@ async function appendOperationalParseFailureRuntimeEvent(
     });
     yield* coordinator.flush("explicit");
   }));
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
