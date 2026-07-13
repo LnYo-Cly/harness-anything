@@ -9,7 +9,14 @@ import {
   type HarnessLayoutInput,
   type WriteOp
 } from "../../../../kernel/src/index.ts";
-import { listGeneratedFiles, permissionPathsForScope } from "./script-scope.ts";
+import {
+  listGeneratedFiles,
+  permissionPathsForScope,
+  resolvedScopeSetIsSafe,
+  sameOrInside,
+  scopeRootIsRecursive,
+  type ResolvedScopeSet
+} from "./script-scope.ts";
 
 export interface CanonicalScriptStage {
   readonly rootInput: HarnessLayoutInput;
@@ -20,10 +27,27 @@ export interface CanonicalScriptStage {
   readonly baseline: ReadonlyMap<string, string>;
 }
 
+export class ScriptStageScopeError extends Error {
+  readonly code = "script_stage_scope_symlink" as const;
+  readonly scopeMode: "read" | "write";
+
+  constructor(scopeMode: "read" | "write") {
+    super("Script staging encountered a symbolic link inside a protected recursive scope.");
+    this.name = "ScriptStageScopeError";
+    this.scopeMode = scopeMode;
+  }
+}
+
 export function createCanonicalScriptStage(
   rootInput: HarnessLayoutInput,
   runDir: string,
-  realOutputRoot: string
+  realOutputRoot: string,
+  options: {
+    readonly protectedScopes?: ReadonlyArray<{
+      readonly mode: "read" | "write";
+      readonly scope: ResolvedScopeSet;
+    }>;
+  } = {}
 ): CanonicalScriptStage {
   const realLayout = resolveHarnessLayout(rootInput);
   const stageRootDir = path.join(runDir, "staging");
@@ -45,11 +69,39 @@ export function createCanonicalScriptStage(
   const layout = resolveHarnessLayout(stagedRootInput);
   const outputRelative = path.relative(realLayout.authoredRoot, realOutputRoot);
   const outputRoot = path.join(layout.authoredRoot, outputRelative);
+  const stageWithoutBaseline: CanonicalScriptStage = {
+    rootInput: stagedRootInput,
+    layout,
+    outputRoot,
+    realLayout,
+    realOutputRoot,
+    baseline: new Map()
+  };
+  assertProtectedStageScopes(stageWithoutBaseline, options.protectedScopes ?? []);
   const baseline = new Map(listGeneratedFiles(layout.authoredRoot).map((filePath) => [
     filePath,
     sha256Text(readFileSync(filePath, "utf8"))
   ]));
   return { rootInput: stagedRootInput, layout, outputRoot, realLayout, realOutputRoot, baseline };
+}
+
+function assertProtectedStageScopes(
+  stage: CanonicalScriptStage,
+  scopes: ReadonlyArray<{
+    readonly mode: "read" | "write";
+    readonly scope: ResolvedScopeSet;
+  }>
+): void {
+  for (const protectedScope of scopes) {
+    const stagedScope = remapScope(stage, protectedScope.scope, { retainOriginalPermissions: false });
+    if (!resolvedScopeSetIsSafe(
+      stagedScope,
+      [stage.layout.rootDir, stage.realLayout.rootDir],
+      protectedScope.mode
+    )) {
+      throw new ScriptStageScopeError(protectedScope.mode);
+    }
+  }
 }
 
 export function canonicalGeneratedPaths(stage: CanonicalScriptStage, stagedPaths: ReadonlyArray<string>): ReadonlyArray<string> {
@@ -92,13 +144,20 @@ export function stageMirrorPath(stage: CanonicalScriptStage, realPath: string): 
 
 export function remapScope(
   stage: CanonicalScriptStage,
-  scope: { readonly ok: true; readonly roots: ReadonlyArray<string>; readonly permissions: ReadonlyArray<string> }
+  scope: ResolvedScopeSet,
+  options: { readonly retainOriginalPermissions?: boolean } = {}
 ) {
   const roots = scope.roots.map((root) => stageMirrorPath(stage, root));
+  const remappedPermissions = roots.flatMap((root, index) => (
+    permissionPathsForScope(root, scopeRootIsRecursive(scope, scope.roots[index] ?? root))
+  ));
   return {
     ok: true as const,
     roots,
-    permissions: [...scope.permissions, ...roots.flatMap((root) => permissionPathsForScope(root, true))]
+    permissions: [...new Set([
+      ...(options.retainOriginalPermissions === false ? [] : scope.permissions),
+      ...remappedPermissions
+    ])]
   };
 }
 
@@ -113,11 +172,15 @@ export function scriptIngestOp(
     const stagedHash = sha256Text(body);
     if (stage.baseline.get(filePath) === stagedHash) return [];
     const relativePath = normalizeRelativeDocumentPath(path.relative(stage.layout.authoredRoot, filePath).split(path.sep).join("/"));
-    const realPath = path.join(stage.realLayout.authoredRoot, relativePath);
     return [{
       path: relativePath,
       body,
-      baseBlobSha256: existsSync(realPath) ? sha256Text(readFileSync(realPath, "utf8")) : null
+      // The stage copy is the canonical snapshot observed before the script ran.
+      // An absent stage entry therefore freezes the canonical base as `null`.
+      // Never re-read the live authored tree here: a concurrent writer may have
+      // changed it while the script was executing, and the coordinator must see
+      // that mismatch and reject this stale batch instead of overwriting it.
+      baseBlobSha256: stage.baseline.get(filePath) ?? null
     }];
   });
   if (writes.length === 0) return undefined;
@@ -132,9 +195,4 @@ export function scriptIngestOp(
 
 function scriptRunEntityId(operationId: string): EntityId {
   return `entity/script-run/${sha256Text(operationId).slice(0, 32)}`;
-}
-
-function sameOrInside(root: string, candidate: string): boolean {
-  const relative = path.relative(path.resolve(root), path.resolve(candidate));
-  return relative.length === 0 || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
