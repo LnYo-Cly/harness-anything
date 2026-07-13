@@ -1,4 +1,5 @@
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import type { Dirent } from "node:fs";
 import type { LayoutFileSystem } from "../layout/file-system.ts";
 
 export const localLayoutFileSystem: LayoutFileSystem = {
@@ -12,6 +13,39 @@ export const localEvidenceFileSystem = {
   readBytes: (inputPath: string): Uint8Array => readFileSync(inputPath),
   realpath: (inputPath: string) => realpathSync(inputPath)
 };
+
+export const localProjectionSourceFileSystem = {
+  readStableDirents: (inputPath: string): { readonly entries: ReadonlyArray<Dirent<string>>; readonly signature: string } => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const before = projectionSourceStatSignature(inputPath);
+      const entries = readdirSync(inputPath, { withFileTypes: true });
+      const after = projectionSourceStatSignature(inputPath);
+      if (before !== null && before === after) return { entries, signature: after };
+    }
+    throw new Error(`projection source directory did not stabilize: ${inputPath}`);
+  },
+  readStableText: (inputPath: string): { readonly body: string; readonly signature: string } => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const before = projectionSourceStatSignature(inputPath);
+      const body = readFileSync(inputPath, "utf8");
+      const after = projectionSourceStatSignature(inputPath);
+      if (before !== null && before === after) return { body, signature: after };
+    }
+    throw new Error(`projection source file did not stabilize: ${inputPath}`);
+  },
+  statSignature: (inputPath: string): string | null => {
+    return projectionSourceStatSignature(inputPath);
+  }
+};
+
+function projectionSourceStatSignature(inputPath: string): string | null {
+  try {
+    const stats = statSync(inputPath, { bigint: true });
+    return [stats.dev, stats.ino, stats.mode, stats.size, stats.mtimeNs, stats.ctimeNs].join(":");
+  } catch {
+    return null;
+  }
+}
 
 export const localRuntimeStateFileSystem = {
   createExclusiveText: (inputPath: string, value: string): boolean => {

@@ -4,6 +4,7 @@ import { localLayoutFileSystem } from "../local/local-layout-file-system.ts";
 import { readAttributionEvents } from "../local/attribution-event-source.ts";
 import type { ActorAxes, ExecutorSource, PrincipalSource } from "../schemas/actor-attribution.ts";
 import type { AttributionEvent } from "../schemas/attribution-event.ts";
+import { unresolvedEntityAttribution } from "./entity-attribution-projection.ts";
 import type { EntityAttributionProjection } from "./types.ts";
 import { runSqlite } from "./sqlite-projection-store.ts";
 import { SqlClient } from "@effect/sql";
@@ -29,14 +30,140 @@ export function materializeAttributionProjection(
 ): ReadonlyArray<AttributionProjectionRow> {
   if (!localLayoutFileSystem.exists(projectionPath)) throw new Error("base projection database must exist before attribution materialization");
   const events = readAttributionEvents(rootInput);
-  runSqlite(projectionPath, Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
+  return materializeAttributionProjectionFromEvents(projectionPath, events);
+}
+
+export function materializeAttributionProjectionFromEvents(
+  projectionPath: string,
+  events: ReadonlyArray<AttributionEvent>
+): ReadonlyArray<AttributionProjectionRow> {
+  if (!localLayoutFileSystem.exists(projectionPath)) throw new Error("base projection database must exist before attribution materialization");
+  runSqlite(projectionPath, Effect.flatMap(SqlClient.SqlClient, (sql) => Effect.gen(function* () {
+    yield* replaceAttributionProjectionRows(sql, events);
+    yield* materializeEntityAttributionBlocks(sql, events);
+  })));
+  return events.map(eventToProjectionRow);
+}
+
+export function replaceAttributionProjectionRows(
+  sql: SqlClient.SqlClient,
+  events: ReadonlyArray<AttributionEvent>
+): Effect.Effect<void, unknown> {
+  return Effect.gen(function* () {
     yield* createAttributionTable(sql);
     yield* sql`DELETE FROM attribution_events`;
     for (const event of events) yield* insertAttributionEvent(sql, event);
-  }));
-  materializeEntityAttributionBlocks(rootInput, projectionPath);
-  return events.map(eventToProjectionRow);
+  });
+}
+
+export function applyAttributionProjectionDelta(
+  sql: SqlClient.SqlClient,
+  events: ReadonlyArray<AttributionEvent>
+): Effect.Effect<ReadonlyArray<string>, unknown> {
+  return Effect.gen(function* () {
+    yield* createAttributionTable(sql);
+    const existingRecords = yield* sql<AttributionRecord>`
+      SELECT event_id, op_id, subject_ref, operation, principal_person_id,
+             executor_agent_id, occurred_at, recorded_at, source_json
+      FROM attribution_events
+      ORDER BY occurred_at, event_id
+    `;
+    const existing = existingRecords.map(recordToProjectionRow);
+    const current = events.map(eventToProjectionRow);
+    const existingById = new Map(existing.map((row) => [row.eventId, row]));
+    const currentById = new Map(current.map((row) => [row.eventId, row]));
+    const changedIds = new Set([
+      ...existing.filter((row) => JSON.stringify(row) !== JSON.stringify(currentById.get(row.eventId))).map((row) => row.eventId),
+      ...current.filter((row) => JSON.stringify(row) !== JSON.stringify(existingById.get(row.eventId))).map((row) => row.eventId)
+    ]);
+    const affectedSubjects = new Set<string>();
+    for (const eventId of changedIds) {
+      const previous = existingById.get(eventId);
+      const next = currentById.get(eventId);
+      if (previous) affectedSubjects.add(previous.subjectRef);
+      if (next) affectedSubjects.add(next.subjectRef);
+      yield* sql`DELETE FROM attribution_events WHERE event_id = ${eventId}`;
+    }
+    for (const event of events) {
+      if (changedIds.has(event.eventId)) yield* insertAttributionEvent(sql, event);
+    }
+    return [...affectedSubjects];
+  });
+}
+
+export function materializeEntityAttributionBlocks(
+  sql: SqlClient.SqlClient,
+  events: ReadonlyArray<AttributionEvent>
+): Effect.Effect<void, unknown> {
+  const rows = events.map(eventToProjectionRow);
+  const bySubject = Map.groupBy(rows, (row) => row.subjectRef);
+  return Effect.gen(function* () {
+    const existing = new Set((yield* sql<{ readonly name: string }>`SELECT name FROM sqlite_master WHERE type = 'table'`)
+      .map((row) => String(row.name)));
+    for (const entity of entityProjectionTables) {
+      if (!existing.has(entity.table)) continue;
+      yield* sql.unsafe(`UPDATE ${entity.table} SET attribution_json = ?`, [JSON.stringify(unresolvedEntityAttribution())]);
+      const records = yield* sql.unsafe<Record<string, unknown>>(`SELECT ${entity.id} FROM ${entity.table}`);
+      for (const record of records) {
+        const id = String(record[entity.id]);
+        const attributed = bySubject.get(id) ?? bySubject.get(`${entity.prefix}${id}`);
+        if (!attributed || attributed.length === 0) continue;
+        const attribution = eventAttribution(attributed);
+        yield* sql.unsafe(`UPDATE ${entity.table} SET attribution_json = ? WHERE ${entity.id} = ?`, [JSON.stringify(attribution), id]);
+      }
+    }
+  });
+}
+
+export function materializeEntityAttributionTargets(
+  sql: SqlClient.SqlClient,
+  targets: ReadonlyArray<{ readonly table: string; readonly id: string }>
+): Effect.Effect<void, unknown> {
+  const uniqueTargets = new Map(targets.map((target) => [`${target.table}\0${target.id}`, target]));
+  return Effect.gen(function* () {
+    for (const target of uniqueTargets.values()) {
+      const entity = entityProjectionTables.find((candidate) => candidate.table === target.table);
+      if (!entity) throw new Error(`unknown attributed projection table: ${target.table}`);
+      yield* sql.unsafe(`UPDATE ${entity.table} SET attribution_json = ? WHERE ${entity.id} = ?`, [
+        JSON.stringify(unresolvedEntityAttribution()),
+        target.id
+      ]);
+      const records = yield* sql.unsafe<AttributionRecord>(`
+        SELECT event_id, op_id, subject_ref, operation, principal_person_id,
+               executor_agent_id, occurred_at, recorded_at, source_json
+        FROM attribution_events
+        WHERE subject_ref = ? OR subject_ref = ?
+        ORDER BY occurred_at, event_id
+      `, [target.id, `${entity.prefix}${target.id}`]);
+      if (records.length === 0) continue;
+      yield* sql.unsafe(`UPDATE ${entity.table} SET attribution_json = ? WHERE ${entity.id} = ?`, [
+        JSON.stringify(eventAttribution(records.map(recordToProjectionRow))),
+        target.id
+      ]);
+    }
+  });
+}
+
+export function materializeEntityAttributionSubjects(
+  sql: SqlClient.SqlClient,
+  subjectRefs: ReadonlyArray<string>
+): Effect.Effect<void, unknown> {
+  return Effect.gen(function* () {
+    const targets: Array<{ readonly table: string; readonly id: string }> = [];
+    for (const entity of entityProjectionTables) {
+      for (const subjectRef of new Set(subjectRefs)) {
+        const candidateId = subjectRef.startsWith(entity.prefix)
+          ? subjectRef.slice(entity.prefix.length)
+          : subjectRef;
+        const records = yield* sql.unsafe<Record<string, unknown>>(
+          `SELECT ${entity.id} AS entity_id FROM ${entity.table} WHERE ${entity.id} = ?`,
+          [candidateId]
+        );
+        if (records.length > 0) targets.push({ table: entity.table, id: candidateId });
+      }
+    }
+    yield* materializeEntityAttributionTargets(sql, targets);
+  });
 }
 
 export function readAttributionProjection(
@@ -158,27 +285,6 @@ const entityProjectionTables = [
   { table: "execution_projection", id: "execution_id", prefix: "execution/" },
   { table: "review_projection", id: "review_id", prefix: "review/" }
 ] as const;
-
-function materializeEntityAttributionBlocks(rootInput: HarnessLayoutInput, projectionPath: string): void {
-  const rows = readAttributionProjection(rootInput, projectionPath);
-  const bySubject = Map.groupBy(rows, (row) => row.subjectRef);
-  runSqlite(projectionPath, Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const existing = new Set((yield* sql<{ readonly name: string }>`SELECT name FROM sqlite_master WHERE type = 'table'`)
-      .map((row) => String(row.name)));
-    for (const entity of entityProjectionTables) {
-      if (!existing.has(entity.table)) continue;
-      const records = yield* sql.unsafe<Record<string, unknown>>(`SELECT ${entity.id} FROM ${entity.table}`);
-      for (const record of records) {
-        const id = String(record[entity.id]);
-        const events = bySubject.get(id) ?? bySubject.get(`${entity.prefix}${id}`);
-        if (!events || events.length === 0) continue;
-        const attribution = eventAttribution(events);
-        yield* sql.unsafe(`UPDATE ${entity.table} SET attribution_json = ? WHERE ${entity.id} = ?`, [JSON.stringify(attribution), id]);
-      }
-    }
-  }));
-}
 
 function eventAttribution(rows: ReadonlyArray<AttributionProjectionRow>): EntityAttributionProjection {
   const ordered = [...rows].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt) || left.eventId.localeCompare(right.eventId));

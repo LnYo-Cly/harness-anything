@@ -1,21 +1,43 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { Effect } from "effect";
 import { createHarnessRuntimeContext } from "../layout/index.ts";
 import { resolveHarnessLayout } from "../layout/index.ts";
-import { executionDeclaration } from "../entity/execution-declaration.ts";
-import { reviewDeclaration } from "../entity/review-declaration.ts";
-import { sessionEntityDeclaration } from "../entity/session.ts";
-import { sha256Text } from "../integrity/stable-hash.ts";
-import { discoverDeclaredEntityRows, projectDeclaredEntities, readDeclaredProjectionRows } from "./entity-declaration-projection.ts";
+import { localProjectionSourceFileSystem } from "../local/local-layout-file-system.ts";
+import { replaceDeclaredProjectionRows } from "./entity-declaration-projection.ts";
 import { buildCheckReport, hardFail, runPostMergeChecks, warning } from "./post-merge-checks.ts";
 import type { FactAnchorRow, RelationCoverageRow, RelationGraphEdgeRow } from "./relation-graph-projection.ts";
 import { buildRelationGraphProjection } from "./relation-graph-projection.ts";
-import { projectionVersion, queryDecisionProjectionRows, queryTaskChildrenRows, queryTaskProjectionRows, queryTaskSubtreeRows, readRelationGraphRows, writeProjectionDatabase, tryReadProjectionDatabase } from "./sqlite-projection-store.ts";
-import { compareDecisionRows, hashDecisionProjectionRows, readDecisionProjectionRows } from "./sqlite-decision-source.ts";
-import { materializeAttributionProjection } from "./sqlite-attribution-projection.ts";
-import { attributionEventSourceHash } from "../local/attribution-event-source.ts";
-import { readLegacyPersonIds } from "./entity-attribution-projection.ts";
-import { compareRows, hashExactRows, readMarkdownSource, taskEntryToRow } from "./sqlite-task-source.ts";
+import {
+  projectionVersion,
+  queryDecisionProjectionRows,
+  queryTaskChildrenRows,
+  queryTaskProjectionRows,
+  queryTaskSubtreeRows,
+  readAttributionProjectionStateHash,
+  readRelationGraphRows,
+  writeProjectionDatabase,
+  tryReadProjectionDatabase
+} from "./sqlite-projection-store.ts";
+import { compareDecisionRows, hashDecisionProjectionRows } from "./sqlite-decision-source.ts";
+import {
+  applyDeclaredProjectionDeltaToSnapshots,
+  buildDeclaredProjectionDeltaFromSources,
+  declaredSourceManifestRows,
+  hashDeclaredSourceManifestRows,
+  readDeclaredSourceManifestRows,
+  replaceDeclaredSourceManifestRows
+} from "./sqlite-declared-source-manifest.ts";
+import { updateProjectionDatabase } from "./sqlite-projection-update-store.ts";
+import { materializeEntityAttributionBlocks, replaceAttributionProjectionRows } from "./sqlite-attribution-projection.ts";
+import { compareRows, hashExactRows, taskEntryToRow } from "./sqlite-task-source.ts";
+import {
+  captureProjectionSourceFingerprint,
+  captureProjectionSourceSnapshot,
+  hashDeclaredProjectionSnapshots,
+  hashProjectionLegacyPersonIds,
+  readDeclaredProjectionSnapshots
+} from "./projection-source-snapshot.ts";
 export { hashTaskProjectionRows } from "./sqlite-task-source.ts";
 export type {
   CoordinationStatus,
@@ -46,6 +68,14 @@ import type {
   TaskProjectionQueryFilters
 } from "./types.ts";
 
+interface ProjectionValidationCacheEntry {
+  readonly signature: string;
+  readonly declaredManifest: ReturnType<typeof readDeclaredSourceManifestRows>;
+}
+
+const projectionValidationCache = new Map<string, ProjectionValidationCacheEntry>();
+const projectionValidationCacheLimit = 16;
+
 export function defaultTaskProjectionPath(rootDir: string): string {
   return resolveHarnessLayout(rootDir).projectionPath;
 }
@@ -54,38 +84,69 @@ export function rebuildTaskProjection(options: TaskProjectionOptions): Projectio
   const rootDir = path.resolve(options.rootDir);
   const runtimeContext = createHarnessRuntimeContext(rootDir, options.layoutOverrides);
   const projectionPath = options.projectionPath ? path.resolve(options.projectionPath) : resolveHarnessLayout(runtimeContext).projectionPath;
-  const source = readMarkdownSource(runtimeContext);
+  const stableBuild = captureStableProjectionBuild(runtimeContext);
+  const snapshot = stableBuild.snapshot;
+  const source = snapshot.taskSource;
   const rows = source.entries.map((entry) => taskEntryToRow(runtimeContext, entry, options.taskFieldExtensions)).sort(compareRows);
-  const decisionRows = readDecisionProjectionRows(runtimeContext);
+  const decisionRows = snapshot.decisionRows;
   const rowsHash = hashExactRows(rows);
   const decisionRowsHash = hashDecisionProjectionRows(decisionRows);
-  const sourceHash = projectionSourceHash(source.hash, runtimeContext);
-  const relationGraph = buildRelationGraphProjection(runtimeContext);
+  const declaredRowsHash = hashDeclaredProjectionSnapshots(snapshot.declaredTables);
+  const declaredManifestRows = declaredSourceManifestRows(snapshot.declaredTables, snapshot.declaredSources);
+  const declaredManifestHash = hashDeclaredSourceManifestRows(declaredManifestRows);
+  const relationGraph = stableBuild.relationGraph;
   writeProjectionDatabase(projectionPath, rows, decisionRows, {
-    sourceHash,
+    sourceHash: snapshot.fingerprint,
     rowsHash,
-    decisionRowsHash
+    decisionRowsHash,
+    declaredRowsHash,
+    declaredManifestHash,
+    attributionSourceHash: snapshot.attributionSource.hash,
+    taskSourceHash: snapshot.taskSource.hash,
+    legacyPersonIdsHash: hashProjectionLegacyPersonIds(snapshot.legacyPersonIds)
   }, {
     relationEdges: relationGraph.edges,
     coverageRows: relationGraph.coverageRows,
     factAnchors: relationGraph.factAnchors
-  }, options.taskFieldExtensions);
-  projectDeclaredEntities(runtimeContext, sessionEntityDeclaration, projectionPath);
-  projectDeclaredEntities(runtimeContext, executionDeclaration, projectionPath);
-  projectDeclaredEntities(runtimeContext, reviewDeclaration, projectionPath);
-  materializeAttributionProjection(runtimeContext, projectionPath);
+  }, options.taskFieldExtensions, (sql) => Effect.gen(function* () {
+    for (const table of snapshot.declaredTables) {
+      yield* replaceDeclaredProjectionRows(sql, table.declaration, table.rows);
+    }
+    yield* replaceDeclaredSourceManifestRows(sql, declaredManifestRows);
+    yield* replaceAttributionProjectionRows(sql, snapshot.attributionEvents);
+    yield* materializeEntityAttributionBlocks(sql, snapshot.attributionEvents);
+  }));
+  rememberProjectionValidation(projectionPath, declaredManifestRows);
   return {
     rows,
     warnings: source.warnings
   };
 }
 
+function captureStableProjectionBuild(runtimeContext: ReturnType<typeof createHarnessRuntimeContext>): {
+  readonly snapshot: ReturnType<typeof captureProjectionSourceSnapshot>;
+  readonly relationGraph: ReturnType<typeof buildRelationGraphProjection>;
+} {
+  let lastFailure: unknown = new Error("projection authored sources did not stabilize during rebuild");
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const snapshot = captureProjectionSourceSnapshot(runtimeContext);
+      const relationGraph = buildRelationGraphProjection(runtimeContext);
+      const verified = captureProjectionSourceFingerprint(runtimeContext);
+      if (verified.fingerprint === snapshot.fingerprint) return { snapshot, relationGraph };
+      lastFailure = new Error("projection authored sources did not stabilize during rebuild");
+    } catch (error) {
+      lastFailure = error;
+    }
+  }
+  throw lastFailure;
+}
+
 export function readTaskProjection(options: TaskProjectionOptions): ProjectionReadResult {
   const rootDir = path.resolve(options.rootDir);
   const runtimeContext = createHarnessRuntimeContext(rootDir, options.layoutOverrides);
   const projectionPath = options.projectionPath ? path.resolve(options.projectionPath) : resolveHarnessLayout(runtimeContext).projectionPath;
-  const source = readMarkdownSource(runtimeContext);
-  const warnings = [...source.warnings];
+  const warnings: ProjectionReadResult["warnings"][number][] = [];
 
   if (!existsSync(projectionPath)) {
     warnings.push(warning(
@@ -95,7 +156,7 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
       "Run harness-anything governance rebuild to materialize a fresh local projection cache before relying on generated state."
     ));
     const rebuilt = rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions });
-    return { rows: rebuilt.rows, warnings };
+    return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
   }
 
   const existing = tryReadProjectionDatabase(projectionPath, options.taskFieldExtensions);
@@ -121,23 +182,68 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
     return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
   }
 
-  if (existing.meta.sourceHash !== projectionSourceHash(source.hash, runtimeContext)) {
-    warnings.push(warning(
+  const cachedValidation = readCachedProjectionValidation(projectionPath);
+  let declaredManifest: ReturnType<typeof readDeclaredSourceManifestRows>;
+  try {
+    declaredManifest = cachedValidation?.declaredManifest ?? readDeclaredSourceManifestRows(projectionPath);
+  } catch {
+    warnings.push(hardFail(
       "generated-cache",
-      "projection_stale",
-      "Projection cache was stale and has been rebuilt from markdown.",
-      "Run harness-anything governance rebuild after authored task changes or merges."
+      "projection_tampered",
+      "Projection source manifest could not be read and has been rebuilt from authored state.",
+      "Discard the generated cache and rebuild it from authored entities; do not merge generated projection edits."
+    ));
+    const rebuilt = rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions });
+    return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
+  }
+  if (!cachedValidation && existing.meta.declaredManifestHash !== hashDeclaredSourceManifestRows(declaredManifest)) {
+    warnings.push(hardFail(
+      "generated-cache",
+      "projection_tampered",
+      "Projection source manifest no longer matches its recorded hash.",
+      "Discard the generated cache and rebuild it from authored entities; do not merge generated projection edits."
     ));
     const rebuilt = rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions });
     return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
   }
 
-  if (!declaredProjectionMatches(runtimeContext, projectionPath)) {
+  const snapshot = captureProjectionSourceFingerprint(runtimeContext, declaredManifest);
+  const source = snapshot.taskSource;
+  warnings.push(...source.warnings);
+
+  let existingDeclaredTables: ReturnType<typeof readDeclaredProjectionSnapshots> | null = null;
+  if (!cachedValidation) {
+    try {
+      existingDeclaredTables = readDeclaredProjectionSnapshots(projectionPath);
+    } catch {
+      existingDeclaredTables = null;
+    }
+  }
+  if (!cachedValidation && (existingDeclaredTables === null || existing.meta.declaredRowsHash !== hashDeclaredProjectionSnapshots(existingDeclaredTables))) {
     warnings.push(hardFail(
       "generated-cache",
       "projection_tampered",
       "Declared entity projection rows no longer match authored entity state.",
       "Discard the generated cache and rebuild it from authored entities; do not merge generated projection edits."
+    ));
+    const rebuilt = rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions });
+    return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
+  }
+
+  let attributionRowsMatch = true;
+  if (!cachedValidation) {
+    try {
+      attributionRowsMatch = existing.meta.attributionRowsHash === readAttributionProjectionStateHash(projectionPath);
+    } catch {
+      attributionRowsMatch = false;
+    }
+  }
+  if (!attributionRowsMatch) {
+    warnings.push(hardFail(
+      "generated-cache",
+      "projection_tampered",
+      "Projected attribution no longer matches its recorded hash.",
+      "Discard the generated cache and rebuild it from authored attribution events; do not merge generated projection edits."
     ));
     const rebuilt = rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions });
     return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
@@ -156,17 +262,53 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
     return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
   }
 
-  const currentDecisionRowsHash = hashDecisionProjectionRows(readDecisionProjectionRows(runtimeContext));
-  if ((existing.meta.decisionRowsHash ?? "") !== currentDecisionRowsHash) {
+  if (existing.meta.sourceHash !== snapshot.fingerprint) {
+    const legacyPersonIdsHash = hashProjectionLegacyPersonIds(snapshot.legacyPersonIds);
+    const declaredOnly = existing.meta.taskSourceHash === snapshot.taskSource.hash &&
+      existing.meta.attributionSourceHash === snapshot.attributionSource.hash &&
+      existing.meta.legacyPersonIdsHash === legacyPersonIdsHash;
+    if (declaredOnly) {
+      try {
+        existingDeclaredTables ??= readDeclaredProjectionSnapshots(projectionPath);
+        const declaredDelta = buildDeclaredProjectionDeltaFromSources(runtimeContext, declaredManifest, snapshot.declaredSources);
+        const currentDeclaredTables = applyDeclaredProjectionDeltaToSnapshots(existingDeclaredTables, declaredDelta);
+        updateProjectionDatabase(projectionPath, {
+          deleteTaskIds: [],
+          upsertTaskRows: [],
+          deleteDecisionIds: [],
+          upsertDecisionRows: [],
+          meta: {
+            ...existing.meta,
+            sourceHash: snapshot.fingerprint,
+            declaredRowsHash: hashDeclaredProjectionSnapshots(currentDeclaredTables),
+            declaredManifestHash: hashDeclaredSourceManifestRows(declaredDelta.manifest.currentRows)
+          },
+          declaredDelta,
+          taskFieldExtensions: options.taskFieldExtensions
+        });
+        rememberProjectionValidation(projectionPath, declaredDelta.manifest.currentRows);
+        warnings.push(warning(
+          "generated-cache",
+          "projection_stale",
+          "Declared entity projection changes were refreshed incrementally.",
+          "No full projection rebuild is required for isolated session, execution, or review changes."
+        ));
+        return { rows: [...existing.rows].sort(compareRows), warnings };
+      } catch {
+        // Fall through to the safe full rebuild when the manifest delta cannot be proven.
+      }
+    }
     warnings.push(warning(
       "generated-cache",
       "projection_stale",
-      "Projection decision cache was stale and has been rebuilt from markdown.",
-      "Run harness-anything governance rebuild after authored decision changes or merges."
+      "Projection cache was stale and has been rebuilt from markdown.",
+      "Run harness-anything governance rebuild after authored task changes or merges."
     ));
     const rebuilt = rebuildTaskProjection({ rootDir, layoutOverrides: options.layoutOverrides, projectionPath, taskFieldExtensions: options.taskFieldExtensions });
     return { rows: rebuilt.rows, warnings: [...warnings, ...rebuilt.warnings] };
   }
+
+  if (!cachedValidation) rememberProjectionValidation(projectionPath, declaredManifest);
 
   return {
     rows: [...existing.rows].sort(compareRows),
@@ -174,27 +316,26 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
   };
 }
 
-function projectionSourceHash(taskSourceHash: string, rootInput: ReturnType<typeof createHarnessRuntimeContext>): string {
-  const entityRows = [sessionEntityDeclaration, executionDeclaration, reviewDeclaration].map((declaration) => ({
-    table: declaration.projection.table,
-    rows: discoverDeclaredEntityRows(rootInput, declaration)
-  }));
-  return sha256Text(JSON.stringify({
-    taskSourceHash,
-    entityRows,
-    attributionEventSourceHash: attributionEventSourceHash(rootInput),
-    legacyPersonIds: [...readLegacyPersonIds(rootInput)].sort()
-  }));
+function readCachedProjectionValidation(projectionPath: string): ProjectionValidationCacheEntry | null {
+  const cached = projectionValidationCache.get(projectionPath);
+  if (!cached || localProjectionSourceFileSystem.statSignature(projectionPath) !== cached.signature) return null;
+  projectionValidationCache.delete(projectionPath);
+  projectionValidationCache.set(projectionPath, cached);
+  return cached;
 }
 
-function declaredProjectionMatches(rootInput: ReturnType<typeof createHarnessRuntimeContext>, projectionPath: string): boolean {
-  try {
-    return [sessionEntityDeclaration, executionDeclaration, reviewDeclaration].every((declaration) =>
-      JSON.stringify(readDeclaredProjectionRows(projectionPath, declaration)) ===
-      JSON.stringify(discoverDeclaredEntityRows(rootInput, declaration))
-    );
-  } catch {
-    return false;
+function rememberProjectionValidation(
+  projectionPath: string,
+  declaredManifest: ReturnType<typeof readDeclaredSourceManifestRows>
+): void {
+  const signature = localProjectionSourceFileSystem.statSignature(projectionPath);
+  if (signature === null) return;
+  projectionValidationCache.delete(projectionPath);
+  projectionValidationCache.set(projectionPath, { signature, declaredManifest });
+  while (projectionValidationCache.size > projectionValidationCacheLimit) {
+    const oldest = projectionValidationCache.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    projectionValidationCache.delete(oldest);
   }
 }
 

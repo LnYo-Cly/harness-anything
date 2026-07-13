@@ -118,20 +118,37 @@ test("SQLite projection rebuild materializes declared session execution and revi
   });
 });
 
-test("SQLite projection reads rebuild when an authored entity changes", () => {
+test("SQLite projection reads incrementally refresh isolated authored entity changes", () => {
   withTempStore((rootDir) => {
     writeIndex(rootDir, "task_01J00000000000000000000000", "Projected entities", "in_review");
     writeProjectionEntities(rootDir);
     rebuildTaskProjection({ rootDir });
+    const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
+    const db = new DatabaseSync(projectionPath);
+    try {
+      db.exec(`
+        CREATE TRIGGER preserve_incremental_read_generation
+        BEFORE DELETE ON execution_projection
+        BEGIN SELECT RAISE(ABORT, 'read path rebuilt execution table'); END
+      `);
+    } finally {
+      db.close();
+    }
 
     const executionPath = path.join(rootDir, "harness/tasks/task_01J00000000000000000000000/executions/exe_01J00000000000000000000000.md");
     const execution = JSON.parse(readFileSync(executionPath, "utf8")) as Record<string, unknown>;
     writeFileSync(executionPath, `${JSON.stringify({ ...execution, state: "accepted" }, null, 2)}\n`);
 
     const result = readTaskProjection({ rootDir });
-    const rows = readEntityProjectionTables(path.join(rootDir, ".harness/cache/projections.sqlite"));
+    const rows = readEntityProjectionTables(projectionPath);
     assert.equal(rows.executions[0]?.state, "accepted");
     assert.equal(result.warnings.some((warning) => warning.code === "projection_stale"), true);
+    const refreshed = new DatabaseSync(projectionPath, { readOnly: true });
+    try {
+      assert.equal(refreshed.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = 'preserve_incremental_read_generation'").get()?.count, 1);
+    } finally {
+      refreshed.close();
+    }
   });
 });
 
@@ -152,6 +169,26 @@ test("SQLite projection reads discard tampered declared entity rows", () => {
 
     assert.equal(readEntityProjectionTables(projectionPath).executions[0]?.state, "submitted");
     assert.equal(result.warnings.some((warning) => warning.code === "projection_tampered"), true);
+  });
+});
+
+test("SQLite projection reads discard tampered declared source manifests", () => {
+  withTempStore((rootDir) => {
+    writeIndex(rootDir, "task_01J00000000000000000000000", "Projected entities", "in_review");
+    writeProjectionEntities(rootDir);
+    rebuildTaskProjection({ rootDir });
+    const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
+    const db = new DatabaseSync(projectionPath);
+    try {
+      db.prepare("UPDATE declared_source_manifest SET content_sha256 = ? WHERE source_kind = 'execution'").run("0".repeat(64));
+    } finally {
+      db.close();
+    }
+
+    const result = readTaskProjection({ rootDir });
+
+    assert.equal(result.warnings.some((warning) => warning.code === "projection_tampered"), true);
+    assert.notEqual(readProjectionManifestValue(projectionPath, "execution", "content_sha256"), "0".repeat(64));
   });
 });
 
@@ -439,6 +476,15 @@ function writeIndex(
     `# ${title}`,
     ""
   ].join("\n"));
+}
+
+function readProjectionManifestValue(projectionPath: string, sourceKind: string, column: string): string {
+  const db = new DatabaseSync(projectionPath, { readOnly: true });
+  try {
+    return String(db.prepare(`SELECT ${column} AS value FROM declared_source_manifest WHERE source_kind = ?`).get(sourceKind)?.value);
+  } finally {
+    db.close();
+  }
 }
 
 function writeDecision(rootDir: string, decisionId: string, watermark: string): void {

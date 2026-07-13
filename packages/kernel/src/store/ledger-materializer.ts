@@ -5,7 +5,7 @@ import type { VersionControlSystem } from "../ports/version-control-system.ts";
 import { updateTaskProjectionIncrementally } from "../projection/sqlite-task-incremental-projection.ts";
 import { materializeAttributionProjection } from "../projection/sqlite-attribution-projection.ts";
 import { rebuildTaskProjection } from "../projection/sqlite-task-projection.ts";
-import { readMarkdownSource } from "../projection/sqlite-task-source.ts";
+import { captureAuthoredProjectionFingerprint } from "../projection/projection-source-baseline.ts";
 import { makeLocalVersionControlSystem } from "./local-version-control-system.ts";
 import { resolveTrunkBranch } from "./write-journal-git.ts";
 import { withRepoLocks } from "./write-journal-locks.ts";
@@ -65,7 +65,7 @@ function materializeBranches(repoRoot: string, rootInput: HarnessLayoutInput, dr
   const warnings: string[] = [];
   let merged = 0;
   let processed = 0;
-  const projectionSourceHashBeforeMerge = readMarkdownSource(rootInput).hash;
+  const projectionSourceFingerprintBeforeMerge = captureAuthoredProjectionFingerprint(rootInput);
   const touchedPaths = new Set<string>();
 
   const trunkBranch = resolveTrunkBranch(repoRoot, undefined, vcs);
@@ -126,7 +126,7 @@ function materializeBranches(repoRoot: string, rootInput: HarnessLayoutInput, dr
       rootDir: layout.rootDir,
       ...(typeof rootInput === "object" && rootInput.layoutOverrides ? { layoutOverrides: rootInput.layoutOverrides } : {}),
       touchedPaths: [...touchedPaths],
-      previousSourceHash: projectionSourceHashBeforeMerge
+      previousSourceFingerprint: projectionSourceFingerprintBeforeMerge
     });
   }
 
