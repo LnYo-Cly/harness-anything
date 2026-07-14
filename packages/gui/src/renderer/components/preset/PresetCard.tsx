@@ -1,8 +1,27 @@
 import { ArrowRight, CaretDown } from "@phosphor-icons/react";
 import type { PresetEntry } from "../../model/types";
-import { CHIP, SECTION_LABEL, chainOf, shortRef } from "./shared";
+import {
+  CHIP,
+  PRESET_HEADER_GRID,
+  SECTION_HINT,
+  SECTION_LABEL,
+  VERSION_TAIL,
+  chainOf,
+  sectionHeading,
+  shortRef,
+} from "./shared";
 import { LocaleBadges } from "./LocaleBadges";
 import { t } from "../../i18n/index.tsx";
+
+function SectionTitle({ text }: { text: string }) {
+  const { title, hint } = sectionHeading(text);
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+      <span className={SECTION_LABEL}>{title}</span>
+      {hint && <span className={SECTION_HINT}>{hint}</span>}
+    </div>
+  );
+}
 
 export function PresetCard({
   entry,
@@ -20,6 +39,7 @@ export function PresetCard({
   onJump: (id: string) => void;
 }) {
   const chain = chainOf(entry, all);
+  const hasStatus = active || !entry.valid;
 
   return (
     <div
@@ -28,34 +48,39 @@ export function PresetCard({
         active ? "border-accent" : "border-border"
       }`}
     >
-      <button
-        onClick={onToggle}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-raised/60"
-      >
-        <span className="min-w-[9rem] max-w-[20rem] truncate font-mono text-[13px] font-semibold">
+      <button onClick={onToggle} className={PRESET_HEADER_GRID}>
+        <span className="min-w-0 truncate font-mono text-[13px] font-semibold">
           {entry.title ?? entry.id}
         </span>
-        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-          <span className="shrink-0 rounded border border-accent/60 px-1.5 py-px font-mono text-[10px] text-accent">
-            {entry.vertical}
+        <span className="shrink-0 truncate rounded border border-accent/60 px-1.5 py-px font-mono text-[10px] text-accent">
+          {entry.vertical}
+        </span>
+        {entry.profile ? (
+          <span className={`shrink-0 truncate ${CHIP}`}>
+            {t("components.presetCard.profileValue", { profile: entry.profile })}
           </span>
-          {entry.profile && <span className={`shrink-0 ${CHIP}`}>{t("components.presetCard.profileValue", { profile: entry.profile })}</span>}
+        ) : (
+          <span className="shrink-0 truncate font-mono text-[10px] text-transparent select-none" aria-hidden>
+            profile: —
+          </span>
+        )}
+        <span className="hidden min-w-0 truncate font-mono text-[11px] text-text-muted lg:block">
+          {entry.kind ?? t("components.presetCard.manifestUnavailable")}
+        </span>
+        <span className="flex min-w-0 shrink-0 items-center gap-1">
           {active && (
             <span className="shrink-0 rounded bg-accent px-1.5 py-px text-[10px] text-accent-fg">
-              {t("components.presetCard.activating")}</span>
+              {t("components.presetCard.activating")}
+            </span>
           )}
           {!entry.valid && (
             <span className="shrink-0 rounded border border-danger/60 px-1.5 py-px font-mono text-[10px] text-danger">
               {t("components.presetCard.invalidIssueCount", { count: entry.issueCount })}
             </span>
           )}
+          {!hasStatus && <span className="w-0" aria-hidden />}
         </span>
-        <span className="hidden min-w-[12rem] max-w-[25rem] flex-1 truncate text-[11px] text-text-muted lg:block">
-          {entry.kind ?? t("components.presetCard.manifestUnavailable")}
-        </span>
-        <span className="ml-auto shrink-0 font-mono text-[11px] text-text-faint">
-          v{entry.version}
-        </span>
+        <span className={VERSION_TAIL}>v{entry.version}</span>
         <CaretDown
           className={`shrink-0 text-[12px] text-text-faint ${
             expanded ? "rotate-180" : ""
@@ -66,7 +91,7 @@ export function PresetCard({
       {expanded && (
         <div className="flex flex-col gap-3 border-t border-border px-3 py-2.5">
           <div>
-            <div className={SECTION_LABEL}>{t("components.presetCard.inheritanceChain")}</div>
+            <SectionTitle text={t("components.presetCard.inheritanceChain")} />
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               {chain.map((p, i) => (
                 <span key={p.id} className="flex items-center gap-1.5">
@@ -83,16 +108,24 @@ export function PresetCard({
                   </button>
                 </span>
               ))}
-              <span className="ml-1 text-[10px] text-text-faint">{t("components.presetCard.singleParentChainConflictFailClosed")}</span>
+              <span className="ml-1 text-[10px] text-text-faint">
+                {t("components.presetCard.singleParentChainConflictFailClosed")}
+              </span>
             </div>
           </div>
 
           <div>
-            <div className={SECTION_LABEL}>{t("components.presetCard.capabilityImportsExplicitIntroductionProhibitingImplicitMultiple")}</div>
+            <SectionTitle
+              text={t(
+                "components.presetCard.capabilityImportsExplicitIntroductionProhibitingImplicitMultiple",
+              )}
+            />
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               {entry.capabilityImports.length > 0 ? (
                 entry.capabilityImports.map((c) => (
-                  <span key={c} className={CHIP}>{c}</span>
+                  <span key={c} className={CHIP}>
+                    {c}
+                  </span>
                 ))
               ) : (
                 <span className="text-[11px] text-text-faint">—</span>
@@ -101,26 +134,43 @@ export function PresetCard({
           </div>
 
           <div>
-            <div className={SECTION_LABEL}>{t("components.presetCard.templateSelectionsHorizontalAccessTemplateLibraryDuring")}</div>
+            <SectionTitle
+              text={t(
+                "components.presetCard.templateSelectionsHorizontalAccessTemplateLibraryDuring",
+              )}
+            />
             {entry.selections.length > 0 ? (
               <div className="mt-1.5 overflow-x-auto">
                 <table className="min-w-[620px] text-left text-[11px]">
                   <thead>
                     <tr className="text-[10px] text-text-faint">
-                      <th className="py-0.5 pr-2 font-normal">{t("components.presetCard.slot")}</th>
-                      <th className="py-0.5 pr-2 font-normal">{t("components.presetCard.template")}</th>
-                      <th className="py-0.5 pr-2 font-normal">{t("components.presetCard.materializedAs")}</th>
-                      <th className="py-0.5 font-normal">{t("components.presetCard.locales")}</th>
+                      <th className="py-0.5 pr-2 font-normal">
+                        {t("components.presetCard.slot")}
+                      </th>
+                      <th className="py-0.5 pr-2 font-normal">
+                        {t("components.presetCard.template")}
+                      </th>
+                      <th className="py-0.5 pr-2 font-normal">
+                        {t("components.presetCard.materializedAs")}
+                      </th>
+                      <th className="py-0.5 font-normal">
+                        {t("components.presetCard.locales")}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {entry.selections.map((s) => (
                       <tr key={s.slot} className="border-t border-border/60">
                         <td className="py-1 pr-2 font-mono text-text">{s.slot}</td>
-                        <td className="max-w-[180px] truncate py-1 pr-2 font-mono text-text-muted" title={s.templateRef}>
+                        <td
+                          className="max-w-[180px] truncate py-1 pr-2 font-mono text-text-muted"
+                          title={s.templateRef}
+                        >
                           {shortRef(s.templateRef)}
                         </td>
-                        <td className="py-1 pr-2 font-mono text-text-muted">{s.materializeAs}</td>
+                        <td className="py-1 pr-2 font-mono text-text-muted">
+                          {s.materializeAs}
+                        </td>
                         <td className="py-1">
                           <LocaleBadges locales={s.locales} />
                         </td>
@@ -130,11 +180,15 @@ export function PresetCard({
                 </table>
               </div>
             ) : (
-              <p className="mt-1.5 text-[11px] text-text-faint">{t("components.presetCard.noCoverageLayerAllInheritedFromParent")}</p>
+              <p className="mt-1.5 text-[11px] text-text-faint">
+                {t("components.presetCard.noCoverageLayerAllInheritedFromParent")}
+              </p>
             )}
           </div>
 
-          <p className="text-[10px] text-text-faint">{t("components.presetCard.readOnlySnapshotInstallationUninstallationStillManaged")}</p>
+          <p className="text-[10px] text-text-faint">
+            {t("components.presetCard.readOnlySnapshotInstallationUninstallationStillManaged")}
+          </p>
         </div>
       )}
     </div>
