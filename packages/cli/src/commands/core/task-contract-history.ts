@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { Schema } from "effect";
+import { isSafeBodyPath } from "../../cli/path.ts";
 import {
   planTemplateMaterialization,
   PresetManifestSchema,
@@ -213,11 +214,6 @@ function combineSelections(
   for (const selection of verticalSelections) byPath.set(selection.materializeAs, selection);
   for (const selection of presetSelections) byPath.set(selection.materializeAs, selection);
   return [...byPath.values()];
-}
-
-function isSafeBodyPath(value: string): boolean {
-  if (path.isAbsolute(value) || value.includes("\\") || !value.endsWith(".md")) return false;
-  return value.split("/").every((part) => part.length > 0 && part !== "." && part !== "..");
 }
 
 function gitRequiredText(rootDir: string, args: ReadonlyArray<string>): string {
