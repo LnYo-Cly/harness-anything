@@ -264,6 +264,7 @@ const repoWriteCliActionKinds = new Set<string>([
   "migrate-anchors",
   "migrate-fact-execution",
   "migrate-provenance",
+  "migrate-retired-attribution-fields",
   "migrate-run",
   "migrate-structure",
   "module-register",

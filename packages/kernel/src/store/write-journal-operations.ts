@@ -23,6 +23,10 @@ import {
 import { sha256Text } from "../integrity/stable-hash.ts";
 import { assertReservedCodeDocWrite } from "./write-journal-code-doc-policy.ts";
 import {
+  prepareRetiredAttributionFieldCleanup,
+  retiredAttributionFieldCleanupTargetPath
+} from "./write-journal-retired-attribution-cleanup.ts";
+import {
   applyCanonicalAuthoredBatch,
   canonicalAuthoredBatchPaths,
   validateCanonicalAuthoredBatch
@@ -62,6 +66,17 @@ export interface WriteTransactionPlan {
 }
 
 export function writeTransactionPlan(op: WriteOp): WriteTransactionPlan {
+  if (op.kind === "migration_retired_attribution_fields") {
+    return {
+      touchedPaths: (rootInput) => [retiredAttributionFieldCleanupTargetPath(rootInput, op)],
+      documentWrites: () => [],
+      apply: (rootInput) => {
+        applyRetiredAttributionFieldCleanup(rootInput, op);
+        return null;
+      },
+      validate: (rootInput) => validateRetiredAttributionFieldCleanup(rootInput, op)
+    };
+  }
   if (op.kind === "doc_sync_submit" || op.kind === "script_ingest") {
     return {
       touchedPaths: (rootInput) => canonicalAuthoredBatchPaths(rootInput, op),
@@ -500,6 +515,20 @@ function writeDocumentsAtomically(
     }
     throw error;
   }
+}
+
+function validateRetiredAttributionFieldCleanup(rootInput: HarnessLayoutInput, op: WriteOp): void {
+  const targetPath = retiredAttributionFieldCleanupTargetPath(rootInput, op);
+  if (!existsSync(targetPath)) rejectWrite(`retired attribution cleanup target does not exist: ${targetPath}`, op.entityId);
+  prepareRetiredAttributionFieldCleanup(targetPath, readFileSync(targetPath, "utf8"), op);
+}
+
+function applyRetiredAttributionFieldCleanup(rootInput: HarnessLayoutInput, op: WriteOp): void {
+  const targetPath = retiredAttributionFieldCleanupTargetPath(rootInput, op);
+  if (!existsSync(targetPath)) rejectWrite(`retired attribution cleanup target does not exist: ${targetPath}`, op.entityId);
+  const prepared = prepareRetiredAttributionFieldCleanup(targetPath, readFileSync(targetPath, "utf8"), op);
+  if (prepared.alreadyApplied) return;
+  writeFileDurably(targetPath, prepared.body);
 }
 
 

@@ -34,6 +34,11 @@ function recordCommitDetail(kind: JournalRecordKind, payload: Record<string, unk
   if (kind === "task_tree_stage") return "task package";
   if (kind === "module_registry_write" && typeof payload.operation === "string") return payload.operation;
   if (kind === "module_scaffold_write") return "scaffold";
+  if (kind === "migration_retired_attribution_fields") {
+    const documentKind = typeof payload.documentKind === "string" ? payload.documentKind : "document";
+    const planId = typeof payload.planId === "string" ? payload.planId : "unknown-plan";
+    return `${documentKind} ${planId}`;
+  }
   if (kind === "decision_relate") {
     const decision = payload.decision as { readonly relations?: ReadonlyArray<{ readonly type?: unknown; readonly target?: unknown }> } | undefined;
     const relation = decision?.relations?.at(-1);

@@ -249,6 +249,7 @@ function displayCommand(command: string): { readonly command: string; readonly e
     "migrate-plan": "migrate plan",
     "migrate-structure": "migrate structure",
     "migrate-provenance": "migrate provenance",
+    "migrate-retired-attribution-fields": "migrate retired-attribution-fields",
     "migrate-run": "migrate run",
     "migrate-verify": "migrate verify",
     "legacy-intake-plan": "legacy plan",
