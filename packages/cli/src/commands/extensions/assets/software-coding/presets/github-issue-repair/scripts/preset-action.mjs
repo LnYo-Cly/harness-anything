@@ -8,8 +8,9 @@ const context = JSON.parse(readFileSync(contextPath, "utf8"));
 const artifactsDir = path.join(context.outputRoot, "artifacts");
 mkdirSync(artifactsDir, { recursive: true });
 
-const input = normalizeInputs(context.inputs ?? {});
-const acquisition = await loadIssueSource(input);
+const validationSmoke = context.validationSmoke === true;
+const input = validationSmoke ? validationSmokeInputs() : normalizeInputs(context.inputs ?? {});
+const acquisition = validationSmoke ? validationSmokeSource() : await loadIssueSource(input);
 const selected = selectIssue(acquisition.issues, input);
 const report = buildReport(input, acquisition, selected);
 const ok = report.status === "ready";
@@ -46,6 +47,40 @@ function normalizeInputs(raw) {
     fixtureFile: optionalString(raw.fixtureFile),
     issueJson: optionalString(raw.issueJson),
     fetchMode
+  };
+}
+
+function validationSmokeInputs() {
+  return {
+    repo: "harness-anything/validation-smoke",
+    state: "open",
+    limit: 1,
+    labels: [],
+    excludeLabels: [],
+    issue: "1",
+    fixtureFile: undefined,
+    issueJson: undefined,
+    fetchMode: "disabled"
+  };
+}
+
+function validationSmokeSource() {
+  return {
+    mode: "validation-smoke",
+    ok: true,
+    issues: [normalizeIssue({
+      number: 1,
+      title: "Validate GitHub issue repair intake",
+      state: "open",
+      html_url: "https://example.invalid/harness-anything/validation-smoke/issues/1",
+      user: { login: "validation-smoke" },
+      labels: [{ name: "bug" }],
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+      body: "Reproduction: run `ha preset check github-issue-repair --json`."
+    })],
+    warnings: [],
+    message: "Executed the host-only preset validation smoke without network access."
   };
 }
 

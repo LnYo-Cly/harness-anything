@@ -21,7 +21,9 @@ const publicRequiredArtifacts = [
 const publicOptionalHtml = { id: "html", role: "html", root: "milestones", path: "milestones.html" };
 mkdirSync(artifactsDir, { recursive: true });
 
-if (entrypoint === "scaffold") {
+if (context.validationSmoke === true && entrypoint !== "render-html") {
+  runSmoke();
+} else if (entrypoint === "scaffold") {
   runScaffold();
 } else if (entrypoint === "render-html") {
   runRenderHtml();
@@ -29,6 +31,28 @@ if (entrypoint === "scaffold") {
   runCheck();
 } else {
   fail("unknown_entrypoint", `Unsupported create-milestone entrypoint: ${entrypoint}`);
+}
+
+function runSmoke() {
+  const contract = requiredArtifacts();
+  const requiredRoles = ["overview", "index", "machine-summary"];
+  const missingRoles = requiredRoles.filter((role) => !contract.some((artifact) => artifact.role === role));
+  const report = {
+    schema: "create-milestone-smoke-report/v1",
+    status: missingRoles.length === 0 ? "passed" : "blocked",
+    entrypoint,
+    requiredRoles,
+    missingRoles
+  };
+  writeFileSync(path.join(artifactsDir, "create-milestone-check.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  writeResult({
+    ok: report.status === "passed",
+    report,
+    error: report.status === "passed" ? undefined : {
+      code: "preset_script_result_failed",
+      hint: `create-milestone contract is missing roles: ${missingRoles.join(", ")}`
+    }
+  });
 }
 
 function runScaffold() {

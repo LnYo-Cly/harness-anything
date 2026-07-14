@@ -66,6 +66,83 @@ test("preset check rejects a present script that cannot be parsed by the runtime
   });
 });
 
+test("preset check rejects an entrypoint name absent from the parser capability registry", () => {
+  withTempRoot((rootDir) => {
+    writePreset(rootDir, "unreachable", {
+      capture: {
+        type: "script",
+        command: "scripts/capture.mjs",
+        writes: ["{{outputRoot}}/**"]
+      }
+    });
+    write(rootDir, ".harness/presets/unreachable/scripts/capture.mjs", "console.log('never reached');\n");
+
+    const result = runJson(rootDir, ["preset", "check", "unreachable"], false);
+
+    assert.equal(result.issues[0].code, "preset_entrypoint_runtime_unregistered");
+    assert.equal(result.issues[0].entrypoint, "capture");
+    assert.match(result.issues[0].message, /capability registry does not expose/u);
+    assert.equal(result.issues[0].nextCommand, "ha preset run --help");
+  });
+});
+
+test("preset check executes the script and rejects script-result ok false", () => {
+  withTempRoot((rootDir) => {
+    writePreset(rootDir, "failed-result", {
+      check: {
+        type: "script",
+        command: "scripts/check.mjs",
+        writes: ["{{outputRoot}}/**"]
+      }
+    });
+    write(rootDir, ".harness/presets/failed-result/scripts/check.mjs", [
+      "import { writeFileSync } from 'node:fs';",
+      "writeFileSync(process.env.HARNESS_SCRIPT_RESULT, JSON.stringify({ schema: 'script-result/v1', ok: false, report: { reason: 'positive-control' }, produced: [] }));",
+      ""
+    ].join("\n"));
+
+    const result = runJson(rootDir, ["preset", "check", "failed-result"], false);
+
+    assert.equal(result.issues[0].code, "preset_entrypoint_smoke_failed");
+    assert.equal(result.issues[0].entrypoint, "check");
+    assert.match(result.issues[0].message, /script-result ok:false/u);
+    assert.equal(result.issues[0].nextCommand, "ha preset check failed-result --json");
+
+    const list = runJson(rootDir, ["preset", "list"]);
+    assert.equal(list.presets.find((preset: Record<string, unknown>) => preset.id === "failed-result").valid, false);
+    assert.equal(list.issues.some((issue: Record<string, unknown>) => issue.entrypoint === "check"), true);
+  });
+});
+
+test("preset audit reports a script ingest rejection instead of aborting the scan", () => {
+  withTempRoot((rootDir) => {
+    writePreset(rootDir, "unmanaged-output", {
+      scaffold: {
+        type: "script",
+        command: "scripts/scaffold.mjs",
+        writes: ["{{outputRoot}}/**"]
+      }
+    });
+    write(rootDir, ".harness/presets/unmanaged-output/scripts/scaffold.mjs", [
+      "import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';",
+      "import path from 'node:path';",
+      "const context = JSON.parse(readFileSync(process.env.HARNESS_PRESET_CONTEXT, 'utf8'));",
+      "mkdirSync(context.outputRoot, { recursive: true });",
+      "writeFileSync(path.join(context.outputRoot, 'undeclared.md'), '# not ingestible\\n');",
+      ""
+    ].join("\n"));
+
+    const result = runJson(rootDir, ["preset", "audit"], false);
+
+    assert.equal(result.error.code, "preset_manifest_invalid");
+    assert.equal(result.presets.find((preset: Record<string, unknown>) => preset.id === "unmanaged-output").valid, false);
+    const issue = result.issues.find((candidate: Record<string, unknown>) =>
+      candidate.entrypoint === "scaffold" && typeof candidate.message === "string" && candidate.message.includes("SEMANTIC_DIFF_REQUIRED"));
+    assert.ok(issue);
+    assert.match(issue.message, /SEMANTIC_DIFF_REQUIRED/u);
+  });
+});
+
 test("usage-acceptance regression fixture reports each broken entrypoint and turns valid only after all three are repaired", () => {
   withTempRoot((rootDir) => {
     writePreset(rootDir, "usage-acceptance", {
@@ -84,11 +161,11 @@ test("usage-acceptance regression fixture reports each broken entrypoint and tur
     ]);
 
     writePreset(rootDir, "usage-acceptance", {
-      capture: { type: "script", command: "scripts/capture.mjs", writes: ["{{outputRoot}}/**"] },
-      "scaffold-plan": { type: "script", command: "scripts/scaffold-plan.mjs", writes: ["{{outputRoot}}/**"] },
+      plan: { type: "script", command: "scripts/scaffold-plan.mjs", writes: ["{{outputRoot}}/**"] },
+      scaffold: { type: "script", command: "scripts/capture.mjs", writes: ["{{outputRoot}}/**"] },
       check: { type: "script", command: "scripts/check.mjs", writes: ["{{outputRoot}}/**"] }
     });
-    write(rootDir, ".harness/presets/usage-acceptance/scripts/capture.mjs", "console.log('capture');\n");
+    write(rootDir, ".harness/presets/usage-acceptance/scripts/capture.mjs", "console.log('scaffold');\n");
     write(rootDir, ".harness/presets/usage-acceptance/scripts/scaffold-plan.mjs", "console.log('scaffold-plan');\n");
 
     const repaired = runJson(rootDir, ["preset", "check", "usage-acceptance"]);

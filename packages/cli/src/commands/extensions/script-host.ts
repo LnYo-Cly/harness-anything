@@ -128,7 +128,6 @@ export function runScriptHost(options: {
   if (!writeScope.ok) return scriptFailure(options.commandName, CliErrorCode.ScriptScopeInvalidWrite, "Script writes must declare approved authored content scopes.");
   if (
     options.script.entry.source === "preset" &&
-    options.dryRun === true &&
     options.outputRoot !== undefined &&
     options.script.entry.writes.length > 0 &&
     !writeScope.roots.some((allowedRoot) => isPathInside(allowedRoot, options.outputRoot!))

@@ -1,5 +1,9 @@
 import path from "node:path";
 import { taskPackagePath, type HarnessLayoutInput } from "../../../../kernel/src/index.ts";
+import {
+  isPresetRunEntrypoint,
+  presetRunEntrypointCapabilities
+} from "../../cli/preset-entrypoint-capabilities.ts";
 import { presetScriptEntry } from "./preset-script-runner.ts";
 import type { ResolvedPreset } from "./state.ts";
 import { runScriptHost, type ResolvedScriptEntry } from "./script-host.ts";
@@ -36,6 +40,12 @@ export function smokePresetEntrypoints(
 ): PresetEntrypointSmokeResult {
   const issues: PresetEntrypointSmokeIssue[] = [];
   const entrypoints = Object.entries(preset.manifest.entrypoints ?? {}).map(([name, entrypoint]) => {
+    if (!isPresetRunEntrypoint(name)) {
+      issues.push(entrypointCapabilityUnregisteredIssue(preset, name, entrypoint.type));
+      return entrypoint.type === "script"
+        ? { name, type: entrypoint.type, command: entrypoint.command, ok: false }
+        : { name, type: entrypoint.type, ok: false };
+    }
     if (entrypoint.type !== "script") {
       issues.push(runtimeUnregisteredIssue(preset, name, entrypoint.type));
       return { name, type: entrypoint.type, ok: false };
@@ -43,13 +53,24 @@ export function smokePresetEntrypoints(
 
     const script = resolvedPresetScript(preset, name, entrypoint);
     const outputRoot = taskPackagePath(rootInput, `task_PRESET_CHECK_${safeToken(preset.manifest.id)}`);
-    const smoke = runScriptHost({
-      rootInput,
-      commandName: "preset-check",
-      script,
-      outputRoot,
-      dryRun: true
-    });
+    let smoke: ReturnType<typeof runScriptHost>;
+    try {
+      smoke = runScriptHost({
+        rootInput,
+        commandName: "preset-check",
+        script,
+        outputRoot
+      });
+    } catch (error) {
+      issues.push({
+        code: "preset_entrypoint_smoke_failed",
+        entrypoint: name,
+        path: `entrypoints.${name}`,
+        message: `Entrypoint ${name} failed its isolated execution smoke: ${error instanceof Error ? error.message : String(error)}`,
+        nextCommand: smokeReproductionCommand(preset)
+      });
+      return { name, type: entrypoint.type, command: entrypoint.command, ok: false };
+    }
     if (!smoke.ok) {
       const error = smoke.result.error;
       issues.push({
@@ -58,13 +79,31 @@ export function smokePresetEntrypoints(
           : "preset_entrypoint_smoke_failed",
         entrypoint: name,
         path: `entrypoints.${name}${error?.code === "script_not_found" ? ".command" : ""}`,
-        message: `Entrypoint ${name} failed its real dry-run smoke: ${error?.hint ?? "unknown runtime failure"}`,
-        nextCommand: repairCommand(preset)
+        message: error?.code === "script_result_failed"
+          ? `Entrypoint ${name} returned script-result ok:false during its isolated smoke.`
+          : `Entrypoint ${name} failed its isolated execution smoke: ${error?.hint ?? "unknown runtime failure"}`,
+        nextCommand: error?.code === "script_not_found"
+          ? repairCommand(preset)
+          : smokeReproductionCommand(preset)
       });
     }
     return { name, type: entrypoint.type, command: entrypoint.command, ok: smoke.ok };
   });
   return { ok: issues.length === 0, entrypoints, issues };
+}
+
+function entrypointCapabilityUnregisteredIssue(
+  preset: ResolvedPreset,
+  entrypoint: string,
+  type: "script" | "template"
+): PresetEntrypointSmokeIssue {
+  return {
+    code: "preset_entrypoint_runtime_unregistered",
+    entrypoint,
+    path: `entrypoints.${entrypoint}`,
+    message: `Entrypoint ${entrypoint} declares type ${type}, but the preset run capability registry does not expose that name. Registered names: ${presetRunEntrypointCapabilities.join(", ")}.`,
+    nextCommand: "ha preset run --help"
+  };
 }
 
 export function presetRuntimeRepairHint(preset: ResolvedPreset, issues: ReadonlyArray<PresetEntrypointSmokeIssue>): string {
@@ -100,7 +139,8 @@ function resolvedPresetScript(
     context: {
       presetId: preset.manifest.id,
       presetTitle: preset.manifest.title,
-      entrypoint: entrypointName
+      entrypoint: entrypointName,
+      validationSmoke: true
     }
   };
 }
@@ -124,6 +164,10 @@ function repairCommand(preset: ResolvedPreset): string {
     return `run \`ha preset seed\`, then \`ha preset check ${preset.manifest.id}\``;
   }
   return `reinstall the complete preset package with \`ha preset install <preset-folder> --project\`, then run \`ha preset check ${preset.manifest.id}\``;
+}
+
+function smokeReproductionCommand(preset: ResolvedPreset): string {
+  return `ha preset check ${preset.manifest.id} --json`;
 }
 
 function safeToken(value: string): string {

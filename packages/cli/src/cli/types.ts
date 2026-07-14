@@ -16,6 +16,7 @@ import type { DecisionAmendField, DecisionAmendOperation } from "../../../kernel
 import type { DecisionClaimFulfillment } from "../../../kernel/src/index.ts";
 import type { HarnessLayoutOverrides } from "../../../kernel/src/index.ts";
 import type { CliError } from "./error-codes.ts";
+import type { PresetRunEntrypoint } from "./preset-entrypoint-capabilities.ts";
 
 export type CheckProfile = "source-package" | "private-harness" | "target-project";
 export type GovernanceRebuildMode = "dry-run" | "archive" | "apply";
@@ -304,7 +305,7 @@ export interface ParsedCommand {
     | { readonly kind: "preset-seed" }
     | { readonly kind: "preset-audit" }
     | { readonly kind: "preset-uninstall"; readonly presetId: string; readonly layer: "project" | "user"; readonly dryRun: boolean }
-    | { readonly kind: "preset-run"; readonly presetId: string; readonly entrypoint: "plan" | "scaffold" | "check"; readonly taskId: string; readonly allowScripts: boolean; readonly inputs: Record<string, string> }
+    | { readonly kind: "preset-run"; readonly presetId: string; readonly entrypoint: PresetRunEntrypoint; readonly taskId: string; readonly allowScripts: boolean; readonly inputs: Record<string, string> }
     | { readonly kind: "preset-action"; readonly presetId: string; readonly actionName: string; readonly taskId: string; readonly allowScripts: boolean; readonly inputs: Record<string, string> }
     | { readonly kind: "script-list"; readonly source?: "user" | "vertical" | "preset"; readonly purpose?: "scaffold" | "generate" | "transform" | "audit"; readonly scriptKind?: "action" | "check" }
     | { readonly kind: "script-inspect"; readonly scriptId: string }

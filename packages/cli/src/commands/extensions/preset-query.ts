@@ -46,11 +46,10 @@ export function runPresetList(rootInput: HarnessLayoutInput, activeVerticalId: s
   const validations = entries.map((entry) => validateResolvedPreset(rootInput, entry));
   const issues = validations.flatMap((entry) => entry.issues);
   return {
-    ok: issues.length === 0,
+    ok: true,
     command: "preset-list",
     presets: validations.map((entry) => entry.summary),
-    issues,
-    error: issues.length === 0 ? undefined : cliError(CliErrorCode.PresetManifestInvalid, "One or more resolved presets failed validation.")
+    issues
   };
 }
 
