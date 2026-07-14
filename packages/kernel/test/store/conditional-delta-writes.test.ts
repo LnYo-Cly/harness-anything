@@ -2,7 +2,7 @@
 import { testWriteAttribution } from "../test-attribution.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Effect } from "effect";
 import {
@@ -125,6 +125,38 @@ test("decision snapshot without an explicit body preserves the existing body byt
   });
 });
 
+test("decision content pin delta preserves legacy frontmatter and body bytes", () => {
+  withTempStore((rootDir) => {
+    const coordinator = makeJournaledWriteCoordinator({ attribution: testWriteAttribution(), rootDir });
+    const originalPin = contentPin("accept", "2026-07-11T00:00:00.000Z", "a");
+    const current = decisionPackage({
+      state: "active",
+      decidedAt: "2026-07-11T00:00:00.000Z",
+      contentPins: [originalPin]
+    });
+    Effect.runSync(coordinator.enqueue(decisionSnapshotOp("decision-base", current, null, "Legacy body bytes.\n")));
+    Effect.runSync(coordinator.flush("explicit"));
+    const decisionPath = path.join(rootDir, "harness/decisions/decision-dec_TEST/decision.md");
+    const withLegacyFields = readFileSync(decisionPath, "utf8")
+      .replace("proposedAt:", "proposedBy: { kind: \"agent\", id: \"legacy-agent\" }\narbiter: { kind: \"human\", id: \"legacy-human\" }\nproposedAt:");
+    writeFileSync(decisionPath, withLegacyFields, "utf8");
+    const repin = contentPin("amend", "2026-07-14T02:30:00.000Z", "b");
+
+    Effect.runSync(coordinator.enqueue(decisionContentPinAppendOp("decision-repin", {
+      ...current,
+      _coordinatorWatermark: "decision-base",
+      contentPins: [originalPin, repin]
+    }, "decision-base", repin)));
+    Effect.runSync(coordinator.flush("explicit"));
+    const after = readFileSync(decisionPath, "utf8");
+
+    assert.match(after, /^proposedBy: \{ kind: "agent", id: "legacy-agent" \}$/mu);
+    assert.match(after, /^arbiter: \{ kind: "human", id: "legacy-human" \}$/mu);
+    assert.equal(decisionBody(after), decisionBody(withLegacyFields));
+    assert.equal(after.replace(/^_coordinatorWatermark:.*$/mu, "_coordinatorWatermark: WATERMARK").replace(/^  - \{ action: "amend".*\n/mu, ""), withLegacyFields.replace(/^_coordinatorWatermark:.*$/mu, "_coordinatorWatermark: WATERMARK"));
+  });
+});
+
 test("decision snapshot body append is idempotent by heading across different rationales", () => {
   withTempStore((rootDir) => {
     const coordinator = makeJournaledWriteCoordinator({ attribution: testWriteAttribution(), rootDir });
@@ -220,6 +252,38 @@ function decisionRelationAppendOp(opId: string, current: DecisionPackage, relati
         relation
       }
     }
+  };
+}
+
+function decisionContentPinAppendOp(
+  opId: string,
+  current: DecisionPackage,
+  expectedWatermark: string,
+  pin: NonNullable<DecisionPackage["contentPins"]>[number]
+) {
+  return {
+    opId,
+    entityId: decisionEntityId(current.decision_id),
+    kind: "decision_amend" as const,
+    payload: {
+      decision: current,
+      writeMode: { kind: "append_content_pin" as const, expectedWatermark, pin }
+    }
+  };
+}
+
+function contentPin(
+  action: "accept" | "amend",
+  decidedAt: string,
+  digestCharacter: string
+): NonNullable<DecisionPackage["contentPins"]>[number] {
+  return {
+    action,
+    state: "active",
+    decidedAt,
+    arbiter: { kind: "human", id: "ZeyuLi" },
+    canonicalization: "decision-content/v1",
+    digest: `sha256:${digestCharacter.repeat(64)}`
   };
 }
 

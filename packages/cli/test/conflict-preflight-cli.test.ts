@@ -17,6 +17,7 @@ const expectedConflictPreflightKinds = [
   "adopt-multica",
   "decision-accept",
   "decision-amend",
+  "decision-repin",
   "decision-defer",
   "decision-propose",
   "decision-reckon",
@@ -80,6 +81,7 @@ const expectedConflictPreflightKinds = [
 const expectedAutoRuntimeEventKinds = [
   "decision-accept",
   "decision-amend",
+  "decision-repin",
   "decision-defer",
   "decision-propose",
   "decision-reckon",

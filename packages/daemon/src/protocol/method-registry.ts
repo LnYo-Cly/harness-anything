@@ -197,6 +197,7 @@ const repoReadCliActionKinds = new Set<string>([
   "check",
   "decision-list",
   "decision-show",
+  "decision-verify",
   "diagnostics-command-usage",
   "doc-status",
   "doc-sync-dry-run",
@@ -242,6 +243,7 @@ const repoReadCliActionKinds = new Set<string>([
 const repoWriteCliActionKinds = new Set<string>([
   "adopt-multica",
   "decision-amend",
+  "decision-repin",
   "decision-propose",
   "decision-reckon",
   "decision-relate",

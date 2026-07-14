@@ -92,7 +92,7 @@ test("every decision judgment transition appends a self-contained content pin", 
   }
 });
 
-test("post-sign amend changes recomputation without mutating the recorded content pin", () => {
+test("post-sign load-bearing amend preserves history and appends a current content pin", () => {
   const enqueued: WriteOp[] = [];
   const service = makeDecisionWriteService({
     coordinator: fakeCoordinator(enqueued),
@@ -118,8 +118,102 @@ test("post-sign amend changes recomputation without mutating the recorded conten
   Effect.runSync(service.amend({ current: signed, next: amended }));
   const persistedAmend = (enqueued[1]?.payload as { decision: DecisionPackage }).decision;
 
-  assert.deepEqual(persistedAmend.contentPins, signed.contentPins);
-  assert.equal(persistedAmend.contentPins?.[0]?.digest, recordedPin.digest);
+  assert.equal(persistedAmend.contentPins?.length, 2);
+  assert.deepEqual(persistedAmend.contentPins?.[0], recordedPin);
+  assert.deepEqual(persistedAmend.contentPins?.[1], {
+    action: "amend",
+    state: "active",
+    decidedAt: "2026-07-11T00:01:00.000Z",
+    arbiter: { kind: "human", id: "ZeyuLi" },
+    canonicalization: "decision-content/v1",
+    digest: computeDecisionContentDigest(amended)
+  });
+});
+
+test("post-sign title-only amend does not append a content pin", () => {
+  const enqueued: WriteOp[] = [];
+  const service = makeDecisionWriteService({ coordinator: fakeCoordinator(enqueued) });
+  const current = decisionPackage({
+    state: "active",
+    decidedAt: "2026-07-11T00:00:00.000Z",
+    contentPins: [{
+      action: "accept",
+      state: "active",
+      decidedAt: "2026-07-11T00:00:00.000Z",
+      arbiter: { kind: "human", id: "ZeyuLi" },
+      canonicalization: "decision-content/v1",
+      digest: computeDecisionContentDigest(decisionPackage())
+    }]
+  });
+
+  Effect.runSync(service.amend({
+    current,
+    next: { ...current, title: "A clearer navigation label." }
+  }));
+  const persistedAmend = (enqueued[0]?.payload as { decision: DecisionPackage }).decision;
+
+  assert.deepEqual(persistedAmend.contentPins, current.contentPins);
+});
+
+test("migration re-pin appends a current digest without changing decision content", () => {
+  const enqueued: WriteOp[] = [];
+  const service = makeDecisionWriteService({
+    coordinator: fakeCoordinator(enqueued),
+    now: () => "2026-07-14T02:30:00.000Z"
+  });
+  const originallyPinned = decisionPackage({ state: "active" });
+  const stale = decisionPackage({
+    state: "active",
+    chosen: [...originallyPinned.chosen, { id: "CH2", text: "Historical post-pin amendment." }],
+    contentPins: [{
+      action: "accept",
+      state: "active",
+      decidedAt: "2026-07-11T00:00:00.000Z",
+      arbiter: { kind: "human", id: "ZeyuLi" },
+      canonicalization: "decision-content/v1",
+      digest: computeDecisionContentDigest(originallyPinned)
+    }]
+  });
+
+  Effect.runSync(service.repinForMigration({ current: stale, opIdPrefix: "amend-after-pin" }));
+  const persisted = (enqueued[0]?.payload as { decision: DecisionPackage }).decision;
+
+  assert.deepEqual({ ...persisted, contentPins: stale.contentPins }, stale);
+  assert.equal(persisted.contentPins?.length, 2);
+  assert.deepEqual(persisted.contentPins?.at(-1), {
+    action: "amend",
+    state: "active",
+    decidedAt: "2026-07-14T02:30:00.000Z",
+    arbiter: { kind: "human", id: "ZeyuLi" },
+    canonicalization: "decision-content/v1",
+    digest: computeDecisionContentDigest(stale)
+  });
+});
+
+test("content re-pin rejects non-migration attribution", () => {
+  const service = makeRawDecisionWriteService({
+    coordinator: fakeCoordinator([]),
+    attribution: {
+      ...judgmentAttribution,
+      principalSource: { kind: "local-configured", authority: "harness.yaml", authoritySha256: "sha256:test" }
+    }
+  });
+  const current = decisionPackage({
+    state: "active",
+    contentPins: [{
+      action: "accept",
+      state: "active",
+      decidedAt: "2026-07-11T00:00:00.000Z",
+      arbiter: { kind: "human", id: "ZeyuLi" },
+      canonicalization: "decision-content/v1",
+      digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }]
+  });
+
+  const result = Effect.runSyncExit(service.repinForMigration({ current }));
+
+  assert.equal(result._tag, "Failure");
+  assert.match(failureReason(result.cause), /requires migration principalSource/u);
 });
 
 test("retire preserves the accept pin and appends a distinct retirement pin", () => {

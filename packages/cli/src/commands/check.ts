@@ -9,6 +9,7 @@ import { cliError, CliErrorCode } from "../cli/error-codes.ts";
 import { relativePath } from "../cli/path.ts";
 import type { CheckProfile, CliResult, CommandRegistryEntry } from "../cli/types.ts";
 import { buildResolvableEntityIndex } from "./check-entity-refs.ts";
+import { attachDecisionContentPinWarnings } from "./check-decision-content-pin-warnings.ts";
 import { profileIssue, type ProfileValidationIssue } from "./check-profile-types.ts";
 import { validateJournalActorAttribution } from "./actor-attribution-checker.ts";
 import { resolveLiveTaskSectionPolicies } from "./check-live-section-policy.ts";
@@ -132,7 +133,10 @@ function runCheckScripts(rootInput: HarnessLayoutInput): {
       continue;
     }
 
-    const report = recordValue(run.scriptedResult.report) ?? run.scriptedResult;
+    const scriptReport = recordValue(run.scriptedResult.report) ?? run.scriptedResult;
+    const report = script.entry.id === "vertical:software-coding:decision-conformance"
+      ? attachDecisionContentPinWarnings(rootInput, scriptReport, issues)
+      : scriptReport;
     reports.push({
       scriptId: script.entry.id,
       ok: run.scriptedResult.ok,

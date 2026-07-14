@@ -636,7 +636,8 @@
         "decision_amend"
       ],
       "cliActions": [
-        "decision-amend"
+        "decision-amend",
+        "decision-repin"
       ],
       "callsiteFiles": [
         "packages/application/src/decision-write-service.ts"
@@ -1222,6 +1223,10 @@
         },
         {
           "file": "packages/cli/src/commands/core/authored-git.ts",
+          "command": "git"
+        },
+        {
+          "file": "packages/cli/src/commands/core/decision-content-pin-verifier.ts",
           "command": "git"
         },
         {

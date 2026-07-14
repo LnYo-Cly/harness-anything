@@ -11,6 +11,7 @@ import type { CliResult, DecisionEvidenceRelationInput, ParsedCommand } from "..
 import { parseDecisionAmendPatches } from "./decision-amend.ts";
 import { parseClaimFulfillments } from "./decision-fulfillment.ts";
 import { readDecisionBody } from "./decision-body.ts";
+import { parseDecisionPinCommand } from "./decision-pin.ts";
 import { isDecisionTransitionOp, parseDecisionTransitionArgs } from "./decision-transition.ts";
 import { parseChoiceInputs, parseClaimInputs, parseRejectedInputs } from "./decision-propose-inputs.ts";
 import { parseDecisionRelationOp } from "./decision-relation.ts";
@@ -48,6 +49,8 @@ export function parseDecisionArgs(
       selector: args[2]!
     });
   }
+  const pinCommand = parseDecisionPinCommand(op, args, rootDir, json);
+  if (pinCommand) return pinCommand;
   if (op === "propose") return parseDecisionPropose(args, rootDir, json, jsonPayloadFor(input, "decision-propose"));
   if (op === "reckon" && args[2]) {
     const taskId = readOption(args, "--task");
@@ -84,7 +87,7 @@ export function parseDecisionArgs(
   }
   if (op === "relate" && args[2]) return parseDecisionRelate(args, rootDir, json);
   if (op === "relation") return parseDecisionRelationOp(args, rootDir, json);
-  return { ok: false, error: cliError(CliErrorCode.UnknownCommand, "Use decision list|show|propose|accept|reject|defer|supersede|amend|relate|reckon|relation|retire.") };
+  return { ok: false, error: cliError(CliErrorCode.UnknownCommand, "Use decision list|show|verify|repin|propose|accept|reject|defer|supersede|amend|relate|reckon|relation|retire.") };
 }
 
 function parseDecisionPropose(args: ReadonlyArray<string>, rootDir: string, json: boolean, payload?: JsonPayload): ParseResult {

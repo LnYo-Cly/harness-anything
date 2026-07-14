@@ -3,6 +3,7 @@ import {
   DecisionPackageSchema,
   computeDecisionContentDigest,
   decisionContentCanonicalization,
+  decisionContentDigestFields,
   decisionFieldContracts,
   decisionEntityId,
   evaluateEntityDisposition,
@@ -64,6 +65,12 @@ export interface DecisionAmendRequest {
   readonly opIdPrefix?: string;
 }
 
+export interface DecisionMigrationRepinRequest {
+  readonly current: DecisionPackage;
+  readonly body?: string;
+  readonly opIdPrefix?: string;
+}
+
 export interface DecisionRelateRequest {
   readonly current: DecisionPackage;
   readonly relation: EntityRelationRecord;
@@ -102,6 +109,7 @@ export interface DecisionWriteService {
   readonly defer: (request: DecisionTransitionRequest) => Effect.Effect<DecisionWriteResult, DecisionWriteRejected | WriteError>;
   readonly supersede: (request: DecisionTransitionRequest) => Effect.Effect<DecisionWriteResult, DecisionWriteRejected | WriteError>;
   readonly amend: (request: DecisionAmendRequest) => Effect.Effect<DecisionWriteResult, DecisionWriteRejected | WriteError>;
+  readonly repinForMigration: (request: DecisionMigrationRepinRequest) => Effect.Effect<DecisionWriteResult, DecisionWriteRejected | WriteError>;
   readonly relate: (request: DecisionRelateRequest) => Effect.Effect<DecisionWriteResult, DecisionWriteRejected | WriteError>;
   readonly retireRelation: (request: DecisionRelationRetireRequest) => Effect.Effect<DecisionWriteResult, DecisionWriteRejected | WriteError>;
   readonly replaceRelation: (request: DecisionRelationReplaceRequest) => Effect.Effect<DecisionWriteResult, DecisionWriteRejected | WriteError>;
@@ -133,7 +141,18 @@ export function makeDecisionWriteService(options: DecisionWriteServiceOptions): 
     amend: (request) => {
       const rejectedChange = firstNonAmendableDecisionChange(request.current, request.next);
       if (rejectedChange) return Effect.fail(rejection(request.current.decision_id, rejectedChange));
-      return writeDecision(options.coordinator, hashPayload, "decision_amend", request.next, request, request.current);
+      const next = appendLoadBearingAmendPin(options, request.current, request.next, timestamp());
+      if (!next.ok) return Effect.fail(rejection(request.current.decision_id, next.reason));
+      return writeDecision(options.coordinator, hashPayload, "decision_amend", next.decision, request, request.current);
+    },
+    repinForMigration: (request) => {
+      const next = appendMigrationRepin(options, request.current, timestamp());
+      if (!next.ok) return Effect.fail(rejection(request.current.decision_id, next.reason));
+      return writeDecision(options.coordinator, hashPayload, "decision_amend", next.decision, request, request.current, {
+        kind: "append_content_pin",
+        expectedWatermark: request.current._coordinatorWatermark ?? null,
+        pin: next.decision.contentPins!.at(-1)!
+      });
     },
     relate: (request) => {
       const next = {
@@ -192,6 +211,69 @@ function firstNonAmendableDecisionChange(current: DecisionPackage, next: Decisio
 
 function sameFieldValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function appendLoadBearingAmendPin(
+  options: DecisionWriteServiceOptions,
+  current: DecisionPackage,
+  next: DecisionPackage,
+  amendedAt: string
+): { readonly ok: true; readonly decision: DecisionPackage } | { readonly ok: false; readonly reason: string } {
+  const hasSignedContent = (current.contentPins?.length ?? 0) > 0;
+  const changesSignedContent = decisionContentDigestFields.some((field) => !sameFieldValue(current[field], next[field]));
+  if (!hasSignedContent || !changesSignedContent) return { ok: true, decision: next };
+  if (!options.attribution) return { ok: false, reason: "decision content pin amendment requires request attribution" };
+  return {
+    ok: true,
+    decision: {
+      ...next,
+      contentPins: [
+        ...(current.contentPins ?? []),
+        {
+          action: "amend",
+          state: next.state,
+          decidedAt: amendedAt,
+          arbiter: contentPinActor(options.attribution.actor),
+          canonicalization: decisionContentCanonicalization,
+          digest: computeDecisionContentDigest(next)
+        }
+      ]
+    }
+  };
+}
+
+function appendMigrationRepin(
+  options: DecisionWriteServiceOptions,
+  current: DecisionPackage,
+  repinnedAt: string
+): { readonly ok: true; readonly decision: DecisionPackage } | { readonly ok: false; readonly reason: string } {
+  if (options.attribution?.principalSource.kind !== "migration") {
+    return { ok: false, reason: "decision content re-pin requires migration principalSource attribution" };
+  }
+  const pin = current.contentPins?.at(-1);
+  if (!pin) return { ok: false, reason: "decision content re-pin requires an existing content pin" };
+  if (pin.canonicalization !== decisionContentCanonicalization) {
+    return { ok: false, reason: `decision content re-pin does not support ${pin.canonicalization}` };
+  }
+  const digest = computeDecisionContentDigest(current);
+  if (pin.digest === digest) return { ok: false, reason: "decision content pin already matches current content" };
+  return {
+    ok: true,
+    decision: {
+      ...current,
+      contentPins: [
+        ...(current.contentPins ?? []),
+        {
+          action: "amend",
+          state: current.state,
+          decidedAt: repinnedAt,
+          arbiter: contentPinActor(options.attribution.actor),
+          canonicalization: decisionContentCanonicalization,
+          digest
+        }
+      ]
+    }
+  };
 }
 
 function bindDecisionCreateProvenance(
@@ -354,7 +436,12 @@ function writeDecision(
 
 type DecisionDocumentWriteMode =
   | { readonly kind: "snapshot"; readonly expectedWatermark?: string | null; readonly appendBody?: string }
-  | { readonly kind: "append_relation"; readonly relation: EntityRelationRecord };
+  | { readonly kind: "append_relation"; readonly relation: EntityRelationRecord }
+  | {
+      readonly kind: "append_content_pin";
+      readonly expectedWatermark: string | null;
+      readonly pin: NonNullable<DecisionPackage["contentPins"]>[number];
+    };
 
 function validateDecisionWrite(decision: DecisionPackage, previous?: DecisionPackage): DecisionWriteRejected | null {
   if (decision.rejected.length === 0 || decision.rejected.some((entry) => entry.why_not.trim().length === 0)) {
