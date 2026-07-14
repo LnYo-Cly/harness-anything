@@ -113,24 +113,28 @@ export function OverviewView({
   const healthRows = [
     {
       label: t("views.overviewView.inv4Watermark"),
+      hint: t("views.overviewView.inv4WatermarkHint"),
       value: t("views.overviewView.projectionValue", { value: dateTime(project.watermarkAt) }),
       tone: "text-text-muted",
       ok: true,
     },
     {
       label: t("views.overviewView.inv6DanglingRelations"),
+      hint: t("views.overviewView.inv6DanglingRelationsHint"),
       value: t("views.overviewView.countItems", { count: danglingRelations.length }),
       tone: danglingRelations.length > 0 ? "text-danger" : "text-success",
       ok: danglingRelations.length === 0,
     },
     {
       label: t("views.overviewView.factLiveness"),
+      hint: t("views.overviewView.factLivenessHint"),
       value: t("views.overviewView.countItemsHaveExpired", { count: invalidatedFacts.length }),
       tone: invalidatedFacts.length > 0 ? "text-stale" : "text-success",
       ok: invalidatedFacts.length === 0,
     },
     {
       label: t("views.overviewView.projectionFreshness"),
+      hint: t("views.overviewView.projectionFreshnessHint"),
       value: t("views.overviewView.freshnessCounts", { stale: stale.length, unavailable: unavailable.length }),
       tone: stale.length + unavailable.length > 0 ? "text-stale" : "text-success",
       ok: stale.length + unavailable.length === 0,
@@ -235,7 +239,11 @@ export function OverviewView({
 
         <Card title={t("views.overviewView.whatWeathering")} bodyClassName="p-3">
           <div className="flex items-center gap-2">
-            <QuestionLabel>{t("views.overviewView.checkWatermarkFactLivenessMechanicalSignal")}</QuestionLabel>
+            <QuestionLabel>
+              <span title={t("views.overviewView.whatWeatheringHint")} aria-label={t("views.overviewView.whatWeatheringHint")}>
+                {t("views.overviewView.checkWatermarkFactLivenessMechanicalSignal")}
+              </span>
+            </QuestionLabel>
             <button
               onClick={onOpenDecisionPool}
               className="ml-auto rounded border border-border px-2 py-1 font-mono text-[11px] text-accent hover:bg-surface-raised"
@@ -244,11 +252,17 @@ export function OverviewView({
           </div>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             {healthRows.map((row) => (
-              <div key={row.label} className="rounded-md border border-border bg-surface-raised px-3 py-2">
+              <div
+                key={row.label}
+                className="rounded-md border border-border bg-surface-raised px-3 py-2"
+                title={row.hint}
+                aria-label={`${row.label}: ${row.hint}`}
+              >
                 <div className="flex items-center gap-1.5 font-mono text-[11px] text-text-faint">
                   {row.ok ? <CheckCircle weight="bold" className="text-success" /> : <WarningCircle weight="bold" className="text-stale" />}
                   {row.label}
                 </div>
+                <div className="mt-0.5 text-[11px] leading-snug text-text-faint">{row.hint}</div>
                 <div className={`mt-1 font-mono text-[13px] ${row.tone}`}>{row.value}</div>
               </div>
             ))}
