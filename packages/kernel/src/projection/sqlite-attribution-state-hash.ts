@@ -6,25 +6,20 @@ export function hashAttributionProjectionState(sql: SqlClient.SqlClient): Effect
   return Effect.gen(function* () {
     const tableRecords = yield* sql<{ readonly name: unknown }>`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`;
     const tableNames = tableRecords.map((record) => String(record.name));
-    const entities: Array<{
-      readonly table: string;
-      readonly rows: ReadonlyArray<{ readonly id: string; readonly attribution: string }>;
-    }> = [];
-    for (const table of tableNames) {
-      const quotedTable = quoteSqliteIdentifier(table);
-      const columns = yield* sql.unsafe<{ readonly name: unknown; readonly pk: unknown }>(`PRAGMA table_info(${quotedTable})`);
-      if (!columns.some((column) => String(column.name) === "attribution_json")) continue;
-      const primaryKey = columns.find((column) => Number(column.pk) > 0);
-      if (!primaryKey) throw new Error(`attributed projection table ${table} has no primary key`);
-      const idColumn = quoteSqliteIdentifier(String(primaryKey.name));
-      const records = yield* sql.unsafe<Record<string, unknown>>(
-        `SELECT ${idColumn} AS entity_id, attribution_json FROM ${quotedTable} ORDER BY ${idColumn}`
-      );
-      entities.push({
-        table,
-        rows: records.map((record) => ({ id: String(record.entity_id), attribution: String(record.attribution_json) }))
-      });
-    }
+    const entitySummaries = tableNames.includes("entity_attribution_summary")
+      ? (yield* sql<Record<string, unknown>>`
+          SELECT entity_kind, entity_id, originator_json, latest_actor_json, trail_count, completeness
+          FROM entity_attribution_summary
+          ORDER BY entity_kind, entity_id
+        `).map((record) => ({
+          entityKind: String(record.entity_kind),
+          entityId: String(record.entity_id),
+          originator: record.originator_json === null ? null : String(record.originator_json),
+          latestActor: record.latest_actor_json === null ? null : String(record.latest_actor_json),
+          trailCount: Number(record.trail_count),
+          completeness: String(record.completeness)
+        }))
+      : [];
     const events = tableNames.includes("attribution_events")
       ? (yield* sql<Record<string, unknown>>`
           SELECT event_id, op_id, subject_ref, operation, principal_person_id,
@@ -78,18 +73,11 @@ export function hashAttributionProjectionState(sql: SqlClient.SqlClient): Effect
         }))
       : [];
     return stablePayloadHash({
-      schema: "projection-attribution-state/v2",
-      entities,
+      schema: "projection-attribution-state/v3",
+      entitySummaries,
       legacyEvents: events,
       eventHeaders,
       eventMutations
     });
   });
-}
-
-function quoteSqliteIdentifier(identifier: string): string {
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(identifier)) {
-    throw new Error(`Invalid SQLite identifier: ${identifier}`);
-  }
-  return `"${identifier}"`;
 }

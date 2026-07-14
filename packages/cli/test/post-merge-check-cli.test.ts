@@ -368,6 +368,8 @@ function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = t
   } catch (error) {
     if (expectSuccess) throw error;
     const stdout = error && typeof error === "object" && "stdout" in error ? String(error.stdout) : "";
+    const stderr = error && typeof error === "object" && "stderr" in error ? String(error.stderr) : "";
+    assert.notEqual(stdout.trim(), "", `CLI produced no JSON output. stderr:\n${stderr}`);
     return unwrapCommandReceipt(JSON.parse(stdout) as Record<string, any>);
   }
 }

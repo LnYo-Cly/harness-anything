@@ -57,17 +57,43 @@ export interface ProjectionSourceSnapshot extends ProjectionSourceFingerprint {
   readonly attributionEvents: ReadonlyArray<UnionAttributionEvent>;
 }
 
+export interface ProjectionSourceCacheReuse {
+  readonly task?: boolean;
+  readonly declared?: boolean;
+  readonly attribution?: boolean;
+  readonly touchedTaskPaths?: ReadonlyArray<string>;
+  readonly validateReusedTaskDirectories?: boolean;
+  readonly validateReusedDeclaredDirectories?: boolean;
+}
+
 export function captureProjectionSourceFingerprint(
   rootInput: HarnessLayoutInput,
-  declaredSourceHints: ReadonlyArray<DeclaredEntitySourceHint> = []
+  declaredSourceHints: ReadonlyArray<DeclaredEntitySourceHint> = [],
+  validation: "stable" | "verify" = "stable",
+  touchedDeclaredPaths: ReadonlyArray<string> = [],
+  reuseUntouchedSourceCaches: ProjectionSourceCacheReuse = {}
 ): ProjectionSourceFingerprint {
-  const taskSource = readMarkdownSource(rootInput);
+  const taskSource = readMarkdownSource(
+    rootInput,
+    validation,
+    reuseUntouchedSourceCaches.task === true,
+    reuseUntouchedSourceCaches.touchedTaskPaths ?? [],
+    reuseUntouchedSourceCaches.validateReusedTaskDirectories !== false
+  );
   const declaredSources = projectionEntityDeclarations.map((declaration) => ({
     declaration,
     table: declaration.projection.table,
-    source: readDeclaredEntitySource(rootInput, declaration, declaredSourceHints)
+    source: readDeclaredEntitySource(
+      rootInput,
+      declaration,
+      declaredSourceHints,
+      validation,
+      touchedDeclaredPaths,
+      reuseUntouchedSourceCaches.declared === true,
+      reuseUntouchedSourceCaches.validateReusedDeclaredDirectories !== false
+    )
   }));
-  const attributionSource = readAttributionEventSource(rootInput);
+  const attributionSource = readAttributionEventSource(rootInput, validation, reuseUntouchedSourceCaches.attribution === true);
   const legacyPersonIds = [...readLegacyPersonIds(rootInput)].sort();
   const fingerprint = stablePayloadHash({
     schema: "projection-source-fingerprint/v2",

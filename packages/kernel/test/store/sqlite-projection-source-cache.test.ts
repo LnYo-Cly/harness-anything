@@ -1,21 +1,49 @@
 // harness-test-tier: integration
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import { localProjectionSourceFileSystem } from "../../src/local/local-layout-file-system.ts";
 import { captureProjectionSourceSnapshot } from "../../src/projection/projection-source-snapshot.ts";
 import { updateTaskProjectionIncrementally } from "../../src/projection/sqlite-task-incremental-projection.ts";
 import { readTaskProjection, rebuildTaskProjection } from "../../src/projection/sqlite-task-projection.ts";
 
-test("fresh processes reuse persisted task decision and attribution bodies", () => {
+test("fresh processes reuse projected attribution events without duplicating authored bodies", () => {
   withTempProjection((rootDir) => {
     seedHarness(rootDir);
     writeAttributionEvent(rootDir, "event-fresh-a", "task/task-a");
-    writeAttributionEvent(rootDir, "event-fresh-b", "task/task-b");
+    const reformattedEventPath = writeAttributionEvent(rootDir, "event-fresh-b", "task/task-b");
+    writeFileSync(reformattedEventPath, readFileSync(reformattedEventPath, "utf8").replace('{"schema"', '{ "schema"'));
+    stamp(reformattedEventPath);
     rebuildTaskProjection({ rootDir });
+
+    const db = new DatabaseSync(path.join(rootDir, ".harness/cache/projections.sqlite"), { readOnly: true });
+    try {
+      assert.deepEqual(db.prepare(`
+        SELECT owner_id, body IS NULL AS body_omitted
+        FROM projection_source_cache_files
+        WHERE cache_kind = 'attribution'
+        ORDER BY owner_id
+      `).all().map((row) => ({ ...row })), [
+        { owner_id: "event-fresh-a", body_omitted: 1 },
+        { owner_id: "event-fresh-b", body_omitted: 1 }
+      ]);
+      assert.deepEqual(db.prepare(`
+        SELECT owner_id, source_path
+        FROM projection_source_cache_files
+        WHERE cache_kind = 'task' AND source_kind = 'task-index'
+        ORDER BY owner_id
+      `).all().map((row) => ({ ...row })), [
+        { owner_id: "task-a", source_path: "harness/tasks/task-a/INDEX.md" },
+        { owner_id: "task-b", source_path: "harness/tasks/task-b/INDEX.md" },
+        { owner_id: "task-c", source_path: "harness/tasks/task-c/INDEX.md" }
+      ]);
+    } finally {
+      db.close();
+    }
 
     const result = runFreshProcess(rootDir, freshProjectionBodyCacheReaderScript);
 
@@ -177,6 +205,43 @@ test("single task changes never rewrite unchanged persisted source rows", () => 
     } finally {
       updated.close();
     }
+  });
+});
+
+test("single task verification never stats unrelated task source files", () => {
+  withTempProjection((rootDir) => {
+    for (let index = 0; index < 12; index += 1) {
+      writeIndex(rootDir, `task-${index}`, `Task ${index}`, "active");
+    }
+    rebuildTaskProjection({ rootDir });
+    const previousSourceFingerprint = captureProjectionSourceSnapshot(rootDir).fingerprint;
+    const touchedPath = writeIndex(rootDir, "task-1", "Task 1 changed", "done");
+    const tasksRoot = path.join(rootDir, "harness/tasks");
+    const touchedRoot = path.dirname(touchedPath);
+    const originalStatSignature = localProjectionSourceFileSystem.statSignature;
+    const unrelatedTaskSourceStats: string[] = [];
+    localProjectionSourceFileSystem.statSignature = (inputPath) => {
+      const resolved = path.resolve(inputPath);
+      if (resolved.startsWith(`${tasksRoot}${path.sep}`) &&
+          !resolved.startsWith(`${touchedRoot}${path.sep}`) &&
+          resolved !== touchedRoot) {
+        unrelatedTaskSourceStats.push(resolved);
+      }
+      return originalStatSignature(inputPath);
+    };
+    let result: ReturnType<typeof updateTaskProjectionIncrementally>;
+    try {
+      result = updateTaskProjectionIncrementally({
+        rootDir,
+        touchedPaths: [touchedPath],
+        previousSourceFingerprint
+      });
+    } finally {
+      localProjectionSourceFileSystem.statSignature = originalStatSignature;
+    }
+
+    assert.equal(result.mode, "incremental");
+    assert.deepEqual(unrelatedTaskSourceStats, []);
   });
 });
 

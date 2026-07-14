@@ -16,6 +16,7 @@ export interface AttributionEventSourceInput {
   readonly body: string;
   readonly statSignature: string;
   readonly contentSha256: string;
+  readonly eventId?: string;
 }
 
 interface AttributionEventSourceCacheEntry {
@@ -36,11 +37,12 @@ const attributionEventSourceCache = new Map<string, AttributionEventSourceCacheE
 const attributionEventSourceCacheLimit = 16;
 
 export function captureAttributionEventSourcePersistentCache(
-  rootInput: HarnessLayoutInput
+  rootInput: HarnessLayoutInput,
+  reuseCacheWithoutValidation = false
 ): AttributionEventSourcePersistentCache | null {
   const layout = resolveHarnessLayout(rootInput);
   const cached = attributionEventSourceCache.get(layout.attributionEventsRoot);
-  if (!cached || !stableAttributionSignatures(cached.signatures)) return null;
+  if (!cached || (!reuseCacheWithoutValidation && !stableAttributionSignatures(cached.signatures))) return null;
   return {
     schema: "attribution-event-source-cache/v1",
     layoutIdentity: layout.attributionEventsRoot,
@@ -83,11 +85,20 @@ export function readUnionAttributionEvents(rootInput: HarnessLayoutInput): Reado
   return readUnionAttributionEventsFromSource(readAttributionEventSource(rootInput));
 }
 
-export function readAttributionEventSource(rootInput: HarnessLayoutInput): AttributionEventSource {
-  return readAttributionEventSourceAttempt(rootInput, 0);
+export function readAttributionEventSource(
+  rootInput: HarnessLayoutInput,
+  validation: "stable" | "verify" = "stable",
+  reuseCacheWithoutValidation = false
+): AttributionEventSource {
+  return readAttributionEventSourceAttempt(rootInput, validation, reuseCacheWithoutValidation, 0);
 }
 
-function readAttributionEventSourceAttempt(rootInput: HarnessLayoutInput, attempt: number): AttributionEventSource {
+function readAttributionEventSourceAttempt(
+  rootInput: HarnessLayoutInput,
+  validation: "stable" | "verify",
+  reuseCacheWithoutValidation: boolean,
+  attempt: number
+): AttributionEventSource {
   const eventsRoot = resolveHarnessLayout(rootInput).attributionEventsRoot;
   if (!localLayoutFileSystem.exists(eventsRoot)) {
     const source = emptyAttributionEventSource();
@@ -98,7 +109,9 @@ function readAttributionEventSourceAttempt(rootInput: HarnessLayoutInput, attemp
     return source;
   }
   const cached = attributionEventSourceCache.get(eventsRoot);
-  if (cached && stableAttributionSignatures(cached.signatures)) {
+  if (cached && (reuseCacheWithoutValidation
+    ? attributionRootSignatureMatches(eventsRoot, cached.signatures)
+    : stableAttributionSignatures(cached.signatures, validation))) {
     attributionEventSourceCache.delete(eventsRoot);
     attributionEventSourceCache.set(eventsRoot, cached);
     return cached.source;
@@ -107,7 +120,7 @@ function readAttributionEventSourceAttempt(rootInput: HarnessLayoutInput, attemp
   try {
     directory = localProjectionSourceFileSystem.readStableDirents(eventsRoot);
   } catch {
-    return retryAttributionEventSource(rootInput, eventsRoot, attempt);
+    return retryAttributionEventSource(rootInput, eventsRoot, validation, reuseCacheWithoutValidation, attempt);
   }
   const previousByPath = new Map(cached?.source.inputs.map((input) => [input.relativePath, input]));
   const inputs: AttributionEventSourceInput[] = [];
@@ -116,7 +129,7 @@ function readAttributionEventSourceAttempt(rootInput: HarnessLayoutInput, attemp
     .sort((left, right) => left.name.localeCompare(right.name))) {
     const filePath = path.join(eventsRoot, entry.name);
     const signature = localProjectionSourceFileSystem.statSignature(filePath);
-    if (signature === null) return retryAttributionEventSource(rootInput, eventsRoot, attempt);
+    if (signature === null) return retryAttributionEventSource(rootInput, eventsRoot, validation, reuseCacheWithoutValidation, attempt);
     const previous = previousByPath.get(entry.name);
     if (previous?.statSignature === signature) {
       inputs.push(previous);
@@ -128,17 +141,20 @@ function readAttributionEventSourceAttempt(rootInput: HarnessLayoutInput, attemp
         relativePath: entry.name,
         body: stable.body,
         statSignature: stable.signature,
-        contentSha256: sha256Text(stable.body)
+        contentSha256: sha256Text(stable.body),
+        eventId: decodeUnionAttributionEventBody(stable.body).eventId
       });
     } catch {
-      return retryAttributionEventSource(rootInput, eventsRoot, attempt);
+      return retryAttributionEventSource(rootInput, eventsRoot, validation, reuseCacheWithoutValidation, attempt);
     }
   }
   const signatures = new Map<string, string | null>([
     [eventsRoot, directory.signature],
     ...inputs.map((input) => [path.join(eventsRoot, input.relativePath), input.statSignature] as const)
   ]);
-  if (!stableAttributionSignatures(signatures)) return retryAttributionEventSource(rootInput, eventsRoot, attempt);
+  if (!stableAttributionSignatures(signatures, validation)) {
+    return retryAttributionEventSource(rootInput, eventsRoot, validation, reuseCacheWithoutValidation, attempt);
+  }
   const source = {
     inputs,
     hash: stablePayloadHash({
@@ -148,6 +164,13 @@ function readAttributionEventSourceAttempt(rootInput: HarnessLayoutInput, attemp
   };
   rememberAttributionEventSourceCache(eventsRoot, { source, signatures });
   return source;
+}
+
+function attributionRootSignatureMatches(
+  eventsRoot: string,
+  signatures: ReadonlyMap<string, string | null>
+): boolean {
+  return localProjectionSourceFileSystem.statSignature(eventsRoot) === signatures.get(eventsRoot);
 }
 
 function rememberAttributionEventSourceCache(
@@ -163,8 +186,12 @@ function rememberAttributionEventSourceCache(
   }
 }
 
-function stableAttributionSignatures(signatures: ReadonlyMap<string, string | null>): boolean {
-  return attributionSignaturesMatch(signatures) && attributionSignaturesMatch(signatures);
+function stableAttributionSignatures(
+  signatures: ReadonlyMap<string, string | null>,
+  validation: "stable" | "verify" = "stable"
+): boolean {
+  return attributionSignaturesMatch(signatures) &&
+    (validation === "verify" || attributionSignaturesMatch(signatures));
 }
 
 function attributionSignaturesMatch(signatures: ReadonlyMap<string, string | null>): boolean {
@@ -177,11 +204,13 @@ function attributionSignaturesMatch(signatures: ReadonlyMap<string, string | nul
 function retryAttributionEventSource(
   rootInput: HarnessLayoutInput,
   eventsRoot: string,
+  validation: "stable" | "verify",
+  reuseCacheWithoutValidation: boolean,
   attempt: number
 ): AttributionEventSource {
   attributionEventSourceCache.delete(eventsRoot);
   if (attempt >= 2) throw new Error("attribution event source did not stabilize");
-  return readAttributionEventSourceAttempt(rootInput, attempt + 1);
+  return readAttributionEventSourceAttempt(rootInput, validation, reuseCacheWithoutValidation, attempt + 1);
 }
 
 function emptyAttributionEventSource(): AttributionEventSource {
@@ -192,11 +221,24 @@ function emptyAttributionEventSource(): AttributionEventSource {
 }
 
 function validPersistentAttributionSource(source: AttributionEventSource): boolean {
-  if (source.inputs.some((input) => sha256Text(input.body) !== input.contentSha256)) return false;
+  if (source.inputs.some((input) => !validPersistentAttributionInput(input))) return false;
   return source.hash === stablePayloadHash({
     schema: "attribution-event-source/v2",
     inputs: source.inputs.map(({ relativePath, contentSha256 }) => ({ relativePath, contentSha256 }))
   });
+}
+
+function validPersistentAttributionInput(input: AttributionEventSourceInput): boolean {
+  if (sha256Text(input.body) === input.contentSha256) return true;
+  // Persisted attribution bodies are reconstructed from the normalized event
+  // rows. Their authored byte hash can differ only by JSON whitespace/order;
+  // the protected attribution state hash authenticates the normalized event.
+  if (!input.eventId) return false;
+  try {
+    return decodeUnionAttributionEventBody(input.body).eventId === input.eventId;
+  } catch {
+    return false;
+  }
 }
 
 function validPersistentAttributionCache(persisted: AttributionEventSourcePersistentCache): boolean {

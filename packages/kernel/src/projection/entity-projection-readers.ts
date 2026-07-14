@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { resolveHarnessLayout, type HarnessLayoutOverrides } from "../layout/index.ts";
+import { attributionFromRecord, attributionSummarySelect } from "./sqlite-attribution-summary.ts";
 import { defaultTaskProjectionPath, readTaskProjection } from "./sqlite-task-projection.ts";
 import type { EntityAttributionProjection } from "./types.ts";
 
@@ -86,10 +87,14 @@ interface ProjectionReaderOptions {
   readonly layoutOverrides?: HarnessLayoutOverrides;
 }
 
+const sessionProjectionSelect = attributedEntitySelect("session_projection", "session", "session_id", "session_attribution");
+const executionProjectionSelect = attributedEntitySelect("execution_projection", "execution", "execution_id", "execution_attribution");
+const reviewProjectionSelect = attributedEntitySelect("review_projection", "review", "review_id", "review_attribution");
+
 export function querySessionProjection(options: ProjectionReaderOptions & { readonly sessionId: string }): SessionProjectionRow | undefined {
   const db = openFreshProjection(options);
   try {
-    const row = db.prepare("SELECT * FROM session_projection WHERE session_id = ?").get(options.sessionId) as Record<string, unknown> | undefined;
+    const row = db.prepare(`${sessionProjectionSelect} WHERE session_projection.session_id = ?`).get(options.sessionId) as Record<string, unknown> | undefined;
     return row ? toSession(row) : undefined;
   } finally {
     db.close();
@@ -99,7 +104,7 @@ export function querySessionProjection(options: ProjectionReaderOptions & { read
 export function queryExecutionProjection(options: ProjectionReaderOptions & { readonly executionId: string }): ExecutionProjectionRow | undefined {
   const db = openFreshProjection(options);
   try {
-    const row = db.prepare("SELECT * FROM execution_projection WHERE execution_id = ?").get(options.executionId) as Record<string, unknown> | undefined;
+    const row = db.prepare(`${executionProjectionSelect} WHERE execution_projection.execution_id = ?`).get(options.executionId) as Record<string, unknown> | undefined;
     return row ? toExecution(row) : undefined;
   } finally {
     db.close();
@@ -109,7 +114,7 @@ export function queryExecutionProjection(options: ProjectionReaderOptions & { re
 export function queryExecutionsByTask(options: ProjectionReaderOptions & { readonly taskId: string }): ReadonlyArray<ExecutionProjectionRow> {
   const db = openFreshProjection(options);
   try {
-    return (db.prepare("SELECT * FROM execution_projection WHERE task_ref = ? ORDER BY claimed_at, execution_id")
+    return (db.prepare(`${executionProjectionSelect} WHERE execution_projection.task_ref = ? ORDER BY execution_projection.claimed_at, execution_projection.execution_id`)
       .all(`task/${options.taskId}`) as Record<string, unknown>[]).map(toExecution);
   } finally {
     db.close();
@@ -119,7 +124,7 @@ export function queryExecutionsByTask(options: ProjectionReaderOptions & { reado
 export function queryExecutions(options: ProjectionReaderOptions): ReadonlyArray<ExecutionProjectionRow> {
   const db = openFreshProjection(options);
   try {
-    return (db.prepare("SELECT * FROM execution_projection ORDER BY claimed_at, execution_id")
+    return (db.prepare(`${executionProjectionSelect} ORDER BY execution_projection.claimed_at, execution_projection.execution_id`)
       .all() as Record<string, unknown>[]).map(toExecution);
   } finally {
     db.close();
@@ -129,7 +134,7 @@ export function queryExecutions(options: ProjectionReaderOptions): ReadonlyArray
 export function queryReviewProjection(options: ProjectionReaderOptions & { readonly reviewId: string }): ReviewProjectionRow | undefined {
   const db = openFreshProjection(options);
   try {
-    const row = db.prepare("SELECT * FROM review_projection WHERE review_id = ?").get(options.reviewId) as Record<string, unknown> | undefined;
+    const row = db.prepare(`${reviewProjectionSelect} WHERE review_projection.review_id = ?`).get(options.reviewId) as Record<string, unknown> | undefined;
     return row ? toReview(row) : undefined;
   } finally {
     db.close();
@@ -139,11 +144,11 @@ export function queryReviewProjection(options: ProjectionReaderOptions & { reado
 export function queryTaskExecutionTrace(options: ProjectionReaderOptions & { readonly taskId: string }): TaskExecutionTrace {
   const db = openFreshProjection(options);
   try {
-    const executions = (db.prepare("SELECT * FROM execution_projection WHERE task_ref = ? ORDER BY claimed_at, execution_id")
+    const executions = (db.prepare(`${executionProjectionSelect} WHERE execution_projection.task_ref = ? ORDER BY execution_projection.claimed_at, execution_projection.execution_id`)
       .all(`task/${options.taskId}`) as Record<string, unknown>[]).map(toExecution);
-    const sessions = new Map((db.prepare("SELECT * FROM session_projection ORDER BY session_id").all() as Record<string, unknown>[])
+    const sessions = new Map((db.prepare(`${sessionProjectionSelect} ORDER BY session_projection.session_id`).all() as Record<string, unknown>[])
       .map((row) => toSession(row)).map((row) => [row.sessionId, row]));
-    const reviews = (db.prepare("SELECT * FROM review_projection WHERE task_ref = ? ORDER BY reviewed_at, review_id")
+    const reviews = (db.prepare(`${reviewProjectionSelect} WHERE review_projection.task_ref = ? ORDER BY review_projection.reviewed_at, review_projection.review_id`)
       .all(`task/${options.taskId}`) as Record<string, unknown>[]).map(toReview);
     return {
       taskId: options.taskId,
@@ -169,9 +174,9 @@ export function auditTaskProvenance(options: ProjectionReaderOptions & { readonl
 } {
   const db = openFreshProjection(options);
   try {
-    const executions = (db.prepare("SELECT * FROM execution_projection WHERE task_ref = ? ORDER BY execution_id")
+    const executions = (db.prepare(`${executionProjectionSelect} WHERE execution_projection.task_ref = ? ORDER BY execution_projection.execution_id`)
       .all(`task/${options.taskId}`) as Record<string, unknown>[]).map(toExecution);
-    const reviews = (db.prepare("SELECT * FROM review_projection WHERE task_ref = ? ORDER BY review_id")
+    const reviews = (db.prepare(`${reviewProjectionSelect} WHERE review_projection.task_ref = ? ORDER BY review_projection.review_id`)
       .all(`task/${options.taskId}`) as Record<string, unknown>[]).map(toReview);
     const sessionIds = new Set((db.prepare("SELECT session_id FROM session_projection").all() as Array<{ readonly session_id: string }>)
       .map((row) => row.session_id));
@@ -243,11 +248,11 @@ export function querySessionExecutionTrace(options: ProjectionReaderOptions & { 
 } {
   const db = openFreshProjection(options);
   try {
-    const sessionRow = db.prepare("SELECT * FROM session_projection WHERE session_id = ?").get(options.sessionId) as Record<string, unknown> | undefined;
-    const executions = (db.prepare("SELECT * FROM execution_projection ORDER BY claimed_at, execution_id").all() as Record<string, unknown>[])
+    const sessionRow = db.prepare(`${sessionProjectionSelect} WHERE session_projection.session_id = ?`).get(options.sessionId) as Record<string, unknown> | undefined;
+    const executions = (db.prepare(`${executionProjectionSelect} ORDER BY execution_projection.claimed_at, execution_projection.execution_id`).all() as Record<string, unknown>[])
       .map(toExecution)
       .filter((execution) => execution.sessionBindings.some((binding) => entityId(binding.session_ref, "session/") === options.sessionId));
-    const reviews = (db.prepare("SELECT * FROM review_projection ORDER BY reviewed_at, review_id").all() as Record<string, unknown>[]).map(toReview);
+    const reviews = (db.prepare(`${reviewProjectionSelect} ORDER BY review_projection.reviewed_at, review_projection.review_id`).all() as Record<string, unknown>[]).map(toReview);
     const session = sessionRow ? toSession(sessionRow) : undefined;
     return {
       sessionId: options.sessionId,
@@ -285,7 +290,7 @@ function toSession(row: Record<string, unknown>): SessionProjectionRow {
     bodySha256: nullableString(row.body_sha256),
     bodyRef: parseJson(row.body_ref_json),
     snapshot: parseJson(row.snapshot_json),
-    attribution: parseAttribution(row.attribution_json)
+    attribution: attributionFromRecord(row)
   };
 }
 
@@ -304,7 +309,7 @@ function toExecution(row: Record<string, unknown>): ExecutionProjectionRow {
     sessionBindings: jsonArray(row.session_bindings_json).filter(isProjectionRecord),
     outputs: jsonArray(row.outputs_json),
     submission: parseJson(row.submission_json),
-    attribution: parseAttribution(row.attribution_json)
+    attribution: attributionFromRecord(row)
   };
 }
 
@@ -325,17 +330,12 @@ function toReview(row: Record<string, unknown>): ReviewProjectionRow {
     rationale: String(row.rationale),
     archiveWarningsAcknowledged: row.archive_warnings_acknowledged === 1,
     reviewedAt: String(row.reviewed_at),
-    attribution: parseAttribution(row.attribution_json)
+    attribution: attributionFromRecord(row)
   };
 }
 
 function parseJson(value: unknown): ProjectionJsonValue {
   return typeof value === "string" ? JSON.parse(value) as ProjectionJsonValue : null;
-}
-
-function parseAttribution(value: unknown): EntityAttributionProjection {
-  if (typeof value !== "string") throw new Error("entity projection row is missing attribution_json");
-  return JSON.parse(value) as EntityAttributionProjection;
 }
 
 function jsonArray(value: unknown): ReadonlyArray<ProjectionJsonValue> {
@@ -353,4 +353,10 @@ function entityId(value: unknown, prefix: string): string | undefined {
 
 function isProjectionRecord(value: ProjectionJsonValue): value is ProjectionJsonObject {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function attributedEntitySelect(table: string, entityKind: string, idColumn: string, alias: string): string {
+  return `SELECT ${table}.*, ${attributionSummarySelect(alias)} FROM ${table} `
+    + `LEFT JOIN entity_attribution_summary ${alias} `
+    + `ON ${alias}.entity_kind = '${entityKind}' AND ${alias}.entity_id = ${table}.${idColumn}`;
 }

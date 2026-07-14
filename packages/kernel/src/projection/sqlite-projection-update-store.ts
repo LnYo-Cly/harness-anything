@@ -15,12 +15,12 @@ import {
 } from "./sqlite-attribution-projection.ts";
 import type { AttributionProjectionDelta } from "./sqlite-attribution-projection.ts";
 import {
-  insertCoverageRow,
+  insertCoverageRows,
   insertDecisionRow,
-  insertFactAnchor,
+  insertFactAnchors,
   insertRelationProjectionWarning,
-  insertRelationEdge,
-  insertTaskFactRow,
+  insertRelationEdges,
+  insertTaskFactRows,
   insertTaskRow,
   queryableTaskFieldExtensions,
   runSqlite
@@ -36,6 +36,7 @@ export function updateProjectionDatabase(
     readonly upsertDecisionRows: ReadonlyArray<DecisionProjectionRow>;
     readonly meta: ProjectionMeta;
     readonly graphRows?: ProjectionGraphRows;
+    readonly preserveGraphFactRows?: boolean;
     readonly declaredDelta: DeclaredProjectionDelta;
     readonly attributionDelta?: AttributionProjectionDelta;
     readonly sourceCache?: ProjectionSourceCacheChange;
@@ -48,13 +49,17 @@ export function updateProjectionDatabase(
     yield* sql`BEGIN IMMEDIATE`;
     try {
       const reuseAttributionRowsHash = yield* canReuseAttributionRowsHash(sql, change);
+      const upsertTaskIds = new Set(change.upsertTaskRows.map((row) => row.taskId));
       for (const taskId of uniqueProjectionIds(change.deleteTaskIds)) {
+        if (upsertTaskIds.has(taskId)) continue;
         yield* sql`DELETE FROM task_projection WHERE task_id = ${taskId}`;
       }
       for (const row of change.upsertTaskRows) {
         yield* insertTaskRow(sql, row, projectedTaskFieldExtensions);
       }
+      const upsertDecisionIds = new Set(change.upsertDecisionRows.map((row) => row.decisionId));
       for (const decisionId of uniqueProjectionIds(change.deleteDecisionIds)) {
+        if (upsertDecisionIds.has(decisionId)) continue;
         yield* sql`DELETE FROM decision_projection WHERE decision_id = ${decisionId}`;
       }
       for (const row of change.upsertDecisionRows) {
@@ -63,17 +68,25 @@ export function updateProjectionDatabase(
       if (change.graphRows) {
         yield* sql`DELETE FROM relation_edges`;
         yield* sql`DELETE FROM relation_coverage`;
-        yield* sql`DELETE FROM task_fact_anchors`;
-        yield* sql`DELETE FROM task_fact_projection`;
-        yield* sql`DELETE FROM relation_projection_warnings`;
-        for (const edge of change.graphRows.relationEdges) yield* insertRelationEdge(sql, edge);
-        for (const row of change.graphRows.coverageRows) yield* insertCoverageRow(sql, row);
-        for (const row of change.graphRows.factAnchors) yield* insertFactAnchor(sql, row);
-        for (const row of change.graphRows.factRows) yield* insertTaskFactRow(sql, row);
-        for (const [index, row] of change.graphRows.warnings.entries()) yield* insertRelationProjectionWarning(sql, index, row);
+        yield* insertRelationEdges(sql, change.graphRows.relationEdges);
+        yield* insertCoverageRows(sql, change.graphRows.coverageRows);
+        if (!change.preserveGraphFactRows) {
+          yield* sql`DELETE FROM task_fact_anchors`;
+          yield* sql`DELETE FROM task_fact_projection`;
+          yield* sql`DELETE FROM relation_projection_warnings`;
+          yield* insertFactAnchors(sql, change.graphRows.factAnchors);
+          yield* insertTaskFactRows(sql, change.graphRows.factRows);
+          for (const [index, row] of change.graphRows.warnings.entries()) yield* insertRelationProjectionWarning(sql, index, row);
+        }
       }
       for (const table of change.declaredDelta.tables) {
-        yield* deleteDeclaredProjectionRows(sql, table.declaration, table.deletePrimaryKeys);
+        const primaryKey = table.declaration.projection.columns.find((column) => column.primaryKey)!;
+        const upsertIds = new Set(table.upsertRows.map((row) => String(row[primaryKey.name])));
+        yield* deleteDeclaredProjectionRows(
+          sql,
+          table.declaration,
+          table.deletePrimaryKeys.filter((id) => !upsertIds.has(id))
+        );
         yield* upsertDeclaredProjectionRows(sql, table.declaration, table.upsertRows);
       }
       yield* applyDeclaredSourceManifestDelta(sql, change.declaredDelta.manifest);
@@ -82,7 +95,7 @@ export function updateProjectionDatabase(
         const affectedSubjects = yield* applyAttributionProjectionDelta(sql, change.attributionDelta);
         yield* materializeEntityAttributionSubjects(sql, affectedSubjects);
         yield* materializeEntityAttributionTargets(sql, changedAttributionTargets(change));
-      } else {
+      } else if (!reuseAttributionRowsHash) {
         yield* materializeEntityAttributionTargets(sql, changedAttributionTargets(change));
       }
       yield* upsertMeta(sql, "sourceHash", change.meta.sourceHash);

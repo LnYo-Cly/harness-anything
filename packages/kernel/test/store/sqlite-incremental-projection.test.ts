@@ -142,6 +142,12 @@ test("single execution changes update a persisted source manifest without rebuil
         BEGIN SELECT RAISE(ABORT, 'untouched execution deleted'); END
       `);
       db.exec(`
+        CREATE TRIGGER preserve_changed_execution_identity
+        BEFORE DELETE ON execution_projection
+        WHEN OLD.execution_id = 'exe_00000000000000000000000001'
+        BEGIN SELECT RAISE(ABORT, 'changed execution should be updated in place'); END
+      `);
+      db.exec(`
         CREATE TRIGGER reject_unnecessary_task_upsert
         BEFORE INSERT ON task_projection
         WHEN NEW.task_id = '${taskId}'

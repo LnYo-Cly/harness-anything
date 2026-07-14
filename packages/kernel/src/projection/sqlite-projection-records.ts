@@ -1,9 +1,9 @@
 import type {
   DecisionProjectionRow,
-  EntityAttributionProjection,
   TaskFieldExtensionProjection,
   TaskProjectionRow
 } from "./types.ts";
+import { attributionFromRecord } from "./sqlite-attribution-summary.ts";
 
 export interface TaskRecord {
   readonly [column: string]: unknown;
@@ -29,10 +29,10 @@ export interface TaskRecord {
   readonly module_key: string | null;
   readonly module_title: string | null;
   readonly has_lesson_candidates: number;
-  readonly attribution_json: string;
 }
 
 export interface DecisionRecord {
+  readonly [column: string]: unknown;
   readonly decision_id: string;
   readonly legacy_id: string | null;
   readonly state: string;
@@ -51,7 +51,6 @@ export interface DecisionRecord {
   readonly proposed_at: string | null;
   readonly provenance_json: string | null;
   readonly decided_at: string | null;
-  readonly attribution_json: string;
 }
 
 export function recordToTaskRow(
@@ -83,7 +82,7 @@ export function recordToTaskRow(
     ...(record.module_key ? { moduleKey: record.module_key } : {}),
     ...(record.module_title ? { moduleTitle: record.module_title } : {}),
     hasLessonCandidates: record.has_lesson_candidates === 1,
-    attribution: JSON.parse(record.attribution_json) as EntityAttributionProjection,
+    attribution: attributionFromRecord(record),
     ...(fieldExtensions ? { fieldExtensions } : {})
   };
 }
@@ -109,7 +108,7 @@ export function recordToDecisionRow(record: DecisionRecord): DecisionProjectionR
     ...(record.proposed_at ? { proposedAt: record.proposed_at } : {}),
     ...(record.provenance_json ? { provenance: JSON.parse(record.provenance_json) as NonNullable<DecisionProjectionRow["provenance"]> } : {}),
     ...(record.decided_at ? { decidedAt: record.decided_at } : {}),
-    attribution: JSON.parse(record.attribution_json) as EntityAttributionProjection
+    attribution: attributionFromRecord(record)
   };
 }
 

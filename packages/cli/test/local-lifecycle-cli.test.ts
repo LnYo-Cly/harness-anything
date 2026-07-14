@@ -511,7 +511,7 @@ test("CLI check reports corrupted projection without crashing or leaking root", 
     execFileSync(process.execPath, ["--input-type=module", "-e", [
       "import { DatabaseSync } from 'node:sqlite';",
       `const db = new DatabaseSync(${JSON.stringify(projectionPath)});`,
-      `db.prepare('UPDATE task_projection SET attribution_json = ? WHERE task_id = ?').run('{bad-json', ${JSON.stringify(taskId)});`,
+      `db.prepare("INSERT INTO entity_attribution_summary (entity_kind, entity_id, originator_json, latest_actor_json, trail_count, completeness) VALUES ('task', ?, NULL, ?, 1, 'complete') ON CONFLICT (entity_kind, entity_id) DO UPDATE SET latest_actor_json = excluded.latest_actor_json").run(${JSON.stringify(taskId)}, '{bad-json');`,
       "db.close();"
     ].join("\n")]);
 

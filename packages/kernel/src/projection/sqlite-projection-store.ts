@@ -4,9 +4,23 @@ import { SqlClient } from "@effect/sql";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import { hashAttributionProjectionState } from "./sqlite-attribution-state-hash.ts";
-import type { TaskFactProjectionRow } from "./fact-projection.ts";
-import type { FactAnchorRow, RelationCoverageRow, RelationGraphEdgeRow } from "./relation-graph-projection.ts";
-import { unresolvedEntityAttribution } from "./entity-attribution-projection.ts";
+import {
+  attributionSummarySelect,
+  ensureEntityAttributionSummaryTable
+} from "./sqlite-attribution-summary.ts";
+import {
+  createRelationGraphIndexes,
+  createRelationGraphTables,
+  insertCoverageRows,
+  insertFactAnchors,
+  insertRelationProjectionWarning,
+  insertRelationEdges,
+  insertTaskFactRows,
+  readRelationGraphReuseSeedFromStore,
+  readRelationGraphRowsFromStore,
+  type ProjectionGraphRows,
+  type RelationGraphReuseSeed
+} from "./sqlite-relation-graph-store.ts";
 import {
   recordToDecisionRow,
   recordToTaskRow,
@@ -17,13 +31,12 @@ import type {
   DecisionProjectionQueryFilters,
   DecisionProjectionRow,
   ProjectionMeta,
-  ProjectionWarning,
   TaskFieldExtensionProjection,
   TaskProjectionQueryFilters,
   TaskProjectionRow
 } from "./types.ts";
 
-export const projectionVersion = "entity-projection/d4-v13";
+export const projectionVersion = "entity-projection/d4-v15";
 const baseTaskProjectionColumns = [
   "task_id",
   "title",
@@ -46,17 +59,17 @@ const baseTaskProjectionColumns = [
   "profile",
   "module_key",
   "module_title",
-  "has_lesson_candidates",
-  "attribution_json"
+  "has_lesson_candidates"
 ] as const;
 
-export interface ProjectionGraphRows {
-  readonly relationEdges: ReadonlyArray<RelationGraphEdgeRow>;
-  readonly coverageRows: ReadonlyArray<RelationCoverageRow>;
-  readonly factAnchors: ReadonlyArray<FactAnchorRow>;
-  readonly factRows: ReadonlyArray<TaskFactProjectionRow>;
-  readonly warnings: ReadonlyArray<ProjectionWarning>;
-}
+export type { ProjectionGraphRows } from "./sqlite-relation-graph-store.ts";
+export {
+  insertCoverageRows,
+  insertFactAnchors,
+  insertRelationEdges,
+  insertRelationProjectionWarning,
+  insertTaskFactRows
+} from "./sqlite-relation-graph-store.ts";
 
 export function writeProjectionDatabase(
   projectionPath: string,
@@ -96,8 +109,7 @@ export function writeProjectionDatabase(
         profile TEXT,
         module_key TEXT,
         module_title TEXT,
-        has_lesson_candidates INTEGER NOT NULL,
-        attribution_json TEXT NOT NULL
+        has_lesson_candidates INTEGER NOT NULL
       )
     `;
     const projectedTaskFieldExtensions = queryableTaskFieldExtensions(taskFieldExtensions);
@@ -124,53 +136,11 @@ export function writeProjectionDatabase(
         decision_class TEXT,
         proposed_at TEXT,
         provenance_json TEXT,
-        decided_at TEXT,
-        attribution_json TEXT NOT NULL
+        decided_at TEXT
       )
     `;
-    yield* sql`
-      CREATE TABLE relation_edges (
-        relation_id TEXT PRIMARY KEY,
-        source_ref TEXT NOT NULL,
-        target_ref TEXT NOT NULL,
-        relation_type TEXT NOT NULL,
-        direction TEXT NOT NULL,
-        state TEXT NOT NULL,
-        row_json TEXT NOT NULL
-      )
-    `;
-    yield* sql`
-      CREATE TABLE relation_coverage (
-        claim_ref TEXT PRIMARY KEY,
-        decision_ref TEXT NOT NULL,
-        status TEXT NOT NULL,
-        covering_fact_ref TEXT,
-        row_json TEXT NOT NULL
-      )
-    `;
-    yield* sql`
-      CREATE TABLE task_fact_anchors (
-        fact_ref TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        fact_id TEXT NOT NULL,
-        source_path TEXT NOT NULL,
-        row_json TEXT NOT NULL
-      )
-    `;
-    yield* sql`
-      CREATE TABLE task_fact_projection (
-        fact_ref TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL,
-        fact_id TEXT NOT NULL,
-        row_json TEXT NOT NULL
-      )
-    `;
-    yield* sql`
-      CREATE TABLE relation_projection_warnings (
-        warning_index INTEGER PRIMARY KEY,
-        row_json TEXT NOT NULL
-      )
-    `;
+    yield* createRelationGraphTables(sql);
+    yield* ensureEntityAttributionSummaryTable(sql);
     yield* insertMeta(sql, "version", projectionVersion);
     yield* insertMeta(sql, "sourceHash", meta.sourceHash);
     yield* insertMeta(sql, "rowsHash", meta.rowsHash);
@@ -182,23 +152,19 @@ export function writeProjectionDatabase(
     yield* insertMeta(sql, "taskSourceHash", meta.taskSourceHash ?? "");
     yield* insertMeta(sql, "sourceCacheHash", meta.sourceCacheHash ?? "");
     yield* insertMeta(sql, "legacyPersonIdsHash", meta.legacyPersonIdsHash ?? "");
-    for (const row of rows) yield* insertTaskRow(sql, row, projectedTaskFieldExtensions);
+    for (const batch of chunks(rows, 500)) yield* insertTaskRows(sql, batch, projectedTaskFieldExtensions);
     for (const row of decisionRows) yield* insertDecisionRow(sql, row);
-    for (const edge of graphRows.relationEdges) yield* insertRelationEdge(sql, edge);
-    for (const row of graphRows.coverageRows) yield* insertCoverageRow(sql, row);
-    for (const row of graphRows.factAnchors) yield* insertFactAnchor(sql, row);
-    for (const row of graphRows.factRows) yield* insertTaskFactRow(sql, row);
+    yield* insertRelationEdges(sql, graphRows.relationEdges);
+    yield* insertCoverageRows(sql, graphRows.coverageRows);
+    yield* insertFactAnchors(sql, graphRows.factAnchors);
+    yield* insertTaskFactRows(sql, graphRows.factRows);
     for (const [index, row] of graphRows.warnings.entries()) yield* insertRelationProjectionWarning(sql, index, row);
     yield* sql`CREATE INDEX task_projection_status ON task_projection (canonical_status, coordination_status)`;
     yield* sql`CREATE INDEX task_projection_parent_task_id ON task_projection (parent_task_id)`;
     yield* sql`CREATE INDEX task_projection_module_key ON task_projection (module_key)`;
     yield* sql`CREATE INDEX decision_projection_legacy_number ON decision_projection (legacy_number)`;
     yield* sql`CREATE INDEX decision_projection_state ON decision_projection (state)`;
-    yield* sql`CREATE INDEX relation_edges_source_ref ON relation_edges (source_ref)`;
-    yield* sql`CREATE INDEX relation_edges_target_ref ON relation_edges (target_ref)`;
-    yield* sql`CREATE INDEX relation_coverage_decision_ref ON relation_coverage (decision_ref)`;
-    yield* sql`CREATE INDEX task_fact_anchors_task_id ON task_fact_anchors (task_id)`;
-    yield* sql`CREATE INDEX task_fact_projection_task_id ON task_fact_projection (task_id)`;
+    yield* createRelationGraphIndexes(sql);
     if (materializeSupplemental) yield* materializeSupplemental(sql);
     const attributionRowsHash = yield* hashAttributionProjectionState(sql);
     yield* sql`UPDATE projection_meta SET value = ${attributionRowsHash} WHERE key = 'attributionRowsHash'`;
@@ -246,7 +212,13 @@ export function queryTaskProjectionRows(
   return runSqlite(projectionPath, Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const where = taskWhereClause(filters);
-    const records = yield* sql.unsafe<TaskRecord>(`SELECT * FROM task_projection ${where.sql} ORDER BY task_id`, where.params);
+    const records = yield* sql.unsafe<TaskRecord>(`
+      SELECT task_projection.*, ${attributionSummarySelect("task_attribution")}
+      FROM task_projection
+      ${attributionJoin("task", "task_projection.task_id", "task_attribution")}
+      ${where.sql}
+      ORDER BY task_projection.task_id
+    `, where.params);
     return records.map((record) => recordToTaskRow(record, taskFieldExtensions));
   }));
 }
@@ -255,7 +227,13 @@ export function queryDecisionProjectionRows(projectionPath: string, filters: Dec
   return runSqlite(projectionPath, Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const where = decisionWhereClause(filters);
-    const records = yield* sql.unsafe<DecisionRecord>(`SELECT * FROM decision_projection ${where.sql} ORDER BY COALESCE(legacy_number, 1000000000), decision_id`, where.params);
+    const records = yield* sql.unsafe<DecisionRecord>(`
+      SELECT decision_projection.*, ${attributionSummarySelect("decision_attribution")}
+      FROM decision_projection
+      ${attributionJoin("decision", "decision_projection.decision_id", "decision_attribution")}
+      ${where.sql}
+      ORDER BY COALESCE(decision_projection.legacy_number, 1000000000), decision_projection.decision_id
+    `, where.params);
     return records.map(recordToDecisionRow);
   }));
 }
@@ -263,7 +241,13 @@ export function queryDecisionProjectionRows(projectionPath: string, filters: Dec
 export function queryTaskChildrenRows(projectionPath: string, parentTaskId: string): ReadonlyArray<TaskProjectionRow> {
   return runSqlite(projectionPath, Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const records = yield* sql.unsafe<TaskRecord>("SELECT * FROM task_projection WHERE parent_task_id = ? ORDER BY task_id", [parentTaskId]);
+    const records = yield* sql.unsafe<TaskRecord>(`
+      SELECT task_projection.*, ${attributionSummarySelect("task_attribution")}
+      FROM task_projection
+      ${attributionJoin("task", "task_projection.task_id", "task_attribution")}
+      WHERE task_projection.parent_task_id = ?
+      ORDER BY task_projection.task_id
+    `, [parentTaskId]);
     return records.map((record) => recordToTaskRow(record));
   }));
 }
@@ -279,9 +263,10 @@ export function queryTaskSubtreeRows(projectionPath: string, rootTaskId: string)
         FROM task_projection child
         JOIN subtree parent ON child.parent_task_id = parent.task_id
       )
-      SELECT task_projection.*
+      SELECT task_projection.*, ${attributionSummarySelect("task_attribution")}
       FROM task_projection
       JOIN subtree ON task_projection.task_id = subtree.task_id
+      ${attributionJoin("task", "task_projection.task_id", "task_attribution")}
       ORDER BY task_projection.task_id
     `, [rootTaskId]);
     return records.map((record) => recordToTaskRow(record));
@@ -291,18 +276,14 @@ export function queryTaskSubtreeRows(projectionPath: string, rootTaskId: string)
 export function readRelationGraphRows(projectionPath: string): ProjectionGraphRows {
   return runSqlite(projectionPath, Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const edgeRecords = yield* sql`SELECT row_json FROM relation_edges ORDER BY source_ref, target_ref, relation_id`;
-    const coverageRecords = yield* sql`SELECT row_json FROM relation_coverage ORDER BY claim_ref`;
-    const factAnchorRecords = yield* sql`SELECT row_json FROM task_fact_anchors ORDER BY fact_ref`;
-    const factRecords = yield* sql`SELECT row_json FROM task_fact_projection ORDER BY fact_ref`;
-    const warningRecords = yield* sql`SELECT row_json FROM relation_projection_warnings ORDER BY warning_index`;
-    return {
-      relationEdges: edgeRecords.map((record) => JSON.parse(String(record.row_json)) as RelationGraphEdgeRow),
-      coverageRows: coverageRecords.map((record) => JSON.parse(String(record.row_json)) as RelationCoverageRow),
-      factAnchors: factAnchorRecords.map((record) => JSON.parse(String(record.row_json)) as FactAnchorRow),
-      factRows: factRecords.map((record) => JSON.parse(String(record.row_json)) as TaskFactProjectionRow),
-      warnings: warningRecords.map((record) => JSON.parse(String(record.row_json)) as ProjectionWarning)
-    };
+    return yield* readRelationGraphRowsFromStore(sql);
+  }));
+}
+
+export function readRelationGraphReuseSeed(projectionPath: string): RelationGraphReuseSeed {
+  return runSqlite(projectionPath, Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    return yield* readRelationGraphReuseSeedFromStore(sql);
   }));
 }
 
@@ -318,8 +299,18 @@ function readProjectionDatabase(
     const sql = yield* SqlClient.SqlClient;
     const metaRows = yield* sql`SELECT key, value FROM projection_meta`;
     const meta = new Map(metaRows.map((row) => [String(row.key), String(row.value)]));
-    const taskRecords = yield* sql.unsafe<TaskRecord>("SELECT * FROM task_projection ORDER BY task_id");
-    const decisionRecords = yield* sql.unsafe<DecisionRecord>("SELECT * FROM decision_projection ORDER BY COALESCE(legacy_number, 1000000000), decision_id");
+    const taskRecords = yield* sql.unsafe<TaskRecord>(`
+      SELECT task_projection.*, ${attributionSummarySelect("task_attribution")}
+      FROM task_projection
+      ${attributionJoin("task", "task_projection.task_id", "task_attribution")}
+      ORDER BY task_projection.task_id
+    `);
+    const decisionRecords = yield* sql.unsafe<DecisionRecord>(`
+      SELECT decision_projection.*, ${attributionSummarySelect("decision_attribution")}
+      FROM decision_projection
+      ${attributionJoin("decision", "decision_projection.decision_id", "decision_attribution")}
+      ORDER BY COALESCE(decision_projection.legacy_number, 1000000000), decision_projection.decision_id
+    `);
     return {
       meta: {
         version: meta.get("version"),
@@ -359,7 +350,38 @@ export function insertTaskRow(
 ): Effect.Effect<unknown, unknown> {
   const extensionColumns = taskFieldExtensions.map((extension) => extension.projection.column);
   const columns = [...baseTaskProjectionColumns, ...extensionColumns].map(quoteIdentifier);
-  const values = [
+  const values = taskRowValues(row, taskFieldExtensions);
+  const assignments = [...baseTaskProjectionColumns, ...extensionColumns]
+    .filter((column) => column !== "task_id")
+    .map((column) => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`);
+  return sql.unsafe(
+    `INSERT INTO task_projection (${columns.join(", ")}) VALUES (${values.map(() => "?").join(", ")}) ON CONFLICT (task_id) DO UPDATE SET ${assignments.join(", ")}`,
+    values
+  );
+}
+
+function insertTaskRows(
+  sql: SqlClient.SqlClient,
+  rows: ReadonlyArray<TaskProjectionRow>,
+  taskFieldExtensions: ReadonlyArray<TaskFieldExtensionProjection>
+): Effect.Effect<unknown, unknown> {
+  const extensionColumns = taskFieldExtensions.map((extension) => extension.projection.column);
+  const columns = [...baseTaskProjectionColumns, ...extensionColumns].map(quoteIdentifier);
+  const placeholders = `(${columns.map(() => "?").join(", ")})`;
+  const assignments = [...baseTaskProjectionColumns, ...extensionColumns]
+    .filter((column) => column !== "task_id")
+    .map((column) => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`);
+  return sql.unsafe(
+    `INSERT INTO task_projection (${columns.join(", ")}) VALUES ${rows.map(() => placeholders).join(", ")} ON CONFLICT (task_id) DO UPDATE SET ${assignments.join(", ")}`,
+    rows.flatMap((row) => taskRowValues(row, taskFieldExtensions))
+  );
+}
+
+function taskRowValues(
+  row: TaskProjectionRow,
+  taskFieldExtensions: ReadonlyArray<TaskFieldExtensionProjection>
+): ReadonlyArray<unknown> {
+  return [
     row.taskId,
     row.title,
     row.parentTaskId ?? null,
@@ -382,16 +404,8 @@ export function insertTaskRow(
     row.moduleKey ?? null,
     row.moduleTitle ?? null,
     row.hasLessonCandidates === true ? 1 : 0,
-    JSON.stringify(row.attribution ?? unresolvedEntityAttribution()),
     ...taskFieldExtensions.map((extension) => row.fieldExtensions?.[extension.field] ?? extension.default)
   ];
-  const assignments = [...baseTaskProjectionColumns, ...extensionColumns]
-    .filter((column) => column !== "task_id" && column !== "attribution_json")
-    .map((column) => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`);
-  return sql.unsafe(
-    `INSERT INTO task_projection (${columns.join(", ")}) VALUES (${values.map(() => "?").join(", ")}) ON CONFLICT (task_id) DO UPDATE SET ${assignments.join(", ")}`,
-    values
-  );
 }
 
 export function insertDecisionRow(sql: SqlClient.SqlClient, row: DecisionProjectionRow): Effect.Effect<unknown, unknown> {
@@ -399,14 +413,13 @@ export function insertDecisionRow(sql: SqlClient.SqlClient, row: DecisionProject
     INSERT INTO decision_projection (
       decision_id, legacy_id, legacy_number, state, title, question, chosen_json,
       rejected_json, path, module_keys_json, product_line_keys_json, risk_tier, urgency,
-      vertical, preset, decision_class, proposed_at, provenance_json, decided_at, attribution_json
+      vertical, preset, decision_class, proposed_at, provenance_json, decided_at
     ) VALUES (
       ${row.decisionId}, ${row.legacyId ?? null}, ${row.legacyId ? legacyNumberFromLabel(row.legacyId) ?? null : null},
       ${row.state}, ${row.title}, ${row.question}, ${JSON.stringify(row.chosen)}, ${JSON.stringify(row.rejected)},
       ${row.path}, ${JSON.stringify(row.moduleKeys)}, ${JSON.stringify(row.productLineKeys)}, ${row.riskTier ?? null}, ${row.urgency ?? null},
       ${row.vertical ?? null}, ${row.preset ?? null}, ${row.decisionClass ?? null}, ${row.proposedAt ?? null},
-      ${row.provenance ? JSON.stringify(row.provenance) : null}, ${row.decidedAt ?? null},
-      ${JSON.stringify(row.attribution ?? unresolvedEntityAttribution())}
+      ${row.provenance ? JSON.stringify(row.provenance) : null}, ${row.decidedAt ?? null}
     ) ON CONFLICT (decision_id) DO UPDATE SET
       legacy_id = excluded.legacy_id,
       legacy_number = excluded.legacy_number,
@@ -433,45 +446,6 @@ export function readAttributionProjectionStateHash(projectionPath: string): stri
   return runSqlite(projectionPath, Effect.flatMap(SqlClient.SqlClient, hashAttributionProjectionState));
 }
 
-export function insertRelationEdge(sql: SqlClient.SqlClient, edge: RelationGraphEdgeRow): Effect.Effect<unknown, unknown> {
-  return sql`
-    INSERT OR REPLACE INTO relation_edges (relation_id, source_ref, target_ref, relation_type, direction, state, row_json)
-    VALUES (${edge.relationId}, ${edge.sourceRef}, ${edge.targetRef}, ${edge.relationType}, ${edge.direction}, ${edge.state}, ${JSON.stringify(edge)})
-  `;
-}
-
-export function insertCoverageRow(sql: SqlClient.SqlClient, row: RelationCoverageRow): Effect.Effect<unknown, unknown> {
-  return sql`
-    INSERT OR REPLACE INTO relation_coverage (claim_ref, decision_ref, status, covering_fact_ref, row_json)
-    VALUES (${row.claimRef}, ${row.decisionRef}, ${row.status}, ${row.coveringFactRef ?? null}, ${JSON.stringify(row)})
-  `;
-}
-
-export function insertFactAnchor(sql: SqlClient.SqlClient, row: FactAnchorRow): Effect.Effect<unknown, unknown> {
-  return sql`
-    INSERT OR REPLACE INTO task_fact_anchors (fact_ref, task_id, fact_id, source_path, row_json)
-    VALUES (${row.factRef}, ${row.taskId}, ${row.factId}, ${row.sourcePath}, ${JSON.stringify(row)})
-  `;
-}
-
-export function insertTaskFactRow(sql: SqlClient.SqlClient, row: TaskFactProjectionRow): Effect.Effect<unknown, unknown> {
-  return sql`
-    INSERT OR REPLACE INTO task_fact_projection (fact_ref, task_id, fact_id, row_json)
-    VALUES (${row.ref}, ${row.taskId}, ${row.factId}, ${JSON.stringify(row)})
-  `;
-}
-
-export function insertRelationProjectionWarning(
-  sql: SqlClient.SqlClient,
-  index: number,
-  row: ProjectionWarning
-): Effect.Effect<unknown, unknown> {
-  return sql`
-    INSERT OR REPLACE INTO relation_projection_warnings (warning_index, row_json)
-    VALUES (${index}, ${JSON.stringify(row)})
-  `;
-}
-
 function taskWhereClause(filters: TaskProjectionQueryFilters): { readonly sql: string; readonly params: ReadonlyArray<unknown> } {
   const clauses: string[] = [];
   const params: unknown[] = [];
@@ -488,8 +462,8 @@ function taskWhereClause(filters: TaskProjectionQueryFilters): { readonly sql: s
   if (filters.missingMaterials) clauses.push("closeout_readiness = 'missing'");
   if (filters.search) {
     const needle = `%${filters.search.toLocaleLowerCase()}%`;
-    clauses.push("(lower(task_id) LIKE ? OR lower(title) LIKE ? OR lower(source_path) LIKE ? OR lower(COALESCE(preset, '')) LIKE ? OR lower(COALESCE(module_key, '')) LIKE ? OR lower(COALESCE(module_title, '')) LIKE ? OR lower(COALESCE(attribution_json, '')) LIKE ?)");
-    params.push(needle, needle, needle, needle, needle, needle, needle);
+    clauses.push("(lower(task_id) LIKE ? OR lower(title) LIKE ? OR lower(source_path) LIKE ? OR lower(COALESCE(preset, '')) LIKE ? OR lower(COALESCE(module_key, '')) LIKE ? OR lower(COALESCE(module_title, '')) LIKE ? OR lower(COALESCE(task_attribution.originator_json, '')) LIKE ? OR lower(COALESCE(task_attribution.latest_actor_json, '')) LIKE ?)");
+    params.push(needle, needle, needle, needle, needle, needle, needle, needle);
   }
   for (const extensionFilter of filters.fieldExtensions ?? []) {
     addClause(clauses, params, `${quoteIdentifier(extensionFilter.column)} = ?`, extensionFilter.value);
@@ -562,6 +536,16 @@ function legacyNumberFromLabel(value: string): number | undefined {
   if (!match) return undefined;
   const parsed = Number(match[1]);
   return Number.isInteger(parsed) ? parsed : undefined;
+}
+
+function attributionJoin(entityKind: string, entityIdExpression: string, alias: string): string {
+  return `LEFT JOIN entity_attribution_summary ${alias} ON ${alias}.entity_kind = '${entityKind}' AND ${alias}.entity_id = ${entityIdExpression}`;
+}
+
+function chunks<Value>(values: ReadonlyArray<Value>, size: number): ReadonlyArray<ReadonlyArray<Value>> {
+  const output: Value[][] = [];
+  for (let index = 0; index < values.length; index += size) output.push(values.slice(index, index + size));
+  return output;
 }
 
 export function queryableTaskFieldExtensions(
