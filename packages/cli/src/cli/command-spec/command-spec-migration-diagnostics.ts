@@ -116,6 +116,23 @@ export const migrationDiagnosticsCommandSpecs = defineCommandSpecs([
     }
   },
   {
+    "kind": "migrate-retired-attribution-fields",
+    "usage": "migrate retired-attribution-fields [--dry-run|--apply --confirm-plan <id> --evidence-ref <ref>] [--batch-size <n>] [--json]",
+    "options": [{"flag":"--dry-run","description":"Preview every key-only document transform without writing; this is the default."},{"flag":"--apply","description":"Apply only the first confirmed batch through the attributed coordinator."},{"flag":"--confirm-plan","description":"Confirm the exact current plan id returned by dry-run."},{"flag":"--evidence-ref","description":"Bind apply attribution to the approved migration report digest or durable reference."},{"flag":"--batch-size","description":"Limit one coordinated apply batch to 1-32 documents; default 25."},{"flag":"--json","description":"Emit command-receipt/v2 JSON."}],
+    "summary": "Surgically remove retired top-level attribution fields while preserving every other authored byte.",
+    "examples": ["harness-anything migrate retired-attribution-fields --dry-run --json", "harness-anything migrate retired-attribution-fields --apply --confirm-plan rafm_0123456789abcdef --evidence-ref task/task_01ABC/artifacts/report.md#sha256:..."],
+    "parse": parseMigrationArgs,
+    "run": runMigrationCommand,
+    "receiptContract": {
+      "data": ["migrationMode", "rows", "report"],
+      "paths": []
+    },
+    "eventPolicy": {
+      "conflictMarkerPreflight": true,
+      "runtimeEvent": "deferred"
+    }
+  },
+  {
     "kind": "migrate-provenance",
     "usage": "migrate provenance [--dry-run|--apply] [--json]",
     "options": [{"flag":"--dry-run","description":"Preview the operation without writing changes."},{"flag":"--apply","description":"Apply the operation instead of planning it."},{"flag":"--json","description":"Emit command-receipt/v2 JSON."}],

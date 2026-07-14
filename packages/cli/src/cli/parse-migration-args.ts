@@ -114,6 +114,32 @@ export function parseMigrationArgs(args: ReadonlyArray<string>, rootDir: string,
     };
   }
 
+  if (migrateArgs[0] === "migrate-retired-attribution-fields") {
+    if (migrateArgs.includes("--dry-run") && migrateArgs.includes("--apply")) {
+      return { ok: false, error: cliError(CliErrorCode.ConflictingMigrationMode, "Use only one of --dry-run or --apply.") };
+    }
+    const batchSize = Number(readOption(migrateArgs, "--batch-size") ?? 25);
+    const evidenceRef = readRequiredValueOption(migrateArgs, "--evidence-ref");
+    if (!evidenceRef.ok) return evidenceRef;
+    if (!Number.isSafeInteger(batchSize) || batchSize <= 0 || batchSize > 32) {
+      return { ok: false, error: cliError(CliErrorCode.ConflictingMigrationMode, "Use a positive --batch-size capped at 32 coordinator ops.") };
+    }
+    return {
+      ok: true,
+      value: {
+        rootDir,
+        json,
+        action: {
+          kind: "migrate-retired-attribution-fields",
+          mode: migrateArgs.includes("--apply") ? "apply" : "dry-run",
+          batchSize,
+          confirmPlan: readOption(migrateArgs, "--confirm-plan"),
+          evidenceRef: evidenceRef.value
+        }
+      }
+    };
+  }
+
   if (migrateArgs[0] === "migrate-provenance") {
     if (migrateArgs.includes("--dry-run") && migrateArgs.includes("--apply")) {
       return { ok: false, error: cliError(CliErrorCode.ConflictingMigrationMode, "Use only one of --dry-run or --apply.") };

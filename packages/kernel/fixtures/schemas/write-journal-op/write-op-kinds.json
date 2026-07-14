@@ -26,6 +26,7 @@
   "module_registry_write",
   "module_scaffold_write",
   "script_ingest",
+  "migration_retired_attribution_fields",
   "machine_artifact_write",
   "machine_artifact_append_jsonl"
 ]

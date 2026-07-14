@@ -55,6 +55,15 @@ export {
 export type { FactConfidence, FactMemoryClass, FactMemoryTag, FactMigrationTrace, FactRecord } from "./fact-record.ts";
 
 export {
+  cleanupRetiredAttributionFields,
+  countContentPinArbitersInDocument,
+  hasRetiredAttributionFields
+} from "./retired-attribution-field-cleanup.ts";
+export type {
+  RetiredAttributionDocumentKind
+} from "./retired-attribution-field-cleanup.ts";
+
+export {
   isRuntimeEventApprovalDecision,
   isRuntimeEventInterruptAction,
   isRuntimeEventKind,

@@ -28,6 +28,15 @@ export class CliActorAttributionError extends Error {
   }
 }
 
+export function migrationWriteAttribution(attribution: WriteAttribution, evidenceRef: string): WriteAttribution {
+  const normalizedEvidenceRef = evidenceRef.trim();
+  if (!normalizedEvidenceRef) throw new CliActorAttributionError("Migration writes require a non-empty evidence reference.");
+  return {
+    ...attribution,
+    principalSource: { kind: "migration", evidenceRef: normalizedEvidenceRef }
+  };
+}
+
 export function resolveLocalCliBootstrapAuthor(
   env: NodeJS.ProcessEnv = process.env,
   actorFlag?: string

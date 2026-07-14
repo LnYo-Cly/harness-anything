@@ -8,12 +8,14 @@ export type DecisionWriteOpKind = Extract<WriteOpKind, `decision_${string}`>;
 export type FactWriteOpKind = Extract<WriteOpKind, `fact_${string}`>;
 export type RelationWriteOpKind = Extract<WriteOpKind, `relation_${string}`>;
 export type ModuleWriteOpKind = Extract<WriteOpKind, `module_${string}`>;
+export type MigrationWriteOpKind = Extract<WriteOpKind, `migration_${string}`>;
 export type MachineArtifactWriteOpKind = Extract<WriteOpKind, `machine_artifact_${string}`>;
 export type TaskWriteOpKind = Exclude<WriteOpKind,
   | DecisionWriteOpKind
   | FactWriteOpKind
   | RelationWriteOpKind
   | ModuleWriteOpKind
+  | MigrationWriteOpKind
   | MachineArtifactWriteOpKind
 >;
 
@@ -47,6 +49,7 @@ type GeneratedWriteRoadWriteOpKind =
   | "module_registry_write"
   | "module_scaffold_write"
   | "script_ingest"
+  | "migration_retired_attribution_fields"
   | "machine_artifact_write"
   | "machine_artifact_append_jsonl";
 true satisfies [GeneratedWriteRoadWriteOpKind] extends [WriteOpKind]

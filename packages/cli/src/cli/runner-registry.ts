@@ -32,6 +32,7 @@ export interface CommandRunnerContext {
   readonly syncExportedSession: (result: ProvenanceSessionExportResult) => Effect.Effect<void, ProvenanceSessionExporterRejected>;
   readonly runtimeEventLedgerService: RuntimeEventLedgerService;
   readonly makeWriteCoordinator: (actor: OperationalActor) => WriteCoordinator;
+  readonly makeMigrationWriteCoordinator: (actor: OperationalActor, evidenceRef: string) => WriteCoordinator;
   readonly actorAttribution: () => CliActorAttribution;
   readonly taskHolderPrincipal: () => TaskHolderPrincipal;
   readonly decisionWriteService: DecisionWriteService;
@@ -113,6 +114,7 @@ export function runRegisteredCommand(
   makeProvenanceSessionExporter: () => ProvenanceSessionExporter,
   syncExportedSession: (result: ProvenanceSessionExportResult) => Effect.Effect<void, ProvenanceSessionExporterRejected>,
   makeWriteCoordinator: (actor: OperationalActor) => WriteCoordinator,
+  makeMigrationWriteCoordinator: (actor: OperationalActor, evidenceRef: string) => WriteCoordinator,
   actorAttribution: () => CliActorAttribution,
   taskHolderPrincipal: () => TaskHolderPrincipal,
   makeDecisionWriteService: () => DecisionWriteService,
@@ -167,6 +169,7 @@ export function runRegisteredCommand(
     },
     syncExportedSession,
     makeWriteCoordinator,
+    makeMigrationWriteCoordinator,
     actorAttribution,
     taskHolderPrincipal,
     get decisionWriteService() {

@@ -20,6 +20,7 @@ import { requiresConflictMarkerPreflight, runRegisteredCommand } from "../cli/ru
 import type { CliResult, ParsedCommand } from "../cli/types.ts";
 import { leaseEnforcementEnabled } from "../commands/settings.ts";
 import { CliActorAttributionError, type CliActorAttribution } from "./actor-attribution.ts";
+import { migrationWriteAttribution } from "./actor-attribution.ts";
 import { CliPrincipalResolutionError, resolveCliTaskHolderPrincipal, resolveLocalCliActorAttribution } from "./local-principal.ts";
 import {
   defaultCliAdapterProvider,
@@ -29,6 +30,7 @@ import {
 export interface ParsedCommandExecutionOptions {
   readonly provider?: CliCompositionAdapterProvider;
   readonly makeWriteCoordinator?: (actor: OperationalActor) => WriteCoordinator;
+  readonly makeMigrationWriteCoordinator?: (actor: OperationalActor, evidenceRef: string) => WriteCoordinator;
   readonly makeOperationalWriteCoordinator?: (actor: OperationalActor) => WriteCoordinator;
   readonly actorAttribution?: CliActorAttribution;
   readonly missingActorAttributionMessage?: string;
@@ -112,6 +114,23 @@ export async function runRegisteredCommandWithCliComposition(
   const makeWriteCoordinator = requiresConflictMarkerPreflight(command.action)
     ? (actor: OperationalActor) => withConflictMarkerFlushRecheck(rawMakeWriteCoordinator(actor), layoutInput)
     : rawMakeWriteCoordinator;
+  const rawMakeMigrationWriteCoordinator = options.makeMigrationWriteCoordinator ?? ((actor: OperationalActor, evidenceRef: string) =>
+    makeAttributedWriteCoordinator(() => {
+      const resolved = getActorAttribution();
+      return provider.createWriteCoordinator({
+        rootDir: command.rootDir,
+        layoutOverrides: command.layoutOverrides,
+        attribution: migrationWriteAttribution(resolved.writeAttribution, evidenceRef),
+        commitAuthor: resolved.commitAuthor,
+        sessionId: getSessionBranchId()
+      });
+    }, getActorAttribution, options.missingActorAttributionMessage, actor));
+  const makeMigrationWriteCoordinator = requiresConflictMarkerPreflight(command.action)
+    ? (actor: OperationalActor, evidenceRef: string) => withConflictMarkerFlushRecheck(
+      rawMakeMigrationWriteCoordinator(actor, evidenceRef),
+      layoutInput
+    )
+    : rawMakeMigrationWriteCoordinator;
   const rawMakeSessionWriteCoordinator = options.makeWriteCoordinator ?? ((actor: OperationalActor) =>
     makeAttributedWriteCoordinator(() => provider.createWriteCoordinator({
       rootDir: command.rootDir,
@@ -161,7 +180,7 @@ export async function runRegisteredCommandWithCliComposition(
       provenanceSessionExporter: makeSessionExporter(),
       syncExportedSession
     }, boundAt)
-  }), enforceTaskLease(), makeTaskHolder, getTaskHolderPrincipal), makeArtifactStore, getCurrentSessionProbe, makeSessionExporter, syncExportedSession, makeWriteCoordinator, getActorAttribution, getTaskHolderPrincipal, () => makeDecisionWriteService({
+  }), enforceTaskLease(), makeTaskHolder, getTaskHolderPrincipal), makeArtifactStore, getCurrentSessionProbe, makeSessionExporter, syncExportedSession, makeWriteCoordinator, makeMigrationWriteCoordinator, getActorAttribution, getTaskHolderPrincipal, () => makeDecisionWriteService({
     rootInput: layoutInput,
     coordinator: makeWriteCoordinator(operationalActor("decision-cli")),
     attribution: getActorAttribution().writeAttribution,

@@ -6,7 +6,7 @@ import { cliError, CliErrorCode } from "../cli/error-codes.ts";
 import { toCommandReceipt, type CommandFailureReceipt, type CommandReceipt } from "../cli/receipt.ts";
 import type { ParsedCommand } from "../cli/types.ts";
 import { isPlainRecord } from "../cli/value-utils.ts";
-import { CliActorAttributionError, daemonActorAttribution } from "../composition/actor-attribution.ts";
+import { CliActorAttributionError, daemonActorAttribution, migrationWriteAttribution } from "../composition/actor-attribution.ts";
 import { runRegisteredCommandWithCliComposition } from "../composition/command-executor.ts";
 import { makeDaemonQueuedOperationalWriteCoordinator, makeDaemonQueuedWriteCoordinator, type CliDaemonRuntime } from "./queued-write-coordinator.ts";
 
@@ -42,6 +42,17 @@ export function createCliCommandService(runtime: CliDaemonRuntime, options: CliC
               `${parsedCommand.action.kind}:${actor.kind}:${actor.id}`,
               {
                 attribution: attribution.writeAttribution,
+                commitAuthor: attribution.commitAuthor,
+                ...(currentSession?.source === "runtime" ? { sessionId: currentSession.sessionId } : {})
+              }
+            )
+            : missingDaemonActorCoordinator(parsedCommand.action.kind, actor),
+          makeMigrationWriteCoordinator: (actor, evidenceRef) => attribution
+            ? makeDaemonQueuedWriteCoordinator(
+              runtime,
+              `${parsedCommand.action.kind}:${actor.kind}:${actor.id}:migration`,
+              {
+                attribution: migrationWriteAttribution(attribution.writeAttribution, evidenceRef),
                 commitAuthor: attribution.commitAuthor,
                 ...(currentSession?.source === "runtime" ? { sessionId: currentSession.sessionId } : {})
               }
