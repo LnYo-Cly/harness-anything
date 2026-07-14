@@ -3,7 +3,7 @@
   "package": {
     "id": "software-coding-core",
     "title": "Software Coding Core Templates",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "owner": "harness-anything",
     "locales": [
       "zh-CN",
@@ -58,6 +58,48 @@
           ],
           "bodyPath": "templates/task.code.impact.analysis/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Change Intent",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Affected Surfaces",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Dependency Paths",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Architecture Context",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Compatibility and Data",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Test and Verification Impact",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Risks and Unknowns",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Evidence",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -100,6 +142,38 @@
             "## Commit and Handoff"
           ],
           "bodyPath": "templates/task.worker.flow/en-US.md"
+        }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Dispatch Goal",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Scope Boundaries",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Inputs and Dependencies",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Acceptance Criteria",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Stop Conditions",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Commit and Handoff",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
         }
       ]
     },
@@ -156,6 +230,73 @@
           ],
           "bodyPath": "templates/task.milestone.plan/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Mission",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Usage Questions",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Wave Decomposition",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Exit Criteria",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Context",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## PR/merge",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## PR/merge 运维",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Constraints",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Checkpoint",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## CI/Gate Authority Stop Condition",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Implementation Plan",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Verification",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## PR/merge Operations",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -199,6 +340,48 @@
           ],
           "bodyPath": "templates/task.plan/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Brief",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Goal",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Context",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Constraints",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Checkpoint",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## CI/Gate Authority Stop Condition",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Implementation Plan",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Verification",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -230,6 +413,51 @@
           ],
           "bodyPath": "templates/task.progress/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Log",
+          "writeMode": "machine-written"
+        },
+        {
+          "anchor": "## Evidence",
+          "writeMode": "machine-written"
+        }
+      ]
+    },
+    {
+      "id": "planning/facts",
+      "version": "1",
+      "documentKind": "fact-records",
+      "slot": "task.facts",
+      "materializeAs": "facts.md",
+      "frontmatterSchema": "task-package/v2",
+      "requiredAnchors": [
+        "## Records"
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Records",
+          "writeMode": "free-prose",
+          "semanticClass": "entity-bearing"
+        }
+      ],
+      "fallbackLocale": "en-US",
+      "locales": [
+        {
+          "locale": "zh-CN",
+          "anchors": [
+            "## Records"
+          ],
+          "bodyPath": "templates/task.facts/zh-CN.md"
+        },
+        {
+          "locale": "en-US",
+          "anchors": [
+            "## Records"
+          ],
+          "bodyPath": "templates/task.facts/en-US.md"
+        }
       ]
     },
     {
@@ -260,6 +488,20 @@
             "## Findings"
           ],
           "bodyPath": "templates/task.review/en-US.md"
+        }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Reviewer",
+          "writeMode": "forbidden"
+        },
+        {
+          "anchor": "## D8 Stop Condition Checklist",
+          "writeMode": "machine-written"
+        },
+        {
+          "anchor": "## Findings",
+          "writeMode": "machine-written"
         }
       ]
     },
@@ -295,6 +537,23 @@
           ],
           "bodyPath": "templates/task.closeout/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Summary",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Verification",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Residual Risk",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -323,6 +582,13 @@
           ],
           "bodyPath": "templates/task.references.index/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Inputs",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -350,6 +616,13 @@
             "## Generated"
           ],
           "bodyPath": "templates/task.artifacts.index/en-US.md"
+        }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Generated",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
         }
       ]
     },
@@ -388,7 +661,8 @@
           ],
           "bodyPath": "templates/dossier.editorial.shell/en-US.md"
         }
-      ]
+      ],
+      "sectionPermissions": []
     },
     {
       "id": "gate-retro/analysis",
@@ -428,6 +702,78 @@
           ],
           "bodyPath": "templates/gate-retro.analysis/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## 事实基准规则",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 快照摘要",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## ADR-0022 D6 检查清单",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 缺陷模式归因",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 可复现证据台账",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 决策 / ADR 投影 Gate",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 结论",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Ground-Truth Rule",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Snapshot Summary",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## ADR-0022 D6 Checklist",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Defect Pattern Attribution",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Reproducible Evidence Ledger",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Decision / ADR Projection Gate",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Verdict",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -461,6 +807,23 @@
             "## Non-Goals"
           ],
           "bodyPath": "templates/task.brief/en-US.md"
+        }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Objective",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Scope",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Non-Goals",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
         }
       ]
     },
@@ -496,6 +859,23 @@
           ],
           "bodyPath": "templates/task.execution.strategy/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Strategy",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Checkpoints",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Verification",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -526,6 +906,18 @@
             "## Resolved"
           ],
           "bodyPath": "templates/task.findings/en-US.md"
+        }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Active",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Resolved",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
         }
       ]
     },
@@ -561,6 +953,23 @@
           ],
           "bodyPath": "templates/task.visual.map/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Flow",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Phase Table",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Ownership",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -583,7 +992,8 @@
           "anchors": [],
           "bodyPath": "templates/task.keep/en-US.md"
         }
-      ]
+      ],
+      "sectionPermissions": []
     },
     {
       "id": "planning/lesson-candidates",
@@ -610,6 +1020,13 @@
             "## Candidates"
           ],
           "bodyPath": "templates/task.lesson.candidates/en-US.md"
+        }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Candidates",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
         }
       ]
     },
@@ -645,6 +1062,23 @@
           ],
           "bodyPath": "templates/task.long.running.contract/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Goal Boundary",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Review Loop",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Stop Conditions",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -675,6 +1109,28 @@
             "## Steps"
           ],
           "bodyPath": "templates/module.plan/en-US.md"
+        }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## 模块",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 步骤",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Module",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Steps",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
         }
       ]
     },
@@ -707,6 +1163,28 @@
           ],
           "bodyPath": "templates/module.brief/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## 模块目标",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 接口",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Module Objective",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Interfaces",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -738,6 +1216,28 @@
           ],
           "bodyPath": "templates/module.session.prompt/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## 会话提示",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 必读上下文",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Session Prompt",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Required Context",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -760,7 +1260,8 @@
           "anchors": [],
           "bodyPath": "templates/repository.governance/en-US.md"
         }
-      ]
+      ],
+      "sectionPermissions": []
     },
     {
       "id": "repository/agent-entry",
@@ -787,6 +1288,33 @@
             "## Harness CLI"
           ],
           "bodyPath": "templates/repository.agent.entry/en-US.md"
+        }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Context loading",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Worktree discipline",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Harness CLI",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Relation edge rules",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Write discipline",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
         }
       ]
     },
@@ -828,6 +1356,33 @@
           ],
           "bodyPath": "templates/repository.agent.base/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Context loading",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Worktree discipline",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Kernel Workflow (triadic)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Relation edge rules",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## WriteCoordinator discipline",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -865,6 +1420,33 @@
           ],
           "bodyPath": "templates/repository.agent.overlay/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Harness CLI (software/coding)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Scaffold folders (see each folder README, do not duplicate here)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Architecture-aware code changes",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Governance routing (near-field hard gates)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## CI/Gate authority stop condition",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -887,7 +1469,8 @@
           "anchors": [],
           "bodyPath": "templates/repository.claude.entry/en-US.md"
         }
-      ]
+      ],
+      "sectionPermissions": []
     },
     {
       "id": "repository/adr-readme",
@@ -914,6 +1497,18 @@
             "## Usage"
           ],
           "bodyPath": "templates/repository.adr.readme/en-US.md"
+        }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## 用法",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Usage",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
         }
       ]
     },
@@ -952,6 +1547,48 @@
           ],
           "bodyPath": "templates/repository.adr.template/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## 状态",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 背景",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 决策",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 后果",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Status",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Context",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Decision",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Consequences",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -979,6 +1616,43 @@
             "## 用途"
           ],
           "bodyPath": "templates/repository.decisions.readme/en-US.md"
+        }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## 用途",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 怎么用",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 放什么 / 不放什么",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 相关命令",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 怎么用 (How to use)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 放什么 / 不放什么 (What goes here / what does not)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 相关命令 (Related commands)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
         }
       ]
     },
@@ -1008,6 +1682,43 @@
           ],
           "bodyPath": "templates/repository.milestones.readme/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## 用途",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 怎么用",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 放什么 / 不放什么",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 相关命令",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 怎么用 (How to use)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 放什么 / 不放什么 (What goes here / what does not)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 相关命令 (Related commands)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -1035,6 +1746,43 @@
             "## 用途"
           ],
           "bodyPath": "templates/repository.sessions.readme/en-US.md"
+        }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## 用途",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 怎么用",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 放什么 / 不放什么",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 相关命令",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 怎么用 (How to use)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 放什么 / 不放什么 (What goes here / what does not)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 相关命令 (Related commands)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
         }
       ]
     },
@@ -1064,6 +1812,43 @@
           ],
           "bodyPath": "templates/repository.standards.readme/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## 用途",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 怎么用",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 放什么 / 不放什么",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 相关命令",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 怎么用 (How to use)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 放什么 / 不放什么 (What goes here / what does not)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 相关命令 (Related commands)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -1091,6 +1876,43 @@
             "## 用途"
           ],
           "bodyPath": "templates/repository.context.readme/en-US.md"
+        }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## 用途",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 怎么用",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 放什么 / 不放什么",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 相关命令",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 怎么用 (How to use)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 放什么 / 不放什么 (What goes here / what does not)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 相关命令 (Related commands)",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
         }
       ]
     },
@@ -1138,6 +1960,58 @@
           ],
           "bodyPath": "templates/repository.architecture.readme/en-US.md"
         }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Purpose",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Activation",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Source of Truth",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## 更新机制",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Authoring Contract",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Views",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Agent Query Routing",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Validation",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Migration and Conflicts",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Update Model",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
       ]
     },
     {
@@ -1155,7 +2029,8 @@
           "anchors": [],
           "bodyPath": "templates/repository.architecture.manifest/en-US.md"
         }
-      ]
+      ],
+      "sectionPermissions": []
     },
     {
       "id": "repository/architecture-likec4-config",
@@ -1172,7 +2047,8 @@
           "anchors": [],
           "bodyPath": "templates/repository.architecture.likec4.config/en-US.md"
         }
-      ]
+      ],
+      "sectionPermissions": []
     },
     {
       "id": "repository/architecture-likec4-specification",
@@ -1189,7 +2065,8 @@
           "anchors": [],
           "bodyPath": "templates/repository.architecture.likec4.specification/en-US.md"
         }
-      ]
+      ],
+      "sectionPermissions": []
     },
     {
       "id": "repository/architecture-likec4-model",
@@ -1206,7 +2083,8 @@
           "anchors": [],
           "bodyPath": "templates/repository.architecture.likec4.model/en-US.md"
         }
-      ]
+      ],
+      "sectionPermissions": []
     },
     {
       "id": "repository/architecture-likec4-view-landscape",
@@ -1223,7 +2101,8 @@
           "anchors": [],
           "bodyPath": "templates/repository.architecture.likec4.view.landscape/en-US.md"
         }
-      ]
+      ],
+      "sectionPermissions": []
     },
     {
       "id": "repository/architecture-likec4-view-write-path",
@@ -1240,7 +2119,8 @@
           "anchors": [],
           "bodyPath": "templates/repository.architecture.likec4.view.write-path/en-US.md"
         }
-      ]
+      ],
+      "sectionPermissions": []
     },
     {
       "id": "repository/architecture-likec4-view-runtime",
@@ -1256,6 +2136,42 @@
           "locale": "en-US",
           "anchors": [],
           "bodyPath": "templates/repository.architecture.likec4.view.runtime/en-US.md"
+        }
+      ],
+      "sectionPermissions": []
+    },
+    {
+      "id": "entity/decision-body",
+      "version": "1",
+      "documentKind": "decision-body",
+      "slot": "decision.body",
+      "materializeAs": "decision.md",
+      "frontmatterSchema": "decision-package/v1",
+      "requiredAnchors": [
+        "## Rationale"
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Rationale",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        }
+      ],
+      "fallbackLocale": "en-US",
+      "locales": [
+        {
+          "locale": "zh-CN",
+          "anchors": [
+            "## Rationale"
+          ],
+          "bodyPath": "templates/decision.body/zh-CN.md"
+        },
+        {
+          "locale": "en-US",
+          "anchors": [
+            "## Rationale"
+          ],
+          "bodyPath": "templates/decision.body/en-US.md"
         }
       ]
     }

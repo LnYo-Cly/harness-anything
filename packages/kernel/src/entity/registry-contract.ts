@@ -63,9 +63,48 @@ export interface ReadyMutationContractFacet {
   readonly actions: ReadonlyArray<string>;
 }
 
+export type SectionWriteMode = "free-prose" | "machine-written" | "forbidden";
+export type SemanticRegionClass = "host-prose-only" | "entity-bearing";
+
+export interface SemanticDiffSectionPolicy {
+  readonly anchor: string;
+  readonly writeMode: SectionWriteMode;
+  readonly semanticClass?: SemanticRegionClass;
+}
+
+export interface SemanticDiffDocumentPolicy {
+  readonly path: string;
+  readonly sections: ReadonlyArray<SemanticDiffSectionPolicy>;
+}
+
+export interface SemanticDiffCandidateDocument {
+  readonly path: string;
+  readonly body: string | null;
+}
+
+export interface SemanticDiffCandidateTree {
+  readonly documents: ReadonlyArray<SemanticDiffCandidateDocument>;
+}
+
+export interface SemanticDiffCompileContext {
+  readonly documentPolicies: ReadonlyArray<SemanticDiffDocumentPolicy>;
+}
+
+export interface SemanticDiffMutationIntent {
+  readonly entityKind: string;
+  readonly identity: EntityIdentity;
+  readonly action: string;
+  readonly storageContext?: EntityStorageContext;
+  readonly additionalStorageContexts?: ReadonlyArray<EntityStorageContext>;
+}
+
 export interface ReadySemanticDiffFacet {
   readonly status: "ready";
-  readonly compile: (base: unknown, candidate: unknown) => ReadonlyArray<unknown>;
+  readonly compile: (
+    base: SemanticDiffCandidateTree,
+    candidate: SemanticDiffCandidateTree,
+    context: SemanticDiffCompileContext
+  ) => ReadonlyArray<SemanticDiffMutationIntent>;
 }
 
 export interface TypedOnlySemanticDiffFacet {

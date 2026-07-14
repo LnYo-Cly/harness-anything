@@ -12,6 +12,7 @@ import {
 import { canonicalEntityKinds, type CanonicalEntityKind } from "./canonical-kinds.ts";
 import { executionDeclaration } from "./execution-declaration.ts";
 import { reviewDeclaration } from "./review-declaration.ts";
+import { readyManagedSemanticDiff } from "./managed-semantic-diff.ts";
 import {
   readyIdentityProjectionFacets,
   readyStorageLocator,
@@ -24,6 +25,7 @@ export {
   compileRegistryMutationPlan,
   createWritableEntityRegistry
 } from "./registry-compiler.ts";
+export { assertManagedSemanticRegions, readyManagedSemanticDiff } from "./managed-semantic-diff.ts";
 export type {
   RegistryMutationPlanInput,
   StoragePlan
@@ -42,7 +44,15 @@ export type {
   EntityRegistration,
   EntityRootResolverDeclaration,
   EntityStorageForm,
-  HostedEntityDeclaration
+  HostedEntityDeclaration,
+  SectionWriteMode,
+  SemanticDiffCandidateDocument,
+  SemanticDiffCandidateTree,
+  SemanticDiffCompileContext,
+  SemanticDiffDocumentPolicy,
+  SemanticDiffMutationIntent,
+  SemanticDiffSectionPolicy,
+  SemanticRegionClass
 } from "./registry-contract.ts";
 export type KernelEntityKind = CanonicalEntityKind;
 export const entityRegistryVersion = 1 as const;
@@ -93,7 +103,7 @@ export const entityRegistry = {
       }
     }),
     mutationContract: { status: "ready", actions: ["propose", "state", "amend", "relation"] },
-    semanticDiff: typedOnlySemanticDiff("W3 enables typed commands only; managed decision semanticDiff remains owned by W5"),
+    semanticDiff: readyManagedSemanticDiff("decision"),
   },
   task: {
     kind: "task",
@@ -117,7 +127,9 @@ export const entityRegistry = {
     }),
     storageLocator: readyStorageLocator({
       locate: (identity, context) => {
-        const packagePath = `tasks/${identity.taskId}`;
+        const packagePath = context.packagePath
+          ? validateTaskPackagePath(context.packagePath, identity.taskId)
+          : `tasks/${identity.taskId}`;
         const documentPath = context.documentPath;
         return {
           targets: [{
@@ -130,7 +142,7 @@ export const entityRegistry = {
       }
     }),
     mutationContract: { status: "ready", actions: ["create", "transition", "append", "document"] },
-    semanticDiff: typedOnlySemanticDiff("W3 enables typed commands only; managed task semanticDiff remains owned by W5"),
+    semanticDiff: readyManagedSemanticDiff("task"),
   },
   fact: {
     kind: "fact",
@@ -151,8 +163,10 @@ export const entityRegistry = {
     storageForm: "schema",
     ...readyIdentityProjectionFacets("fact", ["taskId", "factId"]),
     storageLocator: readyStorageLocator({
-      locate: (identity) => {
-        const documentPath = `tasks/${identity.taskId}/facts.md`;
+      locate: (identity, context) => {
+        const documentPath = context.documentPath
+          ? validateHostedDocumentPath(context.documentPath, identity.taskId, "facts.md")
+          : `tasks/${identity.taskId}/facts.md`;
         return {
           targets: [{ kind: "document", path: documentPath, access: "exact" }],
           consistencyScope: `path:${documentPath}`
@@ -160,7 +174,7 @@ export const entityRegistry = {
       }
     }),
     mutationContract: { status: "ready", actions: ["create", "invalidate"] },
-    semanticDiff: typedOnlySemanticDiff("W2 enables typed commands only; facts-region semanticDiff remains owned by W5"),
+    semanticDiff: readyManagedSemanticDiff("fact"),
   },
   relation: {
     kind: "relation",
@@ -182,7 +196,7 @@ export const entityRegistry = {
     ...readyIdentityProjectionFacets("relation", ["relationId"]),
     storageLocator: readyStorageLocator({ locate: locateRelationStorage }),
     mutationContract: { status: "ready", actions: ["create", "retire"] },
-    semanticDiff: typedOnlySemanticDiff("W2 enables typed commands only; relation-bearing semanticDiff remains owned by W5"),
+    semanticDiff: readyManagedSemanticDiff("relation"),
   },
   module: {
     kind: "module",
@@ -214,7 +228,7 @@ export const entityRegistry = {
       })
     }),
     mutationContract: { status: "ready", actions: ["register", "unregister", "step"] },
-    semanticDiff: typedOnlySemanticDiff("W3 enables typed commands only; module registry semanticDiff remains owned by W5"),
+    semanticDiff: typedOnlySemanticDiff("modules.json has no markdown heading section registered by OQ-4/CH2; transparent writes remain read/draft-only"),
   },
   session: sessionEntityRegistration,
   execution: executionDeclaration,
@@ -249,6 +263,15 @@ function locateRelationStorage(
   _identity: Readonly<Record<string, string>>,
   context: Readonly<Record<string, string>>
 ): { readonly targets: ReadonlyArray<{ readonly kind: "document"; readonly path: string; readonly access: "exact" }>; readonly consistencyScope: string } {
+  if (context.documentPath) {
+    const factSource = /^fact\/([^/]+)\/[^/]+$/u.exec(context.sourceRef ?? "");
+    if (!factSource?.[1]) throw new Error("RELATION_DOCUMENT_HOST_SOURCE_REQUIRED");
+    const documentPath = validateHostedDocumentPath(context.documentPath, factSource[1], "facts.md");
+    return {
+      targets: [{ kind: "document", path: documentPath, access: "exact" }],
+      consistencyScope: `path:${documentPath}`
+    };
+  }
   const sourceRef = context.sourceRef;
   if (!sourceRef) throw new Error("RELATION_STORAGE_SOURCE_REQUIRED");
   const segments = sourceRef.split("/").map(decodeCanonicalSegment);
@@ -266,6 +289,24 @@ function locateRelationStorage(
     targets: [{ kind: "document", path: documentPath, access: "exact" }],
     consistencyScope: `path:${documentPath}`
   };
+}
+
+function validateTaskPackagePath(value: string, taskId: string | undefined): string {
+  const normalized = validateRegistryDocumentPath(value);
+  const match = /^tasks\/([^/]+)$/u.exec(normalized);
+  if (!match?.[1] || !taskId || (match[1] !== taskId && !match[1].startsWith(`${taskId}-`))) {
+    throw new Error("INVALID_TASK_PACKAGE_PATH");
+  }
+  return normalized;
+}
+
+function validateHostedDocumentPath(value: string, taskId: string | undefined, fileName: string): string {
+  const normalized = validateRegistryDocumentPath(value);
+  const match = new RegExp(`^tasks/([^/]+)/${fileName.replace(".", "\\.")}$`, "u").exec(normalized);
+  if (!match?.[1] || !taskId || (match[1] !== taskId && !match[1].startsWith(`${taskId}-`))) {
+    throw new Error("INVALID_HOSTED_DOCUMENT_PATH");
+  }
+  return normalized;
 }
 
 function decodeCanonicalSegment(value: string): string {

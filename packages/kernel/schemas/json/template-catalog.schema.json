@@ -29,7 +29,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "version", "documentKind", "slot", "materializeAs", "frontmatterSchema", "requiredAnchors", "fallbackLocale", "locales"],
+        "required": ["id", "version", "documentKind", "slot", "materializeAs", "frontmatterSchema", "requiredAnchors", "sectionPermissions", "fallbackLocale", "locales"],
         "properties": {
           "id": { "type": "string" },
           "version": { "type": "string" },
@@ -40,6 +40,19 @@
           "requiredAnchors": {
             "type": "array",
             "items": { "type": "string" }
+          },
+          "sectionPermissions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["anchor", "writeMode"],
+              "properties": {
+                "anchor": { "type": "string" },
+                "writeMode": { "enum": ["free-prose", "machine-written", "forbidden"] },
+                "semanticClass": { "enum": ["host-prose-only", "entity-bearing"] }
+              }
+            }
           },
           "fallbackLocale": { "enum": ["zh-CN", "en-US"] },
           "locales": {

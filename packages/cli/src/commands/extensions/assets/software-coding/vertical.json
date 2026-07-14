@@ -67,7 +67,7 @@
         },
         {
           "slot": "task.facts",
-          "templateRef": "template://planning/keep-file@1",
+          "templateRef": "template://planning/facts@1",
           "materializeAs": "facts.md",
           "localePolicy": {
             "prefer": "project",

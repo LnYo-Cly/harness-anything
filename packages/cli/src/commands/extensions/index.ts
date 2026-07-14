@@ -5,6 +5,7 @@ import type { WriteCoordinator, WriteOp } from "../../../../kernel/src/index.ts"
 import { runModuleCommand } from "./module.ts";
 import { runPresetCommand } from "./preset.ts";
 import { runScriptCommand } from "./script.ts";
+import { ScriptSemanticDiffError } from "./script-staging.ts";
 import { InvalidRegistryKeyError } from "./state.ts";
 import { runTemplateCommand } from "./template.ts";
 import { runVerticalCommand } from "./vertical.ts";
@@ -75,6 +76,13 @@ export function runExtensionCommand(command: ParsedCommand, coordinator: WriteCo
         ok: false,
         command: command.action.kind,
         error: cliError(CliErrorCode.InvalidRegistryKey, error.message)
+      };
+    }
+    if (error instanceof ScriptSemanticDiffError) {
+      return {
+        ok: false,
+        command: command.action.kind,
+        error: cliError(CliErrorCode.WriteRejected, error.message)
       };
     }
     return {

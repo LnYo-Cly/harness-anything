@@ -11,6 +11,7 @@ export { reviewDeclaration } from "./entity/review-declaration.ts";
 export * from "./entity/disposition.ts";
 export * from "./entity/field-contracts.ts";
 export {
+  assertManagedSemanticRegions,
   compileRegistryMutationPlan,
   createWritableEntityRegistry,
   entityRegistry,
@@ -36,6 +37,9 @@ export type {
   HostedEntityDeclaration,
   KernelEntityKind,
   RegistryMutationPlanInput,
+  SemanticDiffCandidateTree,
+  SemanticDiffDocumentPolicy,
+  SemanticDiffMutationIntent,
   StoragePlan
 } from "./entity/registry.ts";
 export {
@@ -81,6 +85,7 @@ export { readUnionAttributionEvents } from "./local/attribution-event-source.ts"
 export { makeCodeDocGitEvidenceResolver } from "./git/code-doc-git-evidence.ts";
 export * from "./layout/index.ts";
 export * from "./markdown/frontmatter.ts";
+export { extractMarkdownSection, markdownHeadingSections } from "./markdown/section.ts";
 export * from "./ports/artifact-store-writer.ts";
 export * from "./ports/index.ts";
 export * from "./projection/post-merge-checks.ts";

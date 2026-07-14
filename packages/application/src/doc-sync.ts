@@ -1,3 +1,9 @@
+import {
+  assertManagedSemanticRegions,
+  type RegistryMutationPlanInput,
+  type SemanticDiffDocumentPolicy
+} from "../../kernel/src/index.ts";
+
 export interface RegistryRow {
   readonly id: string;
   readonly bearing: string;
@@ -83,6 +89,7 @@ export interface AppliedChangePlan {
   readonly baseBlobSha256: string | null;
   readonly newBlobSha256: string;
   readonly body: string;
+  readonly baseBody: string | null;
   readonly zoneClassesTouched: ReadonlyArray<string>;
 }
 
@@ -126,9 +133,17 @@ export interface DocSyncValidationResult {
   readonly unresolvedTouches: ReadonlyArray<{ readonly path: string; readonly reason: string; readonly bearing?: string; readonly zoneClass?: string }>;
   readonly conflicts: ReadonlyArray<DocSyncConflictV1>;
   readonly currentLedgerSha: string;
+  readonly semanticMutationPlan: RegistryMutationPlanInput;
 }
 
-export function classifyTouchedZones(pathInput: string, status: DirtyEntry["status"], _baseBody: string | null, _currentBody: string | null, rows: ReadonlyArray<RegistryRow>): ReadonlyArray<TouchedZone> {
+export function classifyTouchedZones(
+  pathInput: string,
+  status: DirtyEntry["status"],
+  baseBody: string | null,
+  currentBody: string | null,
+  rows: ReadonlyArray<RegistryRow>,
+  sectionPolicy?: SemanticDiffDocumentPolicy | null
+): ReadonlyArray<TouchedZone> {
   if (status === "deleted") return [unresolved("doc sync deletion is not defined in Phase 2")];
   const normalized = pathInput.split(/[\\/]+/u).join("/");
   const typedOnlyReason = typedOnlyMachineSurfaceReason(normalized);
@@ -141,7 +156,20 @@ export function classifyTouchedZones(pathInput: string, status: DirtyEntry["stat
     }
     return [unresolved(typedOnlyReason)];
   }
-  if (normalized === "modules.json") return rowZones(rows, "module-registry", "module-authored-structured");
+  if (normalized === "modules.json") {
+    return [unresolved("SEMANTIC_DIFF_REQUIRED: modules.json has no registered markdown heading region", "module-registry", "module-authored-structured")];
+  }
+  const sectionManaged = sectionPolicy !== undefined && sectionPolicy !== null
+    || /^decisions\/decision-[^/]+\/decision\.md$/u.test(normalized)
+    || (/^tasks\/[^/]+\/[^/]+\.md$/u.test(normalized) && !normalized.endsWith("/INDEX.md"));
+  if (sectionManaged) {
+    const sectionFailure = managedSectionFailure(normalized, baseBody, currentBody, sectionPolicy);
+    if (sectionFailure) return [unresolved(sectionFailure)];
+  }
+  if (sectionPolicy && baseBody !== currentBody
+    && (/^decisions\/decision-[^/]+\/decision\.md$/u.test(normalized) || normalized.endsWith("/facts.md"))) {
+    return semanticDiffSubmitZones(rows);
+  }
   if (normalized.startsWith("decisions/")) return rowZones(rows, "decision", "decision-authored-structured");
   if (!normalized.startsWith("tasks/")) return [unresolved("path is outside the registered doc-sync task document surface")];
   if (/^tasks\/[^/]+\/executions(?:\/|$)/u.test(normalized)) return rowZones(rows, "task-execution", "task-authored-structured");
@@ -194,6 +222,13 @@ function rowZones(rows: ReadonlyArray<RegistryRow>, bearing: string, zoneClass: 
   const rpcOnly = matches.filter((row) => row.channel.pathClass === "rpc-only");
   if (rpcOnly.length > 0) return [{ ok: true, bearing, zoneClass, row: bestRpcRow(rpcOnly) }];
   return matches.map((row) => ({ ok: true, bearing, zoneClass, row }));
+}
+
+function semanticDiffSubmitZones(rows: ReadonlyArray<RegistryRow>): ReadonlyArray<TouchedZone> {
+  const row = rows.find((candidate) => candidate.channel.pathClass.startsWith("doc-sync-allowed")
+    && candidate.writeKinds?.includes("doc_sync_submit"));
+  if (!row) return [unresolved("SEMANTIC_DIFF_REQUIRED: doc_sync_submit canonical road is unavailable")];
+  return [{ ok: true, bearing: row.bearing, zoneClass: row.channel.zoneClass, row }];
 }
 
 function bestRpcRow(rows: ReadonlyArray<RegistryRow>): RegistryRow {
@@ -254,4 +289,25 @@ function typedOnlyMachineSurfaceReason(path: string): string | null {
     return "review documents are machine-owned and require a typed review command";
   }
   return null;
+}
+
+function managedSectionFailure(
+  filePath: string,
+  baseBody: string | null,
+  candidateBody: string | null,
+  policy?: SemanticDiffDocumentPolicy | null
+): string | null {
+  if (baseBody === candidateBody) return null;
+  if (!filePath.endsWith(".md")) return null;
+  if (!policy) return `SEMANTIC_DIFF_REQUIRED: no section permission declaration for ${filePath}`;
+  try {
+    assertManagedSemanticRegions(
+      { documents: [{ path: filePath, body: baseBody }] },
+      { documents: [{ path: filePath, body: candidateBody }] },
+      { documentPolicies: [policy] }
+    );
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : "SEMANTIC_DIFF_AMBIGUOUS";
+  }
 }

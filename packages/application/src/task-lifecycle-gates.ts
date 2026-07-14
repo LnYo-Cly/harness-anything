@@ -195,17 +195,7 @@ export function isTaskDocumentPlaceholderMarkdown(
   )));
 }
 
-export function extractMarkdownSection(markdown: string, anchor: string): string {
-  const lines = markdown.split(/\r?\n/u);
-  const start = lines.findIndex((line) => line.trim() === anchor);
-  if (start < 0) return "";
-  const body: string[] = [];
-  for (const line of lines.slice(start + 1)) {
-    if (/^##\s+/u.test(line.trim())) break;
-    if (line.trim().length > 0) body.push(line.trim());
-  }
-  return body.join("\n").trim();
-}
+export { extractMarkdownSection };
 
 export function evaluateReviewGate(input: ReviewGateInput): ReviewGateResult {
   const blocking = input.findings.filter((finding) => finding.open && finding.blocksRelease);
@@ -334,3 +324,4 @@ function isPhaseKind(value: string): value is PhaseKind {
 function isPhaseActor(value: string): value is PhaseActor {
   return value === "agent" || value === "human" || value === "coordinator" || value === "reviewer";
 }
+import { extractMarkdownSection } from "../../kernel/src/index.ts";

@@ -48,6 +48,8 @@ export * from "./authority/semantic-mutation-envelope-v2.ts";
 export * from "./authority/fact-relation-semantic-compiler-v2.ts";
 export * from "./authority/task-decision-module-semantic-compiler-v2.ts";
 export * from "./authority/session-execution-review-semantic-compiler-v2.ts";
+export * from "./authority/transparent-semantic-diff-compiler-v2.ts";
+export { compileManagedCandidateTreeV2 } from "./authority/semantic-authority-helpers-v2.ts";
 export * from "./authority/committed-attribution-event-v2.ts";
 export type { AuthoritySubmissionV2Options } from "./authority/service.ts";
 export type {

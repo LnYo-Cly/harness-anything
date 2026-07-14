@@ -7,7 +7,16 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
-import { makeJournaledWriteCoordinator, sha256Text, type WriteCoordinator } from "../../kernel/src/index.ts";
+import {
+  deriveRelationId,
+  formatFactFlowRecord,
+  formatRelationFlowRecord,
+  makeJournaledWriteCoordinator,
+  sha256Text,
+  type EntityRelationRecord,
+  type FactRecord,
+  type WriteCoordinator
+} from "../../kernel/src/index.ts";
 import {
   buildDocSyncReport,
   makeDocSyncService,
@@ -22,7 +31,7 @@ test("doc sync preview and submit validator classify same-extension prose and fr
   await withHarnessFixture(async ({ rootDir, harnessRoot, taskRoot, taskId }) => {
     const planPath = path.join(taskRoot, "task_plan.md");
     const indexPath = path.join(taskRoot, "INDEX.md");
-    writeFileSync(planPath, "# Plan\n\nUpdated prose.\n", "utf8");
+    writeFileSync(planPath, planBody("Updated prose."), "utf8");
     writeFileSync(indexPath, taskIndex({ urgency: "high" }), "utf8");
 
     const report = buildDocSyncReport(rootDir);
@@ -36,7 +45,7 @@ test("doc sync preview and submit validator classify same-extension prose and fr
         baseLedgerSha: git(harnessRoot, "rev-parse", "HEAD"),
         intentId: "intent-preview-parity",
         changes: [
-          inlineChange(`tasks/${taskId}/task_plan.md`, "# Plan\n\nOriginal prose.\n", "# Plan\n\nUpdated prose.\n"),
+          inlineChange(`tasks/${taskId}/task_plan.md`, planBody("Original prose."), planBody("Updated prose.")),
           inlineChange(`tasks/${taskId}/INDEX.md`, taskIndex({ urgency: "medium" }), taskIndex({ urgency: "high" }))
         ]
       })
@@ -72,7 +81,7 @@ test("doc sync submit accepts pure task prose and commits with hermetic author",
       baseLedgerSha,
       intentId: "intent-prose",
       changes: [
-        inlineChange(`tasks/${taskId}/task_plan.md`, "# Plan\n\nOriginal prose.\n", "# Plan\n\nUpdated prose.\n")
+        inlineChange(`tasks/${taskId}/task_plan.md`, planBody("Original prose."), planBody("Updated prose."))
       ]
     }));
 
@@ -97,15 +106,66 @@ test("doc sync submit accepts pure task prose and commits with hermetic author",
   });
 });
 
+test("doc sync candidate tree compiles prose plus hosted facts and relation in one save", async () => {
+  await withHarnessFixture(async ({ rootDir, harnessRoot, taskRoot, taskId }) => {
+    writeFileSync(path.join(taskRoot, "facts.md"), factsBody(""), "utf8");
+    git(harnessRoot, "add", "tasks");
+    gitCommit(harnessRoot, "seed empty facts region");
+    const first = factRecord("F-AAAA1111");
+    const second = factRecord("F-BBBB2222");
+    const relationInput = {
+      source: `fact/${taskId}/${second.fact_id}`,
+      target: `fact/${taskId}/${first.fact_id}`,
+      type: "supersedes-fact",
+      strength: "strong",
+      direction: "directed",
+      origin: "declared",
+      rationale: "The second observation supersedes the first.",
+      state: "active"
+    } satisfies Omit<EntityRelationRecord, "relation_id">;
+    const relation = { ...relationInput, relation_id: deriveRelationId(relationInput) };
+    const nextFacts = factsBody([
+      formatFactFlowRecord(first),
+      formatFactFlowRecord(second),
+      "relations:",
+      formatRelationFlowRecord(relation)
+    ].join("\n"));
+    const validation = validateDocSyncSubmitRequest({
+      rootInput: rootDir,
+      request: submitRequest({
+        baseLedgerSha: git(harnessRoot, "rev-parse", "HEAD"),
+        intentId: "intent-prose-fact-relation",
+        changes: [
+          inlineChange(`tasks/${taskId}/task_plan.md`, planBody("Original prose."), planBody("Updated prose.")),
+          inlineChange(`tasks/${taskId}/facts.md`, factsBody(""), nextFacts)
+        ]
+      })
+    });
+
+    assert.equal(validation.ok, true, JSON.stringify(validation));
+    const semanticRows = validation.semanticMutationPlan.mutations.map((mutation) => [
+      mutation.entityKind, mutation.action, mutation.identity
+    ] as const).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+    const expectedRows = [
+      ["fact", "create", { taskId, factId: first.fact_id }],
+      ["fact", "invalidate", { taskId, factId: first.fact_id }],
+      ["fact", "create", { taskId, factId: second.fact_id }],
+      ["relation", "create", { relationId: relation.relation_id }],
+      ["task", "document", { taskId }]
+    ].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+    assert.deepEqual(semanticRows, expectedRows);
+  });
+});
+
 test("doc sync submit ingests a pre-applied working-tree prose edit through the coordinator", async () => {
   await withHarnessFixture(async ({ rootDir, harnessRoot, taskRoot, taskId }) => {
-    const nextBody = "# Plan\n\nUpdated before submit.\n";
+    const nextBody = planBody("Updated before submit.");
     writeFileSync(path.join(taskRoot, "task_plan.md"), nextBody, "utf8");
     const service = makeDocSyncService({ rootDir, coordinator: attributedCoordinator(rootDir) });
     const result = await service.submit(submitRequest({
       baseLedgerSha: git(harnessRoot, "rev-parse", "HEAD"),
       intentId: "intent-pre-applied-prose",
-      changes: [inlineChange(`tasks/${taskId}/task_plan.md`, "# Plan\n\nOriginal prose.\n", nextBody)]
+      changes: [inlineChange(`tasks/${taskId}/task_plan.md`, planBody("Original prose."), nextBody)]
     }));
 
     assert.equal(result.ok, true);
@@ -120,7 +180,7 @@ test("doc sync submit fails closed before canonical mutation without a trusted p
     const result = await service.submit(submitRequest({
       baseLedgerSha: git(harnessRoot, "rev-parse", "HEAD"),
       intentId: "intent-no-principal",
-      changes: [inlineChange(`tasks/${taskId}/task_plan.md`, "# Plan\n\nOriginal prose.\n", "# Plan\n\nRejected prose.\n")]
+      changes: [inlineChange(`tasks/${taskId}/task_plan.md`, planBody("Original prose."), planBody("Rejected prose."))]
     }));
 
     assert.equal(result.ok, false);
@@ -176,13 +236,49 @@ test("doc sync submit rejects disguised prose edits to task fact records", async
       baseLedgerSha: git(harnessRoot, "rev-parse", "HEAD"),
       intentId: "intent-fact-disguised",
       changes: [
-        inlineChange(`tasks/${taskId}/facts.md`, "# Facts\n\n- fact: original\n", "# Facts\n\n- fact: structured mutation\n")
+        inlineChange(`tasks/${taskId}/facts.md`, factsBody("- fact: original"), factsBody("- fact: structured mutation"))
       ]
     }));
 
     assert.equal(result.ok, false);
     assert.equal(result.code, "doc_sync_forbidden_touch");
-    assert.equal(result.forbiddenTouches?.[0]?.hunks[0]?.bearing, "task-fact");
+    assert.match(result.unresolvedTouches?.[0]?.reason ?? "", /SEMANTIC_DIFF_AMBIGUOUS/u);
+  });
+});
+
+test("doc sync rejects undeclared, machine-written, forbidden, and non-heading module regions before apply", async () => {
+  await withHarnessFixture(async ({ rootDir, harnessRoot, taskRoot, taskId }) => {
+    const progressBase = progressBody("Original log.");
+    const reviewBase = reviewBody("pending");
+    const moduleBase = `${JSON.stringify({ schema: "module-registry/v1", modules: [] }, null, 2)}\n`;
+    writeFileSync(path.join(taskRoot, "progress.md"), progressBase, "utf8");
+    writeFileSync(path.join(taskRoot, "review.md"), reviewBase, "utf8");
+    writeFileSync(path.join(harnessRoot, "modules.json"), moduleBase, "utf8");
+    git(harnessRoot, "add", ".");
+    gitCommit(harnessRoot, "seed managed section controls");
+
+    const validation = validateDocSyncSubmitRequest({
+      rootInput: rootDir,
+      request: submitRequest({
+        baseLedgerSha: git(harnessRoot, "rev-parse", "HEAD"),
+        intentId: "intent-section-controls",
+        changes: [
+          inlineChange(`tasks/${taskId}/task_plan.md`, planBody("Original prose."), `${planBody("Updated prose.")}## Surprise\nUndeclared.\n`),
+          inlineChange(`tasks/${taskId}/progress.md`, progressBase, progressBody("Prose tamper.")),
+          inlineChange(`tasks/${taskId}/review.md`, reviewBase, reviewBody("prose tamper")),
+          inlineChange("modules.json", moduleBase, `${moduleBase.trimEnd()} \n`, { mediaType: "application/json" })
+        ]
+      })
+    });
+
+    assert.equal(validation.ok, false);
+    const reasons = validation.unresolvedTouches.map((touch) => touch.reason).join("\n");
+    assert.match(reasons, /SEMANTIC_DIFF_REQUIRED:undeclared section/u);
+    assert.match(reasons, /SEMANTIC_DIFF_REQUIRED:machine-written section requires typed command/u);
+    assert.match(reasons, /SEMANTIC_DIFF_REQUIRED:forbidden section changed/u);
+    assert.match(reasons, /modules\.json has no registered markdown heading region/u);
+    assert.equal(readFileSync(path.join(taskRoot, "progress.md"), "utf8"), progressBase);
+    assert.equal(readFileSync(path.join(taskRoot, "review.md"), "utf8"), reviewBase);
   });
 });
 
@@ -213,7 +309,7 @@ test("doc sync submit rejects stale base ledger and blob with A2 CAS shape", asy
   await withHarnessFixture(async ({ rootDir, harnessRoot, taskRoot, taskId }) => {
     const baseLedgerSha = git(harnessRoot, "rev-parse", "HEAD");
     const planPath = path.join(taskRoot, "task_plan.md");
-    writeFileSync(planPath, "# Plan\n\nConcurrent edit.\n", "utf8");
+    writeFileSync(planPath, planBody("Concurrent edit."), "utf8");
     git(harnessRoot, "add", "tasks");
     gitCommit(harnessRoot, "concurrent edit");
 
@@ -222,7 +318,7 @@ test("doc sync submit rejects stale base ledger and blob with A2 CAS shape", asy
       baseLedgerSha,
       intentId: "intent-cas",
       changes: [
-        inlineChange(`tasks/${taskId}/task_plan.md`, "# Plan\n\nOriginal prose.\n", "# Plan\n\nSubmitted edit.\n")
+        inlineChange(`tasks/${taskId}/task_plan.md`, planBody("Original prose."), planBody("Submitted edit."))
       ]
     }));
 
@@ -249,7 +345,7 @@ test("doc sync post-apply checker fails hard and rolls back rpc-only mutations",
       baseLedgerSha: git(harnessRoot, "rev-parse", "HEAD"),
       intentId: "intent-post-apply",
       changes: [
-        inlineChange(`tasks/${taskId}/task_plan.md`, "# Plan\n\nOriginal prose.\n", "# Plan\n\nUpdated prose.\n")
+        inlineChange(`tasks/${taskId}/task_plan.md`, planBody("Original prose."), planBody("Updated prose."))
       ]
     }));
 
@@ -287,7 +383,7 @@ test("doc sync production submit ignores unrelated broken symlinks without a mut
       baseLedgerSha: git(harnessRoot, "rev-parse", "HEAD"),
       intentId: "intent-broken-symlink",
       changes: [
-        inlineChange(`tasks/${taskId}/task_plan.md`, "# Plan\n\nOriginal prose.\n", "# Plan\n\nUpdated prose.\n")
+        inlineChange(`tasks/${taskId}/task_plan.md`, planBody("Original prose."), planBody("Updated prose."))
       ]
     }));
 
@@ -352,8 +448,8 @@ async function withHarnessFixture<T>(fn: (fixture: {
     mkdirSync(taskRoot, { recursive: true });
     mkdirSync(path.join(harnessRoot, "decisions"), { recursive: true });
     writeFileSync(path.join(taskRoot, "INDEX.md"), taskIndex({ urgency: "medium" }), "utf8");
-    writeFileSync(path.join(taskRoot, "task_plan.md"), "# Plan\n\nOriginal prose.\n", "utf8");
-    writeFileSync(path.join(taskRoot, "facts.md"), "# Facts\n\n- fact: original\n", "utf8");
+    writeFileSync(path.join(taskRoot, "task_plan.md"), planBody("Original prose."), "utf8");
+    writeFileSync(path.join(taskRoot, "facts.md"), factsBody("- fact: original"), "utf8");
     writeFileSync(path.join(taskRoot, "notes.txt"), "old notes\n", "utf8");
     writeFileSync(path.join(harnessRoot, "decisions", "dec_mrcda9kw.md"), "# Decision\n\n- claim: old\n", "utf8");
     initHarnessGit(harnessRoot);
@@ -394,12 +490,61 @@ function inlineChange(pathInput: string, baseBody: string | null, newBody: strin
 function taskIndex(input: { readonly urgency: string }): string {
   return [
     "---",
+    "schema: task-package/v2",
+    "task_id: task_01KX3W4V1EDPHPTGWYYBQQ2J75",
     "status: active",
     `urgency: ${input.urgency}`,
+    "vertical: software/coding",
+    "preset: standard-task",
     "---",
     "# Task",
     ""
   ].join("\n");
+}
+
+function planBody(goal: string): string {
+  return [
+    "# Plan",
+    "",
+    "## Brief", "Brief.",
+    "## Goal", goal,
+    "## Context", "Context.",
+    "## Constraints", "Constraints.",
+    "## Checkpoint", "Checkpoint.",
+    "## CI/Gate Authority Stop Condition", "Stop.",
+    "## Implementation Plan", "Plan.",
+    "## Verification", "Verify.",
+    ""
+  ].join("\n");
+}
+
+function factsBody(record: string): string {
+  return ["# Facts", "", "## Records", "", record, ""].join("\n");
+}
+
+function progressBody(log: string): string {
+  return ["# Progress", "", "## Log", "", log, "", "## Evidence", "", "None.", ""].join("\n");
+}
+
+function reviewBody(reviewer: string): string {
+  return [
+    "# Review", "", "## Reviewer", "", reviewer, "",
+    "## D8 Stop Condition Checklist", "", "- [ ] pending", "",
+    "## Findings", "", "None.", ""
+  ].join("\n");
+}
+
+function factRecord(factId: string): FactRecord {
+  return {
+    fact_id: factId,
+    statement: `Statement ${factId}`,
+    source: "doc-sync test",
+    observedAt: "2026-07-14T00:00:00.000Z",
+    confidence: "high",
+    memoryClass: "semantic",
+    memoryTags: [],
+    provenance: [{ runtime: "codex", sessionId: "session-w5", boundAt: "2026-07-14T00:00:00.000Z" }]
+  };
 }
 
 function initHarnessGit(harnessRoot: string): void {

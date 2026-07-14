@@ -38,12 +38,13 @@ test("CLI doc status reports prose candidates and forbidden structured touches",
       "    displayName: Doc Sync User",
       ""
     ].join("\n"));
-    writeFileSync(path.join(taskRoot, "task_plan.md"), "# Plan\n\nOriginal prose.\n");
-    writeFileSync(path.join(taskRoot, "facts.md"), "# Facts\n\n- fact: original\n");
+    writeFileSync(path.join(taskRoot, "INDEX.md"), taskIndex());
+    writeFileSync(path.join(taskRoot, "task_plan.md"), taskPlan("Original prose."));
+    writeFileSync(path.join(taskRoot, "facts.md"), factsBody(""));
     initHarnessGit(harnessRoot);
 
-    writeFileSync(path.join(taskRoot, "task_plan.md"), "# Plan\n\nUpdated prose.\n");
-    writeFileSync(path.join(taskRoot, "facts.md"), "# Facts\n\n- fact: structured mutation\n");
+    writeFileSync(path.join(taskRoot, "task_plan.md"), taskPlan("Updated prose."));
+    writeFileSync(path.join(taskRoot, "facts.md"), factsBody(validFactRecord()));
     mkdirSync(path.join(taskRoot, "executions"), { recursive: true });
     mkdirSync(path.join(taskRoot, "reviews"), { recursive: true });
     writeFileSync(path.join(taskRoot, "executions", "fake.md"), "{}\n");
@@ -52,9 +53,11 @@ test("CLI doc status reports prose candidates and forbidden structured touches",
     const status = runJson(rootDir, ["doc", "status"]);
     assert.equal(status.ok, true);
     assert.equal(status.command, "doc-status");
-    assert.equal(status.report.candidateBlobs.length, 1);
-    assert.equal(status.report.candidateBlobs[0].path, "tasks/task_01KX3W4V1EDPHPTGWYYBQQ2J75/task_plan.md");
-    assert.equal(status.report.forbiddenTouches.some((touch: Record<string, any>) => touch.hunks[0].registryRowId === "fact.record"), true);
+    assert.equal(status.report.candidateBlobs.length, 2);
+    assert.deepEqual(status.report.candidateBlobs.map((candidate: Record<string, any>) => candidate.path).sort(), [
+      "tasks/task_01KX3W4V1EDPHPTGWYYBQQ2J75/facts.md",
+      "tasks/task_01KX3W4V1EDPHPTGWYYBQQ2J75/task_plan.md"
+    ]);
     assert.equal(status.report.forbiddenTouches.some((touch: Record<string, any>) => touch.hunks[0].registryRowId === "task.execution.record"), true);
     assert.equal(status.report.forbiddenTouches.some((touch: Record<string, any>) => touch.hunks[0].registryRowId === "task.execution-review.record"), true);
 
@@ -62,7 +65,7 @@ test("CLI doc status reports prose candidates and forbidden structured touches",
     assert.equal(dryRun.ok, true);
     assert.equal(dryRun.command, "doc-sync-dry-run");
     assert.equal(dryRun.report.writeIntentPreview.submitImplemented, true);
-    assert.equal(dryRun.report.writeIntentPreview.changes.length, 1);
+    assert.equal(dryRun.report.writeIntentPreview.changes.length, 2);
 
     const rejected = runJson(rootDir, ["doc", "sync", "--submit"], false);
     assert.equal(rejected.ok, false);
@@ -115,11 +118,12 @@ test("CLI doc sync submit commits eligible prose through the daemon", () => {
       "    displayName: Doc Sync User",
       ""
     ].join("\n"));
-    writeFileSync(path.join(taskRoot, "task_plan.md"), "# Plan\n\nOriginal prose.\n");
-    writeFileSync(path.join(taskRoot, "facts.md"), "# Facts\n\n- fact: original\n");
+    writeFileSync(path.join(taskRoot, "INDEX.md"), taskIndex());
+    writeFileSync(path.join(taskRoot, "task_plan.md"), taskPlan("Original prose."));
+    writeFileSync(path.join(taskRoot, "facts.md"), factsBody("- fact: original"));
     initHarnessGit(harnessRoot);
-    writeFileSync(path.join(taskRoot, "task_plan.md"), "# Plan\n\nUpdated through daemon.\n");
-    writeFileSync(path.join(taskRoot, "facts.md"), "# Facts\n\n- fact: unrelated structured mutation\n");
+    writeFileSync(path.join(taskRoot, "task_plan.md"), taskPlan("Updated through daemon."));
+    writeFileSync(path.join(taskRoot, "facts.md"), factsBody("- fact: unrelated structured mutation"));
 
     const submitted = runJson(rootDir, [
       "doc", "sync", "--submit",
@@ -168,6 +172,29 @@ function initHarnessGit(harnessRoot: string): void {
 
 function gitStatus(harnessRoot: string): string {
   return execFileSync("git", ["-C", harnessRoot, "status", "--short"], { encoding: "utf8" }).trim();
+}
+
+function taskIndex(): string {
+  return [
+    "---", "schema: task-package/v2", "task_id: task_01KX3W4V1EDPHPTGWYYBQQ2J75", "status: active",
+    "urgency: medium", "vertical: software/coding", "preset: standard-task", "---", "# Task", ""
+  ].join("\n");
+}
+
+function taskPlan(goal: string): string {
+  return [
+    "# Plan", "", "## Goal", goal, "## Context", "Context.", "## Constraints", "Constraints.",
+    "## Checkpoint", "Checkpoint.", "## CI/Gate Authority Stop Condition", "Stop.",
+    "## Implementation Plan", "Plan.", "## Verification", "Verify.", ""
+  ].join("\n");
+}
+
+function factsBody(record: string): string {
+  return ["# Facts", "", "## Records", "", record, ""].join("\n");
+}
+
+function validFactRecord(): string {
+  return "- {fact_id: F-AAAA1111, statement: \"Structured mutation\", source: \"doc sync CLI test\", observedAt: \"2026-07-14T00:00:00.000Z\", confidence: high, memoryClass: semantic, memoryTags: [], provenance: [{runtime: \"codex\", sessionId: \"session-w5\", boundAt: \"2026-07-14T00:00:00.000Z\"}]}";
 }
 
 function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = true): Record<string, any> {

@@ -157,6 +157,25 @@ test("CLI metadata check fails closed on missing preset-selected document and an
   });
 });
 
+test("CLI metadata check applies live section policy to frozen task contract documents", () => {
+  withTempRoot((rootDir) => {
+    runJson(rootDir, ["init"]);
+    const created = runJson(rootDir, ["new-task", "--title", "Frozen Policy Task", "--vertical", "software/coding", "--preset", "standard-task"]);
+    writeSubstantiveTaskPlan(rootDir, String(created.packagePath));
+    assert.equal(existsSync(path.join(rootDir, created.packagePath, "task-contract.json")), true);
+
+    const reviewPath = path.join(rootDir, created.packagePath, "review.md");
+    const originalReview = readFileSync(reviewPath, "utf8");
+    writeFileSync(reviewPath, originalReview.replace("- Agent: pending", "- Agent: edited"), "utf8");
+    const forbidden = runJson(rootDir, ["check", "--profile", "target-project", "--strict"], false);
+    assert.equal(forbidden.warnings.some((warning: Record<string, unknown>) => warning.code === "metadata_forbidden_section_changed"), true);
+
+    writeFileSync(reviewPath, `${originalReview}\n## Undeclared\n\nunsafe\n`, "utf8");
+    const undeclared = runJson(rootDir, ["check", "--profile", "target-project", "--strict"], false);
+    assert.equal(undeclared.warnings.some((warning: Record<string, unknown>) => warning.code === "metadata_section_permission_missing"), true);
+  });
+});
+
 test("CLI metadata check enforces milestone dossier artifact and resolvable provenance refs", () => {
   withTempRoot((rootDir) => {
     runJson(rootDir, ["init"]);
@@ -182,6 +201,8 @@ test("CLI metadata check enforces milestone dossier artifact and resolvable prov
 
     writeFileSync(path.join(rootDir, created.packagePath, "facts.md"), [
       "# Facts",
+      "",
+      "## Records",
       "",
       "- {fact_id: F-DEADBEEF, statement: \"Milestone dossier has anchored evidence.\", source: \"test fixture\", observedAt: \"2026-07-04T00:00:00.000Z\", confidence: high, memoryClass: episodic, memoryTags: [], provenance: [{runtime: \"human\", sessionId: \"human-cli-1783036800000\", boundAt: \"2026-07-04T00:00:00.000Z\"}]}",
       ""

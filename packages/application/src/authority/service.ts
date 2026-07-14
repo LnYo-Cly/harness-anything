@@ -256,6 +256,14 @@ export function createAuthoritySubmissionService(options: AuthoritySubmissionSer
     }
 
     await put(envelope, semanticDigest, "RECEIVED");
+    if (options.v2 && (envelope.operation.kind === "doc_sync_submit" || envelope.operation.kind === "script_ingest")) {
+      return terminal(await persistTerminal(
+        envelope,
+        semanticDigest,
+        "REJECTED",
+        rejected(envelope, semanticDigest, "SEMANTIC_DIFF_REQUIRED")
+      ));
+    }
     const ingressFailure = validateIngress(envelope, semanticDigest, options.workspaceId);
     if (ingressFailure) return terminal(await persistTerminal(envelope, semanticDigest, "REJECTED", ingressFailure));
 
