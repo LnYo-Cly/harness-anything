@@ -7,7 +7,7 @@ import { countAttributionProjectionRows } from "../projection/sqlite-attribution
 import { rebuildTaskProjection } from "../projection/sqlite-task-projection.ts";
 import { captureAuthoredProjectionFingerprint } from "../projection/projection-source-baseline.ts";
 import { makeLocalVersionControlSystem } from "./local-version-control-system.ts";
-import { resolveTrunkBranch } from "./write-journal-git.ts";
+import { resolveTrunkBranch, sessionBranchName } from "./write-journal-git.ts";
 import { withRepoLocks } from "./write-journal-locks.ts";
 import type { OwnedLock } from "./write-journal-types.ts";
 import { durableFileExists } from "./write-journal-durable.ts";
@@ -33,6 +33,7 @@ export interface LedgerMaterializerReport {
 export interface LedgerMaterializerOptions {
   readonly dryRun?: boolean;
   readonly maxBranches?: number;
+  readonly sessionId?: string;
   readonly heldGlobalLock?: OwnedLock;
   readonly versionControlSystem?: VersionControlSystem;
 }
@@ -56,11 +57,18 @@ export function runLedgerMaterializer(rootInput: HarnessLayoutInput, options: Le
   }
 
   return withRepoLocks(layout.rootDir, rootInput, layout.journalPath, { scope: "operational", kind: "system", id: "ledger-materializer" }, 60_000, [], () => {
-    return materializeBranches(repoRoot, rootInput, options.dryRun === true, options.maxBranches, versionControlSystem);
+    return materializeBranches(repoRoot, rootInput, options.dryRun === true, options.maxBranches, options.sessionId, versionControlSystem);
   }, { heldGlobalLock: options.heldGlobalLock });
 }
 
-function materializeBranches(repoRoot: string, rootInput: HarnessLayoutInput, dryRun: boolean, maxBranches: number | undefined, vcs: VersionControlSystem): LedgerMaterializerReport {
+function materializeBranches(
+  repoRoot: string,
+  rootInput: HarnessLayoutInput,
+  dryRun: boolean,
+  maxBranches: number | undefined,
+  sessionId: string | undefined,
+  vcs: VersionControlSystem
+): LedgerMaterializerReport {
   const reports: LedgerMaterializerBranchReport[] = [];
   const warnings: string[] = [];
   let merged = 0;
@@ -81,7 +89,16 @@ function materializeBranches(repoRoot: string, rootInput: HarnessLayoutInput, dr
     };
   }
 
-  const branches = vcs.sessionBranches(repoRoot);
+  let branches: ReadonlyArray<string>;
+  if (sessionId) {
+    // A session id that yields no branch name (e.g. all-whitespace) must fail loudly:
+    // filtering on undefined would silently report "no branches to materialize".
+    const targetBranch = sessionBranchName(sessionId);
+    if (!targetBranch) throw new Error(`invalid materializer session id: ${sessionId}`);
+    branches = vcs.sessionBranches(repoRoot).filter((branch) => branch === targetBranch);
+  } else {
+    branches = vcs.sessionBranches(repoRoot);
+  }
   for (const branch of branches) {
     const commits = vcs.commitsNotInTrunk(repoRoot, trunkBranch, branch);
     if (commits.length === 0) {
@@ -107,6 +124,7 @@ function materializeBranches(repoRoot: string, rootInput: HarnessLayoutInput, dr
       }
       vcs.deleteBranch(repoRoot, branch);
       merged += 1;
+      processed += 1;
       reports.push({ branch, commitCount: commits.length, status: "merged", commits });
     } catch (error) {
       const warning = `${branch}: ${error instanceof Error ? error.message : String(error)}`;
@@ -118,7 +136,6 @@ function materializeBranches(repoRoot: string, rootInput: HarnessLayoutInput, dr
       }
       reports.push({ branch, commitCount: commits.length, status: "conflict", commits, warning });
     }
-    processed += 1;
     if (reachedBranchLimit(processed, maxBranches)) break;
   }
 
