@@ -95,6 +95,7 @@
         "check-gate-surface",
         "check-gate-manifest-invariants",
         "check-enforcement-constants",
+        "check-retired-keys",
         "check-local-load-governance",
         "check-staged-activation",
         "check-template-command-surface",
@@ -140,6 +141,7 @@
         "check-gate-surface",
         "check-gate-manifest-invariants",
         "check-enforcement-constants",
+        "check-retired-keys",
         "check-local-load-governance",
         "check-staged-activation",
         "check-template-command-surface",
@@ -155,7 +157,7 @@
         "check-legacy-intake-readiness",
         "check-supply-chain"
       ],
-      "harnessLeafGateCount": 40
+      "harnessLeafGateCount": 41
     },
     "rewriteCi": {
       "pullRequestGateJobs": [
@@ -3228,6 +3230,87 @@
           "check": true,
           "checkPr": true,
           "script": "harness:check-enforcement-constants"
+        },
+        "rewriteCi": {
+          "pullRequestJobs": [
+            "boundaries"
+          ],
+          "nonPullRequestJobs": [
+            "full-check"
+          ]
+        },
+        "branchProtection": {
+          "required": true,
+          "contexts": [
+            "boundaries"
+          ]
+        },
+        "classes": [
+          "local",
+          "pr",
+          "main-full"
+        ]
+      }
+    },
+    {
+      "id": "check-retired-keys",
+      "deterministic": true,
+      "positiveControl": {
+        "status": "covered",
+        "evidence": [
+          "tools/check-retired-keys.test.mjs"
+        ]
+      },
+      "command": "npm run harness:check-retired-keys",
+      "category": "local-consistency",
+      "tier": "pr-required",
+      "tierReason": null,
+      "authoritySource": [
+        "task_01KXE0493Q44XTR1DWY3P5VVWX#slice-4",
+        "packages/kernel/src/domain/retired-attribution-field-cleanup.ts",
+        "packages/kernel/src/schemas/registry.ts:TaskFrontmatterSchema",
+        "packages/kernel/src/schemas/decision-package.ts:DecisionPackageSchema"
+      ],
+      "consumerScope": [
+        "authored harness/tasks/*/INDEX.md top-level frontmatter keys",
+        "authored harness/decisions/*/decision.md top-level frontmatter keys"
+      ],
+      "githubContext": {
+        "requiredContexts": [
+          "boundaries"
+        ],
+        "workflowJobs": [
+          "boundaries",
+          "full-check"
+        ],
+        "nodeVersions": [
+          24,
+          26
+        ]
+      },
+      "allowlistPolicy": {
+        "allowed": false,
+        "location": null,
+        "adrOrDecisionRequired": false,
+        "notes": "Retired top-level attribution keys have no exceptions; nested contentPins[].arbiter remains an active decision contract."
+      },
+      "changeControl": {
+        "ordinaryImplementationMayModify": false,
+        "requiresGovernanceEvidence": true,
+        "protectedSurfaces": [
+          "packages/kernel/src/domain/retired-attribution-field-cleanup.ts",
+          "tools/check-retired-keys.mjs",
+          "tools/check-retired-keys.test.mjs",
+          "package.json:scripts.harness:check-retired-keys",
+          "tools/gate-manifest.json"
+        ]
+      },
+      "bypassFixtureRequired": false,
+      "executionSurfaces": {
+        "packageJson": {
+          "check": true,
+          "checkPr": true,
+          "script": "harness:check-retired-keys"
         },
         "rewriteCi": {
           "pullRequestJobs": [

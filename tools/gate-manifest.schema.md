@@ -190,11 +190,12 @@ Release-policy gate sample:
 
 The registry records:
 
-- 53 gates: 43 deterministic and 10 non-deterministic/composite.
-- 38 `harness:*` leaf gates from `package.json`; 36 are in `check`, 34 are in
-  `check:pr`, and 37 execute in pull-request workflow jobs. The only
-  `harness:*` gate outside the PR workflow is the non-deterministic,
-  schedule-only `check-enforcement-debt-sunset`.
+- 55 gates: 45 deterministic and 10 non-deterministic/composite.
+- 41 `harness:*` scripts in `package.json`, of which 40 are registered leaf
+  gates; 38 are in `check`, 36 are in `check:pr`, and 39 execute in pull-request
+  workflow jobs. `harness:sync-runtime-skills` is an operational command, not a
+  gate. The only registered `harness:*` gate outside the PR workflow is the
+  non-deterministic, schedule-only `check-enforcement-debt-sunset`.
 - 11 formerly main-only deterministic gates added to the existing `boundaries`
   required context: `check-cli-help-contract`, `check-cli-error-codes`,
   `check-error-classification`, `check-duplicate-definitions`,
@@ -207,6 +208,9 @@ The registry records:
 - `check-staged-activation` executes locally, in `boundaries`, and in non-PR
   `full-check`; its wall-clock expiry semantics make it non-deterministic even
   though each production import-graph probe is repository-local and read-only.
+- `check-retired-keys` executes locally, in `boundaries`, and in non-PR
+  `full-check`; it parses authored frontmatter and rejects only retired top-level
+  attribution keys, while preserving active nested `contentPins[].arbiter`.
 - 14 GitHub branch-protection required contexts:
   `boundaries`, `package-policy`, `typecheck (24)`, `fast-contract`,
   `integration-shard (1)`, `integration-shard (2)`,
