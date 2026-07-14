@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import path from "node:path";
 import { formatRelationFlowRecord, parseEntityRef, validateRelationRecordsForHost } from "../domain/index.ts";
 import type { EntityRelationRecord, EntityRelationValidationIssue } from "../domain/index.ts";
@@ -11,8 +10,14 @@ import {
   relationDecisionAuthoredSourceKind,
   type RelationAuthoredSourceKind
 } from "./relation-source-manifest.ts";
+import {
+  listRelationTaskDirs,
+  listRelationTextFiles,
+  readRelationSourceBody,
+  relationSourceBodyHints,
+  relationSourceSnapshot
+} from "./relation-graph-source-files.ts";
 import { sourcePath, type TaskProjectionSourceHashInput } from "./sqlite-task-source.ts";
-import { readDirIfPresent, readTextFileIfPresent, statPathIfPresent } from "./toctou-safe-fs.ts";
 import { buildClaimFulfillmentRows } from "./claim-fulfillment-projection.ts";
 import { projectFactDocument, type TaskFactProjectionRow } from "./fact-projection.ts";
 import type { ProjectionWarning } from "./types.ts";
@@ -100,12 +105,21 @@ export interface RelationRecordValidationIssue {
 
 export function buildRelationGraphProjection(
   rootInput: HarnessLayoutInput,
-  sourceInputs: ReadonlyArray<TaskProjectionSourceHashInput> = []
+  sourceInputs: ReadonlyArray<TaskProjectionSourceHashInput> = [],
+  reusableFactRefs?: ReadonlySet<string>
 ): RelationGraphProjection {
-  const sourceBodies = sourceBodyHints(rootInput, sourceInputs);
-  const decisions = readDecisionSources(rootInput, sourceBodies);
-  const refIndex = buildGraphRefIndex(rootInput, decisions, sourceBodies);
-  const entries = collectRelationRecordEntries(rootInput, decisions, sourceBodies);
+  const sourceBodies = relationSourceBodyHints(rootInput, sourceInputs);
+  const sourceSnapshot = relationSourceSnapshot(rootInput, sourceInputs);
+  const decisions = readDecisionSources(rootInput, sourceBodies, sourceSnapshot?.decisionFiles);
+  const entries = collectRelationRecordEntries(rootInput, decisions, sourceBodies, sourceSnapshot?.taskDirs, sourceSnapshot !== null);
+  const refIndex = buildGraphRefIndex(
+    rootInput,
+    decisions,
+    sourceBodies,
+    sourceSnapshot?.taskDirs,
+    sourceSnapshot !== null,
+    reusableFactRefs ? { factRefs: reusableFactRefs, entries } : undefined
+  );
   const edges = relationEntriesToEdges(entries, refIndex);
   return {
     edges,
@@ -174,17 +188,19 @@ export function detectRelationGraphCycles(edges: ReadonlyArray<RelationGraphEdge
 function collectRelationRecordEntries(
   rootInput: HarnessLayoutInput,
   decisions: ReadonlyArray<DecisionSource>,
-  sourceBodies: ReadonlyMap<string, string> = new Map()
+  sourceBodies: ReadonlyMap<string, string> = new Map(),
+  taskDirs?: ReadonlyArray<string>,
+  sourceSnapshotComplete = false
 ): ReadonlyArray<RelationRecordEntry> {
   const layout = resolveHarnessLayout(rootInput);
   const rootDir = layout.rootDir;
   const entries: RelationRecordEntry[] = [];
 
-  for (const taskDir of listTaskDirs(layout.tasksRoot)) {
-    const taskId = readTaskPackageId(taskDir, sourceBodies);
+  for (const taskDir of taskDirs ?? listRelationTaskDirs(layout.tasksRoot)) {
+    const taskId = readTaskPackageId(taskDir, sourceBodies, sourceSnapshotComplete);
     for (const source of deriveRelationTaskAuthoredSources(taskDir)) {
-      if (!existsSync(source.filePath)) continue;
-      const body = readSourceBody(source.filePath, sourceBodies);
+      if (!sourceBodies.has(source.filePath) && sourceSnapshotComplete) continue;
+      const body = readRelationSourceBody(source.filePath, sourceBodies);
       if (body === null) continue;
       if (source.content === "frontmatter") {
         const frontmatter = readFrontmatter(body);
@@ -355,15 +371,16 @@ function canonicalRelationRecord(record: EntityRelationRecord): string {
 
 function readDecisionSources(
   rootInput: HarnessLayoutInput,
-  sourceBodies: ReadonlyMap<string, string> = new Map()
+  sourceBodies: ReadonlyMap<string, string> = new Map(),
+  decisionFiles?: ReadonlyArray<string>
 ): ReadonlyArray<DecisionSource> {
   const layout = resolveHarnessLayout(rootInput);
   const decisions: Array<Omit<DecisionSource, "visible"> & { readonly watermark: string }> = [];
   const watermarkCounts = new Map<string, number>();
-  for (const filePath of listTextFiles(layout.decisionsRoot)) {
+  for (const filePath of decisionFiles ?? listRelationTextFiles(layout.decisionsRoot)) {
     const sourceKind = relationDecisionAuthoredSourceKind(filePath);
     if (sourceKind === null) continue;
-    const body = readSourceBody(filePath, sourceBodies);
+    const body = readRelationSourceBody(filePath, sourceBodies);
     if (body === null) continue;
     const frontmatter = readFrontmatter(body);
     if (!frontmatter || readScalar(frontmatter, "schema") !== "decision-package/v1") continue;
@@ -392,23 +409,32 @@ function readDecisionSources(
 function buildGraphRefIndex(
   rootInput: HarnessLayoutInput,
   decisions: ReadonlyArray<DecisionSource>,
-  sourceBodies: ReadonlyMap<string, string> = new Map()
+  sourceBodies: ReadonlyMap<string, string> = new Map(),
+  taskDirs?: ReadonlyArray<string>,
+  sourceSnapshotComplete = false,
+  factSeed?: {
+    readonly factRefs: ReadonlySet<string>;
+    readonly entries: ReadonlyArray<RelationRecordEntry>;
+  }
 ): GraphRefIndex {
   const layout = resolveHarnessLayout(rootInput);
   const taskIds = new Set<string>();
   const doneTaskIds = new Set<string>();
-  const factRefs = new Set<string>();
+  const factRefs = new Set<string>(factSeed?.factRefs);
   const factAnchors: FactAnchorRow[] = [];
   const factRows: TaskFactProjectionRow[] = [];
   const warnings: ProjectionWarning[] = [];
-  for (const taskDir of listTaskDirs(layout.tasksRoot)) {
-    const taskId = readTaskPackageId(taskDir, sourceBodies);
+  const taskDirsById = new Map<string, string>();
+  for (const taskDir of taskDirs ?? listRelationTaskDirs(layout.tasksRoot)) {
+    const taskId = readTaskPackageId(taskDir, sourceBodies, sourceSnapshotComplete);
     taskIds.add(taskId);
+    taskDirsById.set(taskId, taskDir);
     if (readTaskPackageStatus(taskDir, sourceBodies) === "done") doneTaskIds.add(taskId);
+    if (factSeed) continue;
     const factsPath = deriveRelationTaskAuthoredSources(taskDir)
       .find((source) => source.kind === "task-facts")?.filePath;
-    if (!factsPath || !existsSync(factsPath)) continue;
-    const factsBody = readSourceBody(factsPath, sourceBodies);
+    if (!factsPath || (!sourceBodies.has(factsPath) && sourceSnapshotComplete)) continue;
+    const factsBody = readRelationSourceBody(factsPath, sourceBodies);
     if (factsBody === null) continue;
     const portableFactsPath = sourcePath(layout.rootDir, factsPath);
     const projected = projectFactDocument(taskId, portableFactsPath, factsBody);
@@ -432,6 +458,7 @@ function buildGraphRefIndex(
     }
     factRows.push(...projected.rows);
   }
+  if (factSeed) addReferencedFactSources(factRefs, factSeed.entries, taskDirsById, sourceBodies, layout.rootDir);
 
   const decisionIds = new Set<string>();
   const decisionAnchors = new Set<string>();
@@ -452,6 +479,32 @@ function buildGraphRefIndex(
     factRows: factRows.sort((a, b) => a.ref.localeCompare(b.ref)),
     warnings
   };
+}
+
+function addReferencedFactSources(
+  factRefs: Set<string>,
+  entries: ReadonlyArray<RelationRecordEntry>,
+  taskDirsById: ReadonlyMap<string, string>,
+  sourceBodies: ReadonlyMap<string, string>,
+  rootDir: string
+): void {
+  const checkedOwners = new Set<string>();
+  for (const entry of entries) {
+    for (const endpoint of [entry.record.source, entry.record.target]) {
+      const ref = parseEntityRef(endpoint);
+      if (ref?.kind !== "fact" || !ref.ownerTaskId || factRefs.has(`${ref.ownerTaskId}/${ref.id}`) || checkedOwners.has(ref.ownerTaskId)) continue;
+      checkedOwners.add(ref.ownerTaskId);
+      const taskDir = taskDirsById.get(ref.ownerTaskId);
+      if (!taskDir) continue;
+      const factsPath = deriveRelationTaskAuthoredSources(taskDir)
+        .find((source) => source.kind === "task-facts")?.filePath;
+      if (!factsPath) continue;
+      const body = readRelationSourceBody(factsPath, sourceBodies);
+      if (body === null) continue;
+      const projected = projectFactDocument(ref.ownerTaskId, sourcePath(rootDir, factsPath), body);
+      for (const record of projected.records) factRefs.add(`${ref.ownerTaskId}/${record.fact_id}`);
+    }
+  }
 }
 
 function isKnownLocalEndpoint(refText: string, refIndex: GraphRefIndex): boolean {
@@ -492,58 +545,22 @@ function readFlowObjectBlock(frontmatter: string, key: string): string {
   return output.join("\n");
 }
 
-function readTaskPackageId(taskDir: string, sourceBodies: ReadonlyMap<string, string> = new Map()): string {
+function readTaskPackageId(
+  taskDir: string,
+  sourceBodies: ReadonlyMap<string, string> = new Map(),
+  sourceSnapshotComplete = false
+): string {
   const indexPath = path.join(taskDir, "INDEX.md");
-  if (!existsSync(indexPath)) return path.basename(taskDir);
-  const body = readSourceBody(indexPath, sourceBodies);
+  if (!sourceBodies.has(indexPath) && sourceSnapshotComplete) return path.basename(taskDir);
+  const body = readRelationSourceBody(indexPath, sourceBodies);
   const frontmatter = body === null ? null : readFrontmatter(body);
   return (frontmatter ? readScalar(frontmatter, "task_id") : "") || path.basename(taskDir);
 }
 
 function readTaskPackageStatus(taskDir: string, sourceBodies: ReadonlyMap<string, string> = new Map()): string {
-  const body = readSourceBody(path.join(taskDir, "INDEX.md"), sourceBodies);
+  const body = readRelationSourceBody(path.join(taskDir, "INDEX.md"), sourceBodies);
   const frontmatter = body === null ? null : readFrontmatter(body);
   return frontmatter ? readScalar(frontmatter, "  status") : "";
-}
-
-function listTaskDirs(tasksRoot: string): ReadonlyArray<string> {
-  if (!existsSync(tasksRoot)) return [];
-  const entries = readDirIfPresent(tasksRoot);
-  if (entries === null) return [];
-  return entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(tasksRoot, entry.name))
-    .sort();
-}
-
-function listTextFiles(inputPath: string): ReadonlyArray<string> {
-  if (!existsSync(inputPath)) return [];
-  const stat = statPathIfPresent(inputPath);
-  if (stat === null) return [];
-  if (stat.isFile()) return isRelationGraphTextLikePath(inputPath) ? [inputPath] : [];
-  if (!stat.isDirectory()) return [];
-  const entries = readDirIfPresent(inputPath);
-  if (entries === null) return [];
-  return entries
-    .filter((entry) => entry.name !== ".git" && entry.name !== "node_modules")
-    .flatMap((entry) => listTextFiles(path.join(inputPath, entry.name)))
-    .sort();
-}
-
-function sourceBodyHints(
-  rootInput: HarnessLayoutInput,
-  sourceInputs: ReadonlyArray<TaskProjectionSourceHashInput>
-): ReadonlyMap<string, string> {
-  const rootDir = resolveHarnessLayout(rootInput).rootDir;
-  return new Map(sourceInputs.map((input) => [path.resolve(rootDir, input.sourcePath), input.body]));
-}
-
-function readSourceBody(filePath: string, sourceBodies: ReadonlyMap<string, string>): string | null {
-  return sourceBodies.get(filePath) ?? readTextFileIfPresent(filePath);
-}
-
-function isRelationGraphTextLikePath(filePath: string): boolean {
-  return /\.(md|markdown|txt|ya?ml|json)$/iu.test(filePath);
 }
 
 function compareEdges(a: RelationGraphEdgeRow, b: RelationGraphEdgeRow): number {

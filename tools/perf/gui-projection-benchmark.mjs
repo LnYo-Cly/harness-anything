@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { aggregateExecutions } from "../../packages/gui/src/renderer/execution-data.ts";
-import { queryExecutionEvidencePage, queryExecutions, readTriadicProjectionSnapshot, rebuildTaskProjection } from "../../packages/kernel/src/index.ts";
+import {
+  deriveRelationId,
+  formatRelationFlowRecord,
+  queryExecutionEvidencePage,
+  queryExecutions,
+  readTaskProjection,
+  readTriadicProjectionSnapshot,
+  rebuildTaskProjection
+} from "../../packages/kernel/src/index.ts";
 import { queryExecutionEvidencePageFromReadyGeneration } from "../../packages/kernel/src/projection/sqlite-execution-evidence-reader.ts";
 import {
   ensureExecutionEvidenceGenerationReady,
@@ -19,6 +27,7 @@ import { createDaemonRuntime } from "../../packages/adapters/local/src/index.ts"
 const size = positiveInteger("--size", 1_000);
 const outputsPerExecution = positiveInteger("--outputs", 5);
 const attributionEventsPerExecution = positiveInteger("--attribution-events", 5);
+const updateSamples = positiveInteger("--update-samples", 5);
 const keep = process.argv.includes("--keep");
 const rootDir = mkdtempSync(path.join(tmpdir(), "ha-gui-perf-"));
 
@@ -26,6 +35,8 @@ try {
   const fixtureStart = performance.now();
   const fixtureRows = [];
   for (let index = 0; index < size; index += 1) fixtureRows.push(writeTask(index));
+  const reviewPath = writeReview(fixtureRows[0]);
+  const decisionPath = writeDecision();
   const fixtureMs = performance.now() - fixtureStart;
   initAuthoredGit();
 
@@ -65,26 +76,45 @@ try {
   const triadicSamples = sample(20, () => readTriadicProjectionSnapshot({ rootDir }));
   const triadicSnapshotP95 = percentile(triadicSamples.samples, 0.95);
   const changedExecution = fixtureRows[0];
-  const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
-  const manifest = readDeclaredSourceManifestRows(projectionPath);
-  const previousSourceFingerprint = captureProjectionSourceFingerprint(rootDir, manifest).fingerprint;
-  const previousEvidenceSourceFingerprint = readyGeneration.sourceHash;
-  const changedBody = JSON.parse(readFileSync(changedExecution.executionPath, "utf8"));
-  writeFileSync(changedExecution.executionPath, `${JSON.stringify({ ...changedBody, state: "accepted" }, null, 2)}\n`);
-  const incrementalEvidenceStarted = performance.now();
-  const incrementalEvidence = updateExecutionEvidenceProjectionIncrementally({
-    rootDir,
-    touchedPaths: [changedExecution.executionPath],
-    previousSourceFingerprint: previousEvidenceSourceFingerprint
+  const incrementalExecutions = benchmarkExecutionUpdates(changedExecution.executionPath, updateSamples);
+  const incrementalEvidence = incrementalExecutions.evidence.result;
+  const incrementalEvidenceMs = incrementalExecutions.evidence.p95;
+  const incremental = incrementalExecutions.projection.result;
+  const incrementalExecutionMs = incrementalExecutions.projection.p95;
+  const incrementalProjectionPhases = incrementalExecutions.projection.phases;
+  const incrementalReview = benchmarkProjectionUpdates(reviewPath, updateSamples, () => {
+    const review = JSON.parse(readFileSync(reviewPath, "utf8"));
+    writeFileSync(reviewPath, `${JSON.stringify({ ...review, verdict: review.verdict === "approved" ? "dismissed" : "approved" }, null, 2)}\n`);
   });
-  const incrementalEvidenceMs = performance.now() - incrementalEvidenceStarted;
-  const incrementalStarted = performance.now();
-  const incremental = updateTaskProjectionIncrementally({
-    rootDir,
-    touchedPaths: [changedExecution.executionPath],
-    previousSourceFingerprint
+  const taskPath = fixtureRows[Math.min(1, fixtureRows.length - 1)].taskPath;
+  const incrementalTask = benchmarkProjectionUpdates(taskPath, updateSamples, (index) => {
+    writeFileSync(taskPath, readFileSync(taskPath, "utf8")
+      .replaceAll(/Performance Task 1(?: update-\d+)?/gu, `Performance Task 1 update-${index}`));
   });
-  const incrementalExecutionMs = performance.now() - incrementalStarted;
+  const incrementalDecision = benchmarkProjectionUpdates(decisionPath, updateSamples, (index) => {
+    writeFileSync(decisionPath, readFileSync(decisionPath, "utf8")
+      .replace(/title: Performance Decision(?: update-\d+)?/u, `title: Performance Decision update-${index}`));
+  });
+  const incrementalRelation = benchmarkProjectionUpdates(fixtureRows[0].taskPath, updateSamples, () => {
+    const source = `task/${fixtureRows[0].taskId}`;
+    const target = `task/${fixtureRows[Math.min(1, fixtureRows.length - 1)].taskId}`;
+    const relation = {
+      relation_id: deriveRelationId({ source, target, type: "depends-on", direction: "directed" }),
+      source,
+      target,
+      type: "depends-on",
+      direction: "directed",
+      strength: "strong",
+      origin: "declared",
+      rationale: "Performance relation update",
+      state: "active"
+    };
+    const body = readFileSync(fixtureRows[0].taskPath, "utf8");
+    const relationBlock = `relations:\n${formatRelationFlowRecord(relation)}\n`;
+    writeFileSync(fixtureRows[0].taskPath, body.includes(relationBlock)
+      ? body.replace(relationBlock, "")
+      : body.replace(`\n---\n\n# Performance Task 0`, `\n${relationBlock}---\n\n# Performance Task 0`));
+  });
   const result = {
     schema: "gui-projection-benchmark/v2",
     fixture: {
@@ -92,6 +122,7 @@ try {
       executions: size,
       outputs: size * outputsPerExecution,
       attributionEvents: size * attributionEventsPerExecution,
+      updateSamples,
       rootDir: keep ? rootDir : "<temporary>"
     },
     milliseconds: {
@@ -106,7 +137,14 @@ try {
       readTriadicProjectionSnapshot: summarize(triadicSamples.samples),
       aggregateExecutions: summarize(aggregateSamples.samples),
       incrementalEvidence: rounded(incrementalEvidenceMs),
-      incrementalExecution: rounded(incrementalExecutionMs)
+      incrementalEvidenceSamples: incrementalExecutions.evidence.summary,
+      incrementalExecution: rounded(incrementalExecutionMs),
+      incrementalExecutionSamples: incrementalExecutions.projection.summary,
+      incrementalProjectionPhases,
+      incrementalReview,
+      incrementalTask,
+      incrementalDecision,
+      incrementalRelation
     },
     assertions: {
       executionCount: executions.length === size,
@@ -163,8 +201,29 @@ try {
       incrementalEvidenceWithinBudget: size === 1_000 || size === 5_000
         ? incrementalEvidenceMs <= 250
         : null,
+      incrementalProjectionBudgetMs: size === 1_000 || size === 5_000 ? 250 : null,
+      incrementalProjectionWithinBudget: size === 1_000 || size === 5_000
+        ? incrementalExecutionMs <= 250
+        : null,
+      incrementalReviewWithinBudget: size === 1_000 || size === 5_000
+        ? incrementalReview.milliseconds <= 250
+        : null,
+      incrementalTaskWithinBudget: size === 1_000 || size === 5_000
+        ? incrementalTask.milliseconds <= 250
+        : null,
+      incrementalDecisionWithinBudget: size === 1_000 || size === 5_000
+        ? incrementalDecision.milliseconds <= 250
+        : null,
+      incrementalRelationBudgetMs: size === 1_000 || size === 5_000 ? 500 : null,
+      incrementalRelationWithinBudget: size === 1_000 || size === 5_000
+        ? incrementalRelation.milliseconds <= 500
+        : null,
       incrementalEvidenceMode: incrementalEvidence.mode,
-      incrementalExecutionMode: incremental.mode
+      incrementalExecutionMode: incremental.mode,
+      incrementalReviewMode: incrementalReview.mode,
+      incrementalTaskMode: incrementalTask.mode,
+      incrementalDecisionMode: incrementalDecision.mode,
+      incrementalRelationMode: incrementalRelation.mode
     }
   };
 
@@ -182,9 +241,18 @@ try {
       result.assertions.evidenceFacetBuildWithinBudget === false ||
       result.assertions.coldFirstUsableWithinBudget === false ||
       result.assertions.incrementalEvidenceWithinBudget === false ||
+      result.assertions.incrementalProjectionWithinBudget === false ||
+      result.assertions.incrementalReviewWithinBudget === false ||
+      result.assertions.incrementalTaskWithinBudget === false ||
+      result.assertions.incrementalDecisionWithinBudget === false ||
+      result.assertions.incrementalRelationWithinBudget === false ||
       incrementalEvidence.mode !== "incremental" ||
       result.assertions.triadicSnapshotWithinBudget === false ||
-      incremental.mode !== "incremental") {
+      incremental.mode !== "incremental" ||
+      incrementalReview.mode !== "incremental" ||
+      incrementalTask.mode !== "incremental" ||
+      incrementalDecision.mode !== "incremental" ||
+      incrementalRelation.mode !== "incremental") {
     process.exitCode = 1;
   }
 } finally {
@@ -276,7 +344,162 @@ function writeTask(index) {
       }
     })}\n`);
   }
-  return { taskId, executionId, executionPath };
+  return { taskId, executionId, executionPath, taskPath: path.join(taskRoot, "INDEX.md") };
+}
+
+function writeReview(fixture) {
+  const reviewId = "rev_00000000000000000000000000";
+  const reviewPath = path.join(rootDir, "harness/tasks", fixture.taskId, "reviews", `${reviewId}.md`);
+  mkdirSync(path.dirname(reviewPath), { recursive: true });
+  writeFileSync(reviewPath, `${JSON.stringify({
+    schema: "review/v2",
+    review_id: reviewId,
+    task_ref: `task/${fixture.taskId}`,
+    execution_ref: `execution/${fixture.taskId}/${fixture.executionId}`,
+    reviewer_actor: {
+      principal: { personId: "person_perf" },
+      executor: null,
+      responsibleHuman: "person_perf"
+    },
+    reviewer_session_ref: "session/perf",
+    findings: "Performance review",
+    evidence_checked: [],
+    rationale: "Projection benchmark review.",
+    verdict: "approved",
+    archive_warnings_acknowledged: false,
+    reviewed_at: "2026-07-13T00:02:00.000Z"
+  }, null, 2)}\n`);
+  return reviewPath;
+}
+
+function writeDecision() {
+  const decisionPath = path.join(rootDir, "harness/decisions/decision-dec_PERFORMANCE/decision.md");
+  mkdirSync(path.dirname(decisionPath), { recursive: true });
+  writeFileSync(decisionPath, [
+    "---",
+    "schema: decision-package/v1",
+    "decision_id: dec_PERFORMANCE",
+    "_coordinatorWatermark: wm-performance",
+    "title: Performance Decision",
+    "state: active",
+    "riskTier: medium",
+    "urgency: medium",
+    "vertical: software/coding",
+    "preset: architecture-decision",
+    "applies_to:",
+    "  modules: [projection]",
+    "  productLines: []",
+    "proposedBy: { kind: agent, id: benchmark }",
+    "proposedAt: 2026-07-13T00:00:00.000Z",
+    "arbiter: { kind: human, id: benchmark }",
+    "decidedAt: 2026-07-13T00:00:00.000Z",
+    "question: Should projection updates remain bounded?",
+    "chosen:",
+    "  - { id: CH1, text: Keep updates bounded }",
+    "rejected:",
+    "  - { id: RJ1, text: Rebuild everything, why_not: Too slow }",
+    "claims:",
+    "  - { id: C1, text: Incremental updates are bounded, load_bearing: false }",
+    "relations:",
+    "---",
+    "",
+    "# Performance Decision",
+    ""
+  ].join("\n"));
+  return decisionPath;
+}
+
+function benchmarkProjectionUpdate(touchedPath, mutate) {
+  readTaskProjection({ rootDir });
+  const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
+  const manifest = readDeclaredSourceManifestRows(projectionPath);
+  const previousSourceFingerprint = captureProjectionSourceFingerprint(rootDir, manifest).fingerprint;
+  mutate();
+  const phases = [];
+  const started = performance.now();
+  const result = updateTaskProjectionIncrementally({
+    rootDir,
+    touchedPaths: [touchedPath],
+    previousSourceFingerprint,
+    onPhase: (phase) => phases.push({ phase: phase.phase, milliseconds: rounded(phase.milliseconds) })
+  });
+  return { milliseconds: rounded(performance.now() - started), mode: result.mode, phases };
+}
+
+function benchmarkProjectionUpdates(touchedPath, iterations, mutate) {
+  const samples = [];
+  const modes = [];
+  let latest;
+  for (let index = 0; index < iterations; index += 1) {
+    latest = benchmarkProjectionUpdate(touchedPath, () => mutate(index));
+    samples.push(latest.milliseconds);
+    modes.push(latest.mode);
+  }
+  const summary = summarize(samples);
+  return {
+    milliseconds: summary.p95,
+    ...summary,
+    samples: samples.map(rounded),
+    mode: modes.every((mode) => mode === "incremental") ? "incremental" : modes.find((mode) => mode !== "incremental"),
+    phases: latest?.phases ?? []
+  };
+}
+
+function benchmarkExecutionUpdates(executionPath, iterations) {
+  const evidenceSamples = [];
+  const projectionSamples = [];
+  const evidenceModes = [];
+  const projectionModes = [];
+  let evidenceResult;
+  let projectionResult;
+  let projectionPhases = [];
+  for (let index = 0; index < iterations; index += 1) {
+    readTaskProjection({ rootDir });
+    const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
+    const manifest = readDeclaredSourceManifestRows(projectionPath);
+    const previousSourceFingerprint = captureProjectionSourceFingerprint(rootDir, manifest).fingerprint;
+    const previousEvidenceSourceFingerprint = ensureExecutionEvidenceGenerationReady({ rootDir }).ready.sourceHash;
+    const body = JSON.parse(readFileSync(executionPath, "utf8"));
+    writeFileSync(executionPath, `${JSON.stringify({ ...body, state: body.state === "accepted" ? "submitted" : "accepted" }, null, 2)}\n`);
+
+    const evidenceStarted = performance.now();
+    evidenceResult = updateExecutionEvidenceProjectionIncrementally({
+      rootDir,
+      touchedPaths: [executionPath],
+      previousSourceFingerprint: previousEvidenceSourceFingerprint
+    });
+    evidenceSamples.push(performance.now() - evidenceStarted);
+    evidenceModes.push(evidenceResult.mode);
+
+    projectionPhases = [];
+    const projectionStarted = performance.now();
+    projectionResult = updateTaskProjectionIncrementally({
+      rootDir,
+      touchedPaths: [executionPath],
+      previousSourceFingerprint,
+      onPhase: (phase) => projectionPhases.push({
+        phase: phase.phase,
+        milliseconds: rounded(phase.milliseconds)
+      })
+    });
+    projectionSamples.push(performance.now() - projectionStarted);
+    projectionModes.push(projectionResult.mode);
+  }
+  const evidenceSummary = summarize(evidenceSamples);
+  const projectionSummary = summarize(projectionSamples);
+  return {
+    evidence: {
+      ...evidenceSummary,
+      summary: { ...evidenceSummary, samples: evidenceSamples.map(rounded) },
+      result: { ...evidenceResult, mode: evidenceModes.every((mode) => mode === "incremental") ? "incremental" : evidenceModes.find((mode) => mode !== "incremental") }
+    },
+    projection: {
+      ...projectionSummary,
+      summary: { ...projectionSummary, samples: projectionSamples.map(rounded) },
+      result: { ...projectionResult, mode: projectionModes.every((mode) => mode === "incremental") ? "incremental" : projectionModes.find((mode) => mode !== "incremental") },
+      phases: projectionPhases
+    }
+  };
 }
 
 function sample(iterations, run) {

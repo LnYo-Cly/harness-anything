@@ -28,15 +28,22 @@ export function buildClaimFulfillmentRows(input: {
   readonly edges: ReadonlyArray<RelationGraphEdgeRow>;
   readonly refIndex: CoverageRefIndex;
 }): ReadonlyArray<RelationCoverageRow> {
+  const claimsByDecision = input.decisions.map((decision) => ({
+    decision,
+    claims: loadBearingClaims(decision.frontmatter)
+  }));
+  if (claimsByDecision.every(({ claims }) => claims.length === 0)) return [];
   const activeEdges = input.edges.filter((edge) => edge.state === "active");
   const evidenceGraph = evidenceGraphFrom(activeEdges);
   const invalidatedFactRefs = invalidatedFactsFrom(activeEdges);
   const refutingFactRefsByClaim = refutationsFrom(activeEdges);
-  const deliveredTaskIds = deliveredTasks(input.rootInput, input.refIndex.doneTaskIds);
+  const deliveredTaskIds = claimsByDecision.some(({ claims }) => claims.some((claim) => claim.fulfillment === "delivered"))
+    ? deliveredTasks(input.rootInput, input.refIndex.doneTaskIds)
+    : new Set<string>();
   const rows: RelationCoverageRow[] = [];
 
-  for (const decision of input.decisions) {
-    for (const claim of loadBearingClaims(decision.frontmatter)) {
+  for (const { decision, claims } of claimsByDecision) {
+    for (const claim of claims) {
       const claimRef = `${decision.decisionRef}/${claim.id}`;
       const refutingFactRefs = [...(refutingFactRefsByClaim.get(claimRef) ?? [])].sort();
       const coverage = refutingFactRefs.length === 0

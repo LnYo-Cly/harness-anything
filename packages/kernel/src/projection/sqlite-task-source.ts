@@ -60,12 +60,13 @@ const markdownSourceCache = new Map<string, MarkdownSourceCacheEntry>();
 const markdownSourceCacheLimit = 16;
 
 export function captureMarkdownSourcePersistentCache(
-  rootInput: HarnessLayoutInput
+  rootInput: HarnessLayoutInput,
+  reuseCacheWithoutValidation = false
 ): MarkdownSourcePersistentCache | null {
   const layout = resolveHarnessLayout(rootInput);
   const cacheKey = markdownSourceCacheKey(layout);
   const cached = markdownSourceCache.get(cacheKey);
-  if (!cached || !markdownSourceCacheEntryMatches(cached)) return null;
+  if (!cached || (!reuseCacheWithoutValidation && !markdownSourceCacheEntryMatches(cached))) return null;
   return {
     schema: "markdown-source-cache/v1",
     layoutIdentity: cacheKey,
@@ -116,7 +117,9 @@ function validPersistentMarkdownSource(persisted: MarkdownSourcePersistentCache)
     typeof input.sourcePath !== "string" ||
     !isSafeRelativeSourceCachePath(input.sourcePath) ||
     typeof input.body !== "string" ||
-    typeof input.statSignature !== "string")) return false;
+    typeof input.statSignature !== "string" ||
+    (input.contentSha256 !== undefined &&
+      (typeof input.contentSha256 !== "string" || sha256Text(input.body) !== input.contentSha256)))) return false;
   if (persisted.result.entries.some((entry) =>
     typeof entry.taskId !== "string" ||
     typeof entry.indexPath !== "string" ||
@@ -134,16 +137,23 @@ function validPersistentMarkdownSource(persisted: MarkdownSourcePersistentCache)
   return persisted.result.entries.every((entry) => bodiesByPath.get(entry.indexPath) === entry.body);
 }
 
-export function readMarkdownSource(rootInput: HarnessLayoutInput): {
-  readonly entries: ReadonlyArray<TaskSourceEntry>;
-  readonly hash: string;
-  readonly warnings: ReadonlyArray<ProjectionWarning>;
-  readonly sourceInputs: ReadonlyArray<TaskProjectionSourceHashInput>;
-} {
+export function readMarkdownSource(
+  rootInput: HarnessLayoutInput,
+  validation: "stable" | "verify" = "stable",
+  reuseCacheWithoutValidation = false,
+  touchedPaths: ReadonlyArray<string> = [],
+  validateReusedDirectories = true
+): MarkdownSourceResult {
   const layout = resolveHarnessLayout(rootInput);
   const cacheKey = markdownSourceCacheKey(layout);
   const cached = markdownSourceCache.get(cacheKey);
-  if (cached && markdownSourceCacheEntryMatches(cached)) {
+  if (cached && touchedPaths.length > 0) {
+    const refreshed = refreshMarkdownSourceCacheForTouchedPaths(layout, cacheKey, cached, touchedPaths);
+    if (refreshed) return refreshed;
+  }
+  if (cached && (reuseCacheWithoutValidation
+    ? !validateReusedDirectories || sourceCacheSignaturesMatch(cached.directorySignatures)
+    : markdownSourceCacheEntryMatches(cached, validation))) {
     markdownSourceCache.delete(cacheKey);
     markdownSourceCache.set(cacheKey, cached);
     return cached.result;
@@ -153,6 +163,80 @@ export function readMarkdownSource(rootInput: HarnessLayoutInput): {
   const cacheEntry = createMarkdownSourceCacheEntry(layout, source, result);
   markdownSourceCache.delete(cacheKey);
   if (cacheEntry) rememberMarkdownSourceCache(cacheKey, cacheEntry);
+  return result;
+}
+
+function refreshMarkdownSourceCacheForTouchedPaths(
+  layout: ReturnType<typeof resolveHarnessLayout>,
+  cacheKey: string,
+  cached: MarkdownSourceCacheEntry,
+  touchedPaths: ReadonlyArray<string>
+): MarkdownSourceResult | null {
+  const inputs = new Map(cached.result.sourceInputs.map((input) => [input.sourcePath, input]));
+  const entries = new Map(cached.result.entries.map((entry) => [sourcePath(layout.rootDir, entry.indexPath), entry]));
+  const fileSignatures = new Map(cached.fileSignatures);
+  let changed = false;
+  for (const touchedPath of touchedPaths) {
+    const absolutePath = path.resolve(touchedPath);
+    const relativePath = sourcePath(layout.rootDir, absolutePath);
+    const existing = inputs.get(relativePath);
+    if (!existing) return null;
+    const currentSignature = localProjectionSourceFileSystem.statSignature(absolutePath);
+    if (currentSignature === null) return null;
+    if (currentSignature === existing.statSignature) continue;
+    changed = true;
+    const stable = localProjectionSourceFileSystem.readStableText(absolutePath);
+    inputs.set(relativePath, {
+      kind: existing.kind,
+      sourcePath: relativePath,
+      body: stable.body,
+      statSignature: stable.signature,
+      contentSha256: sha256Text(stable.body)
+    });
+    fileSignatures.set(path.resolve(layout.rootDir, relativePath), stable.signature);
+    if (existing.kind === "task-index") {
+      let frontmatter: string;
+      try {
+        frontmatter = parseFrontmatter(stable.body);
+      } catch {
+        return null;
+      }
+      const previous = entries.get(relativePath);
+      entries.set(relativePath, {
+        taskId: previous?.taskId ?? path.basename(path.dirname(absolutePath)),
+        indexPath: absolutePath,
+        body: stable.body,
+        frontmatter,
+        statSignature: stable.signature
+      });
+    }
+  }
+  if (!changed) {
+    rememberMarkdownSourceCache(cacheKey, cached);
+    return cached.result;
+  }
+  const orderedEntries = [...entries.values()].sort((left, right) => left.indexPath.localeCompare(right.indexPath));
+  const taskIndexPaths = new Set(orderedEntries.map((entry) => sourcePath(layout.rootDir, entry.indexPath)));
+  const sourceInputs = [
+    ...orderedEntries.flatMap((entry) => {
+      const input = inputs.get(sourcePath(layout.rootDir, entry.indexPath));
+      return input ? [input] : [];
+    }),
+    ...[...inputs.values()]
+      .filter((input) => !taskIndexPaths.has(input.sourcePath))
+      .sort((left, right) => left.sourcePath.localeCompare(right.sourcePath))
+  ];
+  const result: MarkdownSourceResult = {
+    entries: orderedEntries,
+    hash: hashTaskSourceInputs(sourceInputs),
+    warnings: cached.result.warnings,
+    sourceInputs
+  };
+  rememberMarkdownSourceCache(cacheKey, {
+    result,
+    fileSignatures,
+    directorySignatures: cached.directorySignatures
+  });
   return result;
 }
 
@@ -219,9 +303,13 @@ function createMarkdownSourceCacheEntry(
   };
 }
 
-function markdownSourceCacheEntryMatches(entry: MarkdownSourceCacheEntry): boolean {
+function markdownSourceCacheEntryMatches(
+  entry: MarkdownSourceCacheEntry,
+  validation: "stable" | "verify" = "stable"
+): boolean {
   const signatures = new Map<string, string | null>([...entry.directorySignatures, ...entry.fileSignatures]);
-  return sourceCacheSignaturesMatch(signatures) && sourceCacheSignaturesMatch(signatures);
+  return sourceCacheSignaturesMatch(signatures) &&
+    (validation === "verify" || sourceCacheSignaturesMatch(signatures));
 }
 
 function reusableSourceBodies(
@@ -325,6 +413,7 @@ export interface TaskProjectionSourceHashInput {
   readonly sourcePath: string;
   readonly body: string;
   readonly statSignature: string;
+  readonly contentSha256?: string;
 }
 
 interface RelationSourceHashInput extends TaskProjectionSourceHashInput {
@@ -364,7 +453,8 @@ function readRelationGraphSourceInputs(
           ...(input.taskId ? { taskId: input.taskId } : {}),
           sourcePath: sourcePath(rootDir, input.path),
           body: sourceText.body,
-          statSignature: sourceText.signature
+          statSignature: sourceText.signature,
+          contentSha256: sha256Text(sourceText.body)
         }];
     });
   const decisionInputs = listDecisionDocuments(layout.decisionsRoot)
@@ -378,7 +468,8 @@ function readRelationGraphSourceInputs(
           kind,
           sourcePath: sourcePath(rootDir, decisionPath),
           body: sourceText.body,
-          statSignature: sourceText.signature
+          statSignature: sourceText.signature,
+          contentSha256: sha256Text(sourceText.body)
         }];
     });
   return [...taskDocumentInputs, ...decisionInputs];
@@ -405,7 +496,8 @@ function readTaskSupplementalSourceInputs(
           kind: input.kind,
           sourcePath: sourcePath(rootDir, input.path),
           body: sourceText.body,
-          statSignature: sourceText.signature
+          statSignature: sourceText.signature,
+          contentSha256: sha256Text(sourceText.body)
         }];
     });
 }
@@ -425,7 +517,11 @@ function listDecisionDocuments(decisionsRoot: string): ReadonlyArray<string> {
 }
 
 export function hashExactRows(rows: ReadonlyArray<TaskProjectionRow>): string {
-  return hashText(JSON.stringify([...rows].sort(compareRows).map(canonicalTaskProjectionRow)));
+  return hashExactSortedRows([...rows].sort(compareRows));
+}
+
+export function hashExactSortedRows(rows: ReadonlyArray<TaskProjectionRow>): string {
+  return hashText(JSON.stringify(rows.map(canonicalTaskProjectionRow)));
 }
 
 export function hashTaskProjectionRows(rows: ReadonlyArray<TaskProjectionRow>): string {
@@ -440,11 +536,14 @@ function hashText(text: string): string {
 }
 
 function hashTaskSourceInputs(inputs: ReadonlyArray<TaskProjectionSourceHashInput>): string {
-  return hashText(JSON.stringify(inputs.map(({ kind, sourcePath: inputPath, body }) => ({
-    kind,
-    sourcePath: inputPath,
-    body
-  }))));
+  return hashText(JSON.stringify({
+    schema: "task-projection-source/v2",
+    inputs: inputs.map(({ kind, sourcePath: inputPath, body, contentSha256 }) => ({
+      kind,
+      sourcePath: inputPath,
+      contentSha256: contentSha256 ?? sha256Text(body)
+    }))
+  }));
 }
 
 export function compareRows(a: TaskProjectionRow, b: TaskProjectionRow): number {

@@ -460,7 +460,12 @@ test("corrupted SQLite projection is reported with a stable warning and rebuilt 
     const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
     const db = new DatabaseSync(projectionPath);
     try {
-      db.prepare("UPDATE task_projection SET attribution_json = ? WHERE task_id = ?").run("{bad-json", "task-1");
+      db.prepare(`
+        INSERT INTO entity_attribution_summary (
+          entity_kind, entity_id, originator_json, latest_actor_json, trail_count, completeness
+        ) VALUES ('task', ?, NULL, ?, 1, 'complete')
+        ON CONFLICT (entity_kind, entity_id) DO UPDATE SET latest_actor_json = excluded.latest_actor_json
+      `).run("task-1", "{bad-json");
     } finally {
       db.close();
     }

@@ -51,12 +51,12 @@ test("projection reads reject valid-looking attribution tampering", () => {
     const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
     const db = new DatabaseSync(projectionPath);
     try {
-      db.prepare("UPDATE task_projection SET attribution_json = ? WHERE task_id = ?").run(JSON.stringify({
-        originator: { principal: { kind: "person", personId: "attacker" }, executor: null },
-        latestActor: { principal: { kind: "person", personId: "attacker" }, executor: null },
-        trailCount: 99,
-        completeness: "complete"
-      }), "task-a");
+      const attacker = JSON.stringify({ principal: { kind: "person", personId: "attacker" }, executor: null });
+      db.prepare(`
+        UPDATE entity_attribution_summary
+        SET originator_json = ?, latest_actor_json = ?, trail_count = 99, completeness = 'complete'
+        WHERE entity_kind = 'task' AND entity_id = ?
+      `).run(attacker, attacker, "task-a");
     } finally {
       db.close();
     }
@@ -283,12 +283,11 @@ test("incremental publish falls back to a stable rebuild after a cross-generatio
     mkdirSync(path.join(rootDir, "harness/sessions"), { recursive: true });
     writeIntegrityDecision(rootDir, "Decision B");
 
-    const sessionsRoot = path.join(rootDir, "harness/sessions");
-    const originalReadStableDirents = localProjectionSourceFileSystem.readStableDirents;
+    const originalReadStableText = localProjectionSourceFileSystem.readStableText;
     let mutated = false;
-    localProjectionSourceFileSystem.readStableDirents = (inputPath) => {
-      const result = originalReadStableDirents(inputPath);
-      if (!mutated && inputPath === sessionsRoot) {
+    localProjectionSourceFileSystem.readStableText = (inputPath) => {
+      const result = originalReadStableText(inputPath);
+      if (!mutated && inputPath === decisionPath) {
         mutated = true;
         writeIntegrityDecision(rootDir, "Decision C");
       }
@@ -302,7 +301,7 @@ test("incremental publish falls back to a stable rebuild after a cross-generatio
         previousSourceFingerprint
       });
     } finally {
-      localProjectionSourceFileSystem.readStableDirents = originalReadStableDirents;
+      localProjectionSourceFileSystem.readStableText = originalReadStableText;
     }
 
     assert.equal(mutated, true);

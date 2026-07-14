@@ -20,9 +20,10 @@ import {
 } from "./sqlite-projection-store.ts";
 import { compareDecisionRows, hashDecisionProjectionRows } from "./sqlite-decision-source.ts";
 import {
-  applyDeclaredProjectionDeltaToSnapshots,
   buildDeclaredProjectionDeltaFromSources,
+  declaredProjectionRowsMatchManifest,
   declaredSourceManifestRows,
+  hashDeclaredProjectionIntegrityRows,
   hashDeclaredSourceManifestRows,
   readDeclaredSourceManifestRows,
   replaceDeclaredSourceManifestRows
@@ -45,7 +46,6 @@ import { compareRows, hashExactRows, taskEntryToRow } from "./sqlite-task-source
 import {
   captureProjectionSourceFingerprint,
   captureProjectionSourceSnapshot,
-  hashDeclaredProjectionSnapshots,
   hashProjectionLegacyPersonIds,
   readDeclaredProjectionSnapshots
 } from "./projection-source-snapshot.ts";
@@ -94,8 +94,8 @@ export function rebuildTaskProjection(options: TaskProjectionOptions): Projectio
   const decisionRows = snapshot.decisionRows;
   const rowsHash = hashExactRows(rows);
   const decisionRowsHash = hashDecisionProjectionRows(decisionRows);
-  const declaredRowsHash = hashDeclaredProjectionSnapshots(snapshot.declaredTables);
   const declaredManifestRows = declaredSourceManifestRows(snapshot.declaredTables, snapshot.declaredSources);
+  const declaredRowsHash = hashDeclaredProjectionIntegrityRows(declaredManifestRows);
   const declaredManifestHash = hashDeclaredSourceManifestRows(declaredManifestRows);
   const relationGraph = stableBuild.relationGraph;
   const sourceCache = stableBuild.sourceCache;
@@ -124,7 +124,7 @@ export function rebuildTaskProjection(options: TaskProjectionOptions): Projectio
     yield* replaceAttributionProjectionRows(sql, snapshot.attributionEvents);
     yield* materializeEntityAttributionBlocks(sql, snapshot.attributionEvents);
   }));
-  rememberProjectionValidation(projectionPath, declaredManifestRows);
+  rememberProjectionValidation(projectionPath, declaredManifestRows, undefined, sourceCache);
   return {
     rows,
     warnings: source.warnings
@@ -141,8 +141,8 @@ function captureStableProjectionBuild(runtimeContext: ReturnType<typeof createHa
     try {
       const snapshot = captureProjectionSourceSnapshot(runtimeContext);
       const relationGraph = buildRelationGraphProjection(runtimeContext, snapshot.taskSource.sourceInputs);
-      const verified = captureProjectionSourceFingerprint(runtimeContext);
-      const sourceCache = captureProjectionSourceCacheSnapshot(runtimeContext);
+      const verified = captureProjectionSourceFingerprint(runtimeContext, [], "verify");
+      const sourceCache = captureProjectionSourceCacheSnapshot(runtimeContext, true);
       if (verified.fingerprint === snapshot.fingerprint && sourceCache) return { snapshot, relationGraph, sourceCache };
       lastFailure = new Error("projection authored sources did not stabilize during rebuild");
     } catch (error) {
@@ -247,7 +247,11 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
       existingDeclaredTables = null;
     }
   }
-  if (!cachedValidation && (existingDeclaredTables === null || existing.meta.declaredRowsHash !== hashDeclaredProjectionSnapshots(existingDeclaredTables))) {
+  if (!cachedValidation && (
+    existingDeclaredTables === null ||
+    existing.meta.declaredRowsHash !== hashDeclaredProjectionIntegrityRows(declaredManifest) ||
+    !declaredProjectionRowsMatchManifest(existingDeclaredTables, declaredManifest)
+  )) {
     warnings.push(hardFail(
       "generated-cache",
       "projection_tampered",
@@ -297,9 +301,7 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
       existing.meta.legacyPersonIdsHash === legacyPersonIdsHash;
     if (declaredOnly) {
       try {
-        existingDeclaredTables ??= readDeclaredProjectionSnapshots(projectionPath);
         const declaredDelta = buildDeclaredProjectionDeltaFromSources(runtimeContext, declaredManifest, snapshot.declaredSources);
-        const currentDeclaredTables = applyDeclaredProjectionDeltaToSnapshots(existingDeclaredTables, declaredDelta);
         updateProjectionDatabase(projectionPath, {
           deleteTaskIds: [],
           upsertTaskRows: [],
@@ -308,13 +310,18 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
           meta: {
             ...existing.meta,
             sourceHash: snapshot.fingerprint,
-            declaredRowsHash: hashDeclaredProjectionSnapshots(currentDeclaredTables),
+            declaredRowsHash: hashDeclaredProjectionIntegrityRows(declaredDelta.manifest.currentRows),
             declaredManifestHash: hashDeclaredSourceManifestRows(declaredDelta.manifest.currentRows)
           },
           declaredDelta,
           taskFieldExtensions: options.taskFieldExtensions
         });
-        rememberProjectionValidation(projectionPath, declaredDelta.manifest.currentRows);
+        rememberProjectionValidation(
+          projectionPath,
+          declaredDelta.manifest.currentRows,
+          undefined,
+          cachedValidation?.sourceCache ?? persistedSourceCache ?? undefined
+        );
         warnings.push(warning(
           "generated-cache",
           "projection_stale",
@@ -340,7 +347,14 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
   if (persistedSourceCache && currentSourceCache && currentSourceCache.hash !== persistedSourceCache.hash) {
     updateProjectionSourceCacheSnapshot(projectionPath, persistedSourceCache, currentSourceCache);
   }
-  if (!cachedValidation) rememberProjectionValidation(projectionPath, declaredManifest);
+  if (!cachedValidation?.projection || !cachedValidation.sourceCache) {
+    rememberProjectionValidation(
+      projectionPath,
+      declaredManifest,
+      existing,
+      cachedValidation?.sourceCache ?? persistedSourceCache ?? undefined
+    );
+  }
 
   return {
     rows: [...existing.rows].sort(compareRows),

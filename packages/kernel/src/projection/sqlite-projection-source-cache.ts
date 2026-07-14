@@ -7,16 +7,24 @@ import { resolveHarnessLayout } from "../layout/index.ts";
 import { readFrontmatter } from "../markdown/frontmatter.ts";
 import {
   captureAttributionEventSourcePersistentCache,
+  decodeUnionAttributionEventBody,
   restoreAttributionEventSourcePersistentCache,
   type AttributionEventSourcePersistentCache
 } from "../local/attribution-event-source.ts";
 import {
   captureMarkdownSourcePersistentCache,
+  readMarkdownSource,
   restoreMarkdownSourcePersistentCache,
   type MarkdownSourcePersistentCache,
   type TaskProjectionSourceHashInput
 } from "./sqlite-task-source.ts";
 import { runSqlite } from "./sqlite-projection-store.ts";
+import {
+  applyProjectionSourceCacheStoredChange,
+  readProjectionSourceCacheRows,
+  readProjectionSourceCacheStoredBody,
+  replaceProjectionSourceCacheStoredRows
+} from "./sqlite-projection-source-cache-store.ts";
 
 type ProjectionSourceCacheKind = "task" | "attribution";
 
@@ -46,79 +54,166 @@ export interface ProjectionSourceCacheSnapshot {
   readonly files: ReadonlyArray<ProjectionSourceCacheFileRow>;
   readonly watches: ReadonlyArray<ProjectionSourceCacheWatchRow>;
   readonly metadata: ReadonlyArray<ProjectionSourceCacheMetadataRow>;
+  readonly kindHashes: Readonly<Record<ProjectionSourceCacheKind, string>>;
   readonly hash: string;
 }
 
 export interface ProjectionSourceCacheChange {
   readonly previous: ProjectionSourceCacheSnapshot;
   readonly current: ProjectionSourceCacheSnapshot;
-}
-
-interface SourceCacheFileRecord {
-  readonly cache_kind: unknown;
-  readonly source_path: unknown;
-  readonly source_kind: unknown;
-  readonly owner_id: unknown;
-  readonly stat_signature: unknown;
-  readonly content_sha256: unknown;
-  readonly body: unknown;
-}
-
-interface SourceCacheWatchRecord {
-  readonly cache_kind: unknown;
-  readonly source_path: unknown;
-  readonly stat_signature: unknown;
-}
-
-interface SourceCacheMetadataRecord {
-  readonly cache_kind: unknown;
-  readonly payload_json: unknown;
-  readonly payload_sha256: unknown;
+  readonly deleteFiles: ReadonlyArray<ProjectionSourceCacheFileRow>;
+  readonly upsertFiles: ReadonlyArray<ProjectionSourceCacheFileRow>;
+  readonly deleteWatches: ReadonlyArray<ProjectionSourceCacheWatchRow>;
+  readonly upsertWatches: ReadonlyArray<ProjectionSourceCacheWatchRow>;
+  readonly upsertMetadata: ReadonlyArray<ProjectionSourceCacheMetadataRow>;
 }
 
 export function captureProjectionSourceCacheSnapshot(
-  rootInput: HarnessLayoutInput
+  rootInput: HarnessLayoutInput,
+  reuseValidatedCaches = false,
+  previousSnapshot?: ProjectionSourceCacheSnapshot,
+  refreshKinds: Readonly<{ task: boolean; attribution: boolean }> = { task: true, attribution: true }
 ): ProjectionSourceCacheSnapshot | null {
-  const task = captureMarkdownSourcePersistentCache(rootInput);
-  const attribution = captureAttributionEventSourcePersistentCache(rootInput);
-  if (!task || !attribution) return null;
+  const task = refreshKinds.task ? captureMarkdownSourcePersistentCache(rootInput, reuseValidatedCaches) : null;
+  const attribution = refreshKinds.attribution ? captureAttributionEventSourcePersistentCache(rootInput, reuseValidatedCaches) : null;
+  if ((refreshKinds.task && !task) || (refreshKinds.attribution && !attribution) ||
+      (!refreshKinds.task && !previousSnapshot) || (!refreshKinds.attribution && !previousSnapshot)) return null;
   const layout = resolveHarnessLayout(rootInput);
-  const taskEntries = new Map(task.result.entries.map((entry) => [entry.indexPath, entry]));
-  const taskFiles = task.result.sourceInputs.map((input) => {
+  const taskEntries = new Map(task?.result.entries.map((entry) => [
+    path.isAbsolute(entry.indexPath)
+      ? rootRelativePath(layout.rootDir, entry.indexPath)
+      : entry.indexPath.split(path.sep).join("/"),
+    entry
+  ]) ?? []);
+  const previousTaskFiles = new Map(previousSnapshot?.files
+    .filter((row) => row.cacheKind === "task")
+    .map((row) => [row.sourcePath, row]) ?? []);
+  const taskFiles = task ? task.result.sourceInputs.map((input) => {
     const entry = taskEntries.get(input.sourcePath);
+    const previous = previousTaskFiles.get(input.sourcePath);
+    if (previous && previous.sourceKind === input.kind && previous.statSignature === input.statSignature &&
+        previous.ownerId === entry?.taskId) return previous;
     return {
       cacheKind: "task" as const,
       sourcePath: input.sourcePath,
       sourceKind: input.kind,
       ...(entry ? { ownerId: entry.taskId } : {}),
       statSignature: input.statSignature,
-      contentSha256: sha256Text(input.body),
+      contentSha256: input.contentSha256 ?? sha256Text(input.body),
       body: input.body
     };
-  });
-  const attributionFiles = attribution.source.inputs.map((input) => ({
+  }) : previousSnapshot!.files.filter((row) => row.cacheKind === "task");
+  const attributionFiles = attribution ? attribution.source.inputs.map((input) => ({
     cacheKind: "attribution" as const,
     sourcePath: rootRelativePath(layout.rootDir, path.join(layout.attributionEventsRoot, input.relativePath)),
     sourceKind: "attribution-event",
+    ownerId: input.eventId ?? decodeUnionAttributionEventBody(input.body).eventId,
     statSignature: input.statSignature,
     contentSha256: input.contentSha256,
     body: input.body
-  }));
-  const fileKeys = new Set([...taskFiles, ...attributionFiles].map(cachePathKey));
-  const watches = [
-    ...task.directorySignatures.map((entry) => ({ cacheKind: "task" as const, sourcePath: entry.relativePath, statSignature: entry.signature })),
-    ...attribution.signatures
-      .filter((entry) => !fileKeys.has(cachePathKey({ cacheKind: "attribution", sourcePath: entry.relativePath })))
-      .map((entry) => ({ cacheKind: "attribution" as const, sourcePath: entry.relativePath, statSignature: entry.signature }))
-  ];
+  })) : previousSnapshot!.files.filter((row) => row.cacheKind === "attribution");
+  const attributionFileKeys = attribution ? new Set(attributionFiles.map(cachePathKey)) : null;
+  const taskWatches = task
+    ? task.directorySignatures.map((entry) => ({ cacheKind: "task" as const, sourcePath: entry.relativePath, statSignature: entry.signature }))
+    : previousSnapshot!.watches.filter((row) => row.cacheKind === "task");
+  const attributionWatches = attribution
+      ? attribution.signatures
+        .filter((entry) => !attributionFileKeys!.has(cachePathKey({ cacheKind: "attribution", sourcePath: entry.relativePath })))
+        .map((entry) => ({ cacheKind: "attribution" as const, sourcePath: entry.relativePath, statSignature: entry.signature }))
+      : previousSnapshot!.watches.filter((row) => row.cacheKind === "attribution");
+  const previousMetadata = new Map(previousSnapshot?.metadata.map((row) => [row.cacheKind, row]) ?? []);
   return projectionSourceCacheSnapshot({
-    files: [...taskFiles, ...attributionFiles],
-    watches,
+    files: [
+      ...attributionFiles,
+      ...taskFiles.sort(compareCachePaths)
+    ],
+    watches: [
+      ...attributionWatches.sort(compareCachePaths),
+      ...taskWatches.sort(compareCachePaths)
+    ],
     metadata: [
-      metadataRow("task", { schema: "task-source-cache-metadata/v1", layoutIdentity: task.layoutIdentity, warnings: task.result.warnings }),
-      metadataRow("attribution", { schema: "attribution-source-cache-metadata/v1", layoutIdentity: attribution.layoutIdentity })
+      task
+        ? metadataRow("task", { schema: "task-source-cache-metadata/v1", layoutIdentity: task.layoutIdentity, warnings: task.result.warnings })
+        : previousMetadata.get("task")!,
+      attribution
+        ? metadataRow("attribution", { schema: "attribution-source-cache-metadata/v1", layoutIdentity: attribution.layoutIdentity })
+        : previousMetadata.get("attribution")!
     ]
+  }, !reuseValidatedCaches, previousSnapshot ? {
+    ...(!task ? { task: previousSnapshot.kindHashes.task } : {}),
+    ...(!attribution ? { attribution: previousSnapshot.kindHashes.attribution } : {})
+  } : {}, true);
+}
+
+export function refreshProjectionSourceCacheSnapshotForTouchedTaskPaths(
+  rootInput: HarnessLayoutInput,
+  previousSnapshot: ProjectionSourceCacheSnapshot,
+  taskSource: ReturnType<typeof readMarkdownSource>,
+  touchedPaths: ReadonlyArray<string>
+): ProjectionSourceCacheSnapshot | null {
+  if (touchedPaths.length === 0) return null;
+  const layout = resolveHarnessLayout(rootInput);
+  const currentInputs = new Map(taskSource.sourceInputs.map((input) => [input.sourcePath, input]));
+  const taskOwners = new Map(taskSource.entries.map((entry) => [
+    rootRelativePath(layout.rootDir, entry.indexPath),
+    entry.taskId
+  ]));
+  const fileIndexes = new Map(previousSnapshot.files.map((row, index) => [cachePathKey(row), index]));
+  const files = [...previousSnapshot.files];
+  for (const touchedPath of touchedPaths) {
+    const sourcePathValue = rootRelativePath(layout.rootDir, touchedPath);
+    const input = currentInputs.get(sourcePathValue);
+    const index = fileIndexes.get(cachePathKey({ cacheKind: "task", sourcePath: sourcePathValue }));
+    if (!input || index === undefined) return null;
+    const row: ProjectionSourceCacheFileRow = {
+      cacheKind: "task",
+      sourcePath: sourcePathValue,
+      sourceKind: input.kind,
+      ...(taskOwners.has(sourcePathValue) ? { ownerId: taskOwners.get(sourcePathValue) } : {}),
+      statSignature: input.statSignature,
+      contentSha256: input.contentSha256 ?? sha256Text(input.body),
+      body: input.body
+    };
+    if (!validSourceCacheBody(row)) return null;
+    files[index] = row;
+  }
+  const taskMetadata = metadataRow("task", {
+    schema: "task-source-cache-metadata/v1",
+    layoutIdentity: [layout.rootDir, layout.authoredRoot, layout.tasksRoot, layout.decisionsRoot].join("\0"),
+    warnings: taskSource.warnings
   });
+  const metadata = previousSnapshot.metadata.map((row) => row.cacheKind === "task" ? taskMetadata : row);
+  return projectionSourceCacheSnapshot({
+    files,
+    watches: previousSnapshot.watches,
+    metadata
+  }, false, { attribution: previousSnapshot.kindHashes.attribution }, true);
+}
+
+export function refreshProjectionSourceCacheAfterIncrementalChange(input: {
+  readonly rootInput: HarnessLayoutInput;
+  readonly previousSnapshot: ProjectionSourceCacheSnapshot | undefined;
+  readonly taskSource: ReturnType<typeof readMarkdownSource>;
+  readonly touchedTaskPaths: ReadonlyArray<string>;
+  readonly taskChanged: boolean;
+  readonly attributionChanged: boolean;
+}): ProjectionSourceCacheSnapshot | null {
+  const fastSnapshot = input.previousSnapshot && input.taskChanged && !input.attributionChanged
+    ? refreshProjectionSourceCacheSnapshotForTouchedTaskPaths(
+        input.rootInput,
+        input.previousSnapshot,
+        input.taskSource,
+        input.touchedTaskPaths
+      )
+    : null;
+  return fastSnapshot ?? captureProjectionSourceCacheSnapshot(
+    input.rootInput,
+    true,
+    input.previousSnapshot,
+    input.previousSnapshot
+      ? { task: input.taskChanged, attribution: input.attributionChanged }
+      : { task: true, attribution: true }
+  );
 }
 
 export function readProjectionSourceCacheSnapshot(projectionPath: string): ProjectionSourceCacheSnapshot {
@@ -126,33 +221,24 @@ export function readProjectionSourceCacheSnapshot(projectionPath: string): Proje
     const sql = yield* SqlClient.SqlClient;
     yield* sql`BEGIN`;
     try {
-      const files = yield* sql<SourceCacheFileRecord>`
-        SELECT cache_kind, source_path, source_kind, owner_id, stat_signature,
-               content_sha256, body
-        FROM projection_source_cache_files
-        ORDER BY cache_kind, source_path
-      `;
-      const watches = yield* sql<SourceCacheWatchRecord>`
-        SELECT cache_kind, source_path, stat_signature
-        FROM projection_source_cache_watches
-        ORDER BY cache_kind, source_path
-      `;
-      const metadata = yield* sql<SourceCacheMetadataRecord>`
-        SELECT cache_kind, payload_json, payload_sha256
-        FROM projection_source_cache_metadata
-        ORDER BY cache_kind
-      `;
-      const snapshot = projectionSourceCacheSnapshot({
-        files: files.map(recordToFileRow),
-        watches: watches.map(recordToWatchRow),
-        metadata: metadata.map(recordToMetadataRow)
-      });
+      const snapshot = projectionSourceCacheSnapshot(yield* readProjectionSourceCacheRows(sql));
       yield* sql`COMMIT`;
       return snapshot;
     } catch (error) {
       yield* sql`ROLLBACK`;
       throw error;
     }
+  }));
+}
+
+export function readProjectionSourceCacheBody(
+  projectionPath: string,
+  cacheKindValue: ProjectionSourceCacheKind,
+  sourcePath: string
+): string | undefined {
+  return runSqlite(projectionPath, Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    return yield* readProjectionSourceCacheStoredBody(sql, cacheKindValue, sourcePath);
   }));
 }
 
@@ -176,7 +262,13 @@ export function restoreProjectionSourceCacheSnapshot(
     }
     const taskFiles = snapshot.files.filter((row) => row.cacheKind === "task");
     const taskInputs: TaskProjectionSourceHashInput[] = taskFiles
-      .map((row) => ({ kind: row.sourceKind, sourcePath: row.sourcePath, body: row.body, statSignature: row.statSignature }))
+      .map((row) => ({
+        kind: row.sourceKind,
+        sourcePath: row.sourcePath,
+        body: row.body,
+        statSignature: row.statSignature,
+        contentSha256: row.contentSha256
+      }))
       .sort(compareTaskSourceInputs);
     const task: MarkdownSourcePersistentCache = {
       schema: "markdown-source-cache/v1",
@@ -207,7 +299,8 @@ export function restoreProjectionSourceCacheSnapshot(
           relativePath: path.relative(layout.attributionEventsRoot, path.resolve(layout.rootDir, row.sourcePath)).split(path.sep).join("/"),
           body: row.body,
           statSignature: row.statSignature,
-          contentSha256: row.contentSha256
+          contentSha256: row.contentSha256,
+          ...(row.ownerId ? { eventId: row.ownerId } : {})
         })),
         hash: stablePayloadHash({
           schema: "attribution-event-source/v2",
@@ -239,44 +332,36 @@ export function replaceProjectionSourceCacheRows(
   sql: SqlClient.SqlClient,
   snapshot: ProjectionSourceCacheSnapshot
 ): Effect.Effect<void, unknown> {
-  return Effect.gen(function* () {
-    yield* createProjectionSourceCacheTables(sql);
-    yield* sql`DELETE FROM projection_source_cache_files`;
-    yield* sql`DELETE FROM projection_source_cache_watches`;
-    yield* sql`DELETE FROM projection_source_cache_metadata`;
-    for (const rows of chunks(snapshot.files, 250)) yield* insertFileRows(sql, rows);
-    for (const rows of chunks(snapshot.watches, 500)) yield* insertWatchRows(sql, rows);
-    for (const row of snapshot.metadata) yield* upsertMetadataRow(sql, row);
-  });
+  return replaceProjectionSourceCacheStoredRows(sql, snapshot);
 }
 
 export function applyProjectionSourceCacheChange(
   sql: SqlClient.SqlClient,
   change: ProjectionSourceCacheChange
 ): Effect.Effect<void, unknown> {
-  return Effect.gen(function* () {
-    yield* createProjectionSourceCacheTables(sql);
-    const currentFiles = new Map(change.current.files.map((row) => [cachePathKey(row), row]));
-    const previousFiles = new Map(change.previous.files.map((row) => [cachePathKey(row), row]));
-    for (const [key, row] of previousFiles) {
-      if (!currentFiles.has(key)) yield* deleteCachePath(sql, "projection_source_cache_files", row);
-    }
-    for (const [key, row] of currentFiles) {
-      if (!sameFileRow(previousFiles.get(key), row)) yield* upsertFileRow(sql, row);
-    }
-    const currentWatches = new Map(change.current.watches.map((row) => [cachePathKey(row), row]));
-    const previousWatches = new Map(change.previous.watches.map((row) => [cachePathKey(row), row]));
-    for (const [key, row] of previousWatches) {
-      if (!currentWatches.has(key)) yield* deleteCachePath(sql, "projection_source_cache_watches", row);
-    }
-    for (const [key, row] of currentWatches) {
-      if (!sameWatchRow(previousWatches.get(key), row)) yield* upsertWatchRow(sql, row);
-    }
-    const previousMetadata = new Map(change.previous.metadata.map((row) => [row.cacheKind, row]));
-    for (const row of change.current.metadata) {
-      if (previousMetadata.get(row.cacheKind)?.payloadSha256 !== row.payloadSha256) yield* upsertMetadataRow(sql, row);
-    }
-  });
+  return applyProjectionSourceCacheStoredChange(sql, change);
+}
+
+export function buildProjectionSourceCacheChange(
+  previous: ProjectionSourceCacheSnapshot,
+  current: ProjectionSourceCacheSnapshot,
+  changedKinds: ReadonlyArray<ProjectionSourceCacheKind> = ["task", "attribution"]
+): ProjectionSourceCacheChange {
+  const kinds = new Set(changedKinds);
+  const currentFiles = new Map(current.files.filter((row) => kinds.has(row.cacheKind)).map((row) => [cachePathKey(row), row]));
+  const previousFiles = new Map(previous.files.filter((row) => kinds.has(row.cacheKind)).map((row) => [cachePathKey(row), row]));
+  const currentWatches = new Map(current.watches.filter((row) => kinds.has(row.cacheKind)).map((row) => [cachePathKey(row), row]));
+  const previousWatches = new Map(previous.watches.filter((row) => kinds.has(row.cacheKind)).map((row) => [cachePathKey(row), row]));
+  const previousMetadata = new Map(previous.metadata.map((row) => [row.cacheKind, row]));
+  return {
+    previous,
+    current,
+    deleteFiles: [...previousFiles].filter(([key]) => !currentFiles.has(key)).map(([, row]) => row),
+    upsertFiles: [...currentFiles].filter(([key, row]) => !sameFileRow(previousFiles.get(key), row)).map(([, row]) => row),
+    deleteWatches: [...previousWatches].filter(([key]) => !currentWatches.has(key)).map(([, row]) => row),
+    upsertWatches: [...currentWatches].filter(([key, row]) => !sameWatchRow(previousWatches.get(key), row)).map(([, row]) => row),
+    upsertMetadata: current.metadata.filter((row) => kinds.has(row.cacheKind) && previousMetadata.get(row.cacheKind)?.payloadSha256 !== row.payloadSha256)
+  };
 }
 
 export function updateProjectionSourceCacheSnapshot(
@@ -288,7 +373,7 @@ export function updateProjectionSourceCacheSnapshot(
     const sql = yield* SqlClient.SqlClient;
     yield* sql`BEGIN IMMEDIATE`;
     try {
-      yield* applyProjectionSourceCacheChange(sql, { previous, current });
+      yield* applyProjectionSourceCacheChange(sql, buildProjectionSourceCacheChange(previous, current));
       yield* sql`
         INSERT OR REPLACE INTO projection_meta (key, value)
         VALUES ('sourceCacheHash', ${current.hash})
@@ -305,29 +390,72 @@ function projectionSourceCacheSnapshot(input: {
   readonly files: ReadonlyArray<ProjectionSourceCacheFileRow>;
   readonly watches: ReadonlyArray<ProjectionSourceCacheWatchRow>;
   readonly metadata: ReadonlyArray<ProjectionSourceCacheMetadataRow>;
-}): ProjectionSourceCacheSnapshot {
-  const files = [...input.files].sort(compareCachePaths);
-  const watches = [...input.watches].sort(compareCachePaths);
+}, validateBodies = true, reusableKindHashes: Readonly<Partial<Record<ProjectionSourceCacheKind, string>>> = {}, presorted = false): ProjectionSourceCacheSnapshot {
+  const files = presorted ? input.files : [...input.files].sort(compareCachePaths);
+  const watches = presorted ? input.watches : [...input.watches].sort(compareCachePaths);
   const metadata = [...input.metadata].sort((left, right) => left.cacheKind.localeCompare(right.cacheKind));
   assertCacheKinds(metadata.map((row) => row.cacheKind));
-  for (const row of files) {
-    if (sha256Text(row.body) !== row.contentSha256) throw new Error(`projection source cache body hash mismatch: ${row.sourcePath}`);
+  if (validateBodies) for (const row of files) {
+    if (!validSourceCacheBody(row)) throw new Error(`projection source cache body hash mismatch: ${row.sourcePath}`);
   }
   for (const row of metadata) {
     const expected = stablePayloadHash({ schema: "projection-source-cache-metadata-payload/v1", payloadJson: row.payloadJson });
     if (row.payloadSha256 !== expected) throw new Error(`projection source cache metadata hash mismatch: ${row.cacheKind}`);
   }
+  const kindHashes = {
+    attribution: reusableKindHashes.attribution ?? sourceCacheKindHash("attribution", files, watches, metadata),
+    task: reusableKindHashes.task ?? sourceCacheKindHash("task", files, watches, metadata)
+  };
   return {
     files,
     watches,
     metadata,
+    kindHashes,
     hash: stablePayloadHash({
-      schema: "projection-source-cache/v2",
-      files: files.map(({ body: _body, ...row }) => row),
-      watches,
-      metadata: metadata.map(({ cacheKind, payloadSha256 }) => ({ cacheKind, payloadSha256 }))
+      schema: "projection-source-cache/v3",
+      kindHashes
     })
   };
+}
+
+function validSourceCacheBody(row: ProjectionSourceCacheFileRow): boolean {
+  if (sha256Text(row.body) === row.contentSha256) return true;
+  // Attribution cache rows omit raw authored bodies and are reconstructed from
+  // normalized, integrity-hashed event tables, so only identity is compared here.
+  if (row.cacheKind !== "attribution" || !row.ownerId) return false;
+  try {
+    return decodeUnionAttributionEventBody(row.body).eventId === row.ownerId;
+  } catch {
+    return false;
+  }
+}
+
+function sourceCacheKindHash(
+  kind: ProjectionSourceCacheKind,
+  files: ReadonlyArray<ProjectionSourceCacheFileRow>,
+  watches: ReadonlyArray<ProjectionSourceCacheWatchRow>,
+  metadata: ReadonlyArray<ProjectionSourceCacheMetadataRow>
+): string {
+  return sha256Text(JSON.stringify({
+    schema: "projection-source-cache-kind/v2",
+    cacheKind: kind,
+    files: files
+      .filter((row) => row.cacheKind === kind)
+      .map((row) => [
+        row.cacheKind,
+        row.sourcePath,
+        row.sourceKind,
+        row.ownerId ?? null,
+        row.statSignature,
+        row.contentSha256
+      ]),
+    watches: watches
+      .filter((row) => row.cacheKind === kind)
+      .map((row) => [row.cacheKind, row.sourcePath, row.statSignature]),
+    metadata: metadata
+      .filter((row) => row.cacheKind === kind)
+      .map((row) => [row.cacheKind, row.payloadSha256])
+  }));
 }
 
 function metadataRow(cacheKind: ProjectionSourceCacheKind, payload: unknown): ProjectionSourceCacheMetadataRow {
@@ -337,136 +465,6 @@ function metadataRow(cacheKind: ProjectionSourceCacheKind, payload: unknown): Pr
     payloadJson,
     payloadSha256: stablePayloadHash({ schema: "projection-source-cache-metadata-payload/v1", payloadJson })
   };
-}
-
-function createProjectionSourceCacheTables(sql: SqlClient.SqlClient): Effect.Effect<void, unknown> {
-  return Effect.gen(function* () {
-    yield* sql`
-      CREATE TABLE IF NOT EXISTS projection_source_cache_files (
-        cache_kind TEXT NOT NULL,
-        source_path TEXT NOT NULL,
-        source_kind TEXT NOT NULL,
-        owner_id TEXT,
-        stat_signature TEXT NOT NULL,
-        content_sha256 TEXT NOT NULL,
-        body TEXT NOT NULL,
-        PRIMARY KEY (cache_kind, source_path)
-      )
-    `;
-    yield* sql`
-      CREATE TABLE IF NOT EXISTS projection_source_cache_watches (
-        cache_kind TEXT NOT NULL,
-        source_path TEXT NOT NULL,
-        stat_signature TEXT,
-        PRIMARY KEY (cache_kind, source_path)
-      )
-    `;
-    yield* sql`
-      CREATE TABLE IF NOT EXISTS projection_source_cache_metadata (
-        cache_kind TEXT PRIMARY KEY,
-        payload_json TEXT NOT NULL,
-        payload_sha256 TEXT NOT NULL
-      )
-    `;
-  });
-}
-
-function upsertFileRow(sql: SqlClient.SqlClient, row: ProjectionSourceCacheFileRow): Effect.Effect<unknown, unknown> {
-  return sql`
-    INSERT OR REPLACE INTO projection_source_cache_files (
-      cache_kind, source_path, source_kind, owner_id, stat_signature,
-      content_sha256, body
-    ) VALUES (
-      ${row.cacheKind}, ${row.sourcePath}, ${row.sourceKind}, ${row.ownerId ?? null},
-      ${row.statSignature}, ${row.contentSha256}, ${row.body}
-    )
-  `;
-}
-
-function insertFileRows(
-  sql: SqlClient.SqlClient,
-  rows: ReadonlyArray<ProjectionSourceCacheFileRow>
-): Effect.Effect<unknown, unknown> {
-  return sql.unsafe(`
-    INSERT INTO projection_source_cache_files (
-      cache_kind, source_path, source_kind, owner_id, stat_signature,
-      content_sha256, body
-    ) VALUES ${rows.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ")}
-  `, rows.flatMap((row) => [
-    row.cacheKind,
-    row.sourcePath,
-    row.sourceKind,
-    row.ownerId ?? null,
-    row.statSignature,
-    row.contentSha256,
-    row.body
-  ]));
-}
-
-function upsertWatchRow(sql: SqlClient.SqlClient, row: ProjectionSourceCacheWatchRow): Effect.Effect<unknown, unknown> {
-  return sql`
-    INSERT OR REPLACE INTO projection_source_cache_watches (cache_kind, source_path, stat_signature)
-    VALUES (${row.cacheKind}, ${row.sourcePath}, ${row.statSignature})
-  `;
-}
-
-function insertWatchRows(
-  sql: SqlClient.SqlClient,
-  rows: ReadonlyArray<ProjectionSourceCacheWatchRow>
-): Effect.Effect<unknown, unknown> {
-  return sql.unsafe(`
-    INSERT INTO projection_source_cache_watches (cache_kind, source_path, stat_signature)
-    VALUES ${rows.map(() => "(?, ?, ?)").join(", ")}
-  `, rows.flatMap((row) => [row.cacheKind, row.sourcePath, row.statSignature]));
-}
-
-function upsertMetadataRow(sql: SqlClient.SqlClient, row: ProjectionSourceCacheMetadataRow): Effect.Effect<unknown, unknown> {
-  return sql`
-    INSERT OR REPLACE INTO projection_source_cache_metadata (cache_kind, payload_json, payload_sha256)
-    VALUES (${row.cacheKind}, ${row.payloadJson}, ${row.payloadSha256})
-  `;
-}
-
-function deleteCachePath(
-  sql: SqlClient.SqlClient,
-  table: "projection_source_cache_files" | "projection_source_cache_watches",
-  row: { readonly cacheKind: string; readonly sourcePath: string }
-): Effect.Effect<unknown, unknown> {
-  return sql.unsafe(`DELETE FROM ${table} WHERE cache_kind = ? AND source_path = ?`, [row.cacheKind, row.sourcePath]);
-}
-
-function recordToFileRow(record: SourceCacheFileRecord): ProjectionSourceCacheFileRow {
-  return {
-    cacheKind: cacheKind(record.cache_kind),
-    sourcePath: String(record.source_path),
-    sourceKind: String(record.source_kind),
-    ...(record.owner_id === null ? {} : { ownerId: String(record.owner_id) }),
-    statSignature: String(record.stat_signature),
-    contentSha256: String(record.content_sha256),
-    body: String(record.body)
-  };
-}
-
-function recordToWatchRow(record: SourceCacheWatchRecord): ProjectionSourceCacheWatchRow {
-  return {
-    cacheKind: cacheKind(record.cache_kind),
-    sourcePath: String(record.source_path),
-    statSignature: record.stat_signature === null ? null : String(record.stat_signature)
-  };
-}
-
-function recordToMetadataRow(record: SourceCacheMetadataRecord): ProjectionSourceCacheMetadataRow {
-  return {
-    cacheKind: cacheKind(record.cache_kind),
-    payloadJson: String(record.payload_json),
-    payloadSha256: String(record.payload_sha256)
-  };
-}
-
-function cacheKind(value: unknown): ProjectionSourceCacheKind {
-  const kind = String(value);
-  if (kind !== "task" && kind !== "attribution") throw new Error(`unknown projection source cache kind: ${kind}`);
-  return kind;
 }
 
 function requiredMetadata(
@@ -506,19 +504,26 @@ function compareTaskSourceInputs(left: TaskProjectionSourceHashInput, right: Tas
 }
 
 function taskSourceHash(inputs: ReadonlyArray<TaskProjectionSourceHashInput>): string {
-  return `sha256:${sha256Text(JSON.stringify(inputs.map(({ kind, sourcePath, body }) => ({ kind, sourcePath, body }))))}`;
+  return `sha256:${sha256Text(JSON.stringify({
+    schema: "task-projection-source/v2",
+    inputs: inputs.map(({ kind, sourcePath, body, contentSha256 }) => ({
+      kind,
+      sourcePath,
+      contentSha256: contentSha256 ?? sha256Text(body)
+    }))
+  }))}`;
 }
 
 function sameFileRow(left: ProjectionSourceCacheFileRow | undefined, right: ProjectionSourceCacheFileRow): boolean {
-  return left !== undefined && stablePayloadHash({ ...left, body: undefined }) === stablePayloadHash({ ...right, body: undefined });
+  return left !== undefined &&
+    left.cacheKind === right.cacheKind &&
+    left.sourcePath === right.sourcePath &&
+    left.sourceKind === right.sourceKind &&
+    left.ownerId === right.ownerId &&
+    left.statSignature === right.statSignature &&
+    left.contentSha256 === right.contentSha256;
 }
 
 function sameWatchRow(left: ProjectionSourceCacheWatchRow | undefined, right: ProjectionSourceCacheWatchRow): boolean {
   return left !== undefined && left.statSignature === right.statSignature;
-}
-
-function chunks<Value>(values: ReadonlyArray<Value>, size: number): ReadonlyArray<ReadonlyArray<Value>> {
-  const output: Value[][] = [];
-  for (let index = 0; index < values.length; index += size) output.push(values.slice(index, index + size));
-  return output;
 }

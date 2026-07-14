@@ -79,6 +79,38 @@ export function hashDeclaredSourceManifestRows(rows: ReadonlyArray<DeclaredSourc
   });
 }
 
+export function hashDeclaredProjectionIntegrityRows(rows: ReadonlyArray<DeclaredSourceManifestRow>): string {
+  return stablePayloadHash({
+    schema: "declared-projection-integrity/v1",
+    rows: rows
+      .filter((row) => row.primaryKey.length > 0)
+      .map(({ projectionTable, primaryKey, projectedRowSha256 }) => ({
+        projectionTable,
+        primaryKey,
+        projectedRowSha256
+      }))
+      .sort((left, right) => left.projectionTable.localeCompare(right.projectionTable)
+        || left.primaryKey.localeCompare(right.primaryKey))
+  });
+}
+
+export function declaredProjectionRowsMatchManifest(
+  tables: ReadonlyArray<DeclaredProjectionSnapshot>,
+  manifest: ReadonlyArray<DeclaredSourceManifestRow>
+): boolean {
+  const actual = new Map(tables.flatMap((table) => {
+    const primaryKey = table.declaration.projection.columns.find((column) => column.primaryKey)!;
+    return table.rows.map((row) => [
+      `${table.table}\0${String(row[primaryKey.name])}`,
+      stablePayloadHash(row)
+    ] as const);
+  }));
+  const expected = manifest.filter((row) => row.primaryKey.length > 0);
+  if (actual.size !== expected.length) return false;
+  return expected.every((row) =>
+    actual.get(`${row.projectionTable}\0${row.primaryKey}`) === row.projectedRowSha256);
+}
+
 export function buildDeclaredProjectionDelta(
   previousRows: ReadonlyArray<DeclaredSourceManifestRow>,
   currentTables: ReadonlyArray<DeclaredProjectionSnapshot>
@@ -241,7 +273,7 @@ export function replaceDeclaredSourceManifestRows(
   return Effect.gen(function* () {
     yield* createDeclaredSourceManifestTable(sql);
     yield* sql`DELETE FROM declared_source_manifest`;
-    for (const row of rows) yield* upsertDeclaredSourceManifestRow(sql, row);
+    for (const batch of chunks(rows, 500)) yield* insertDeclaredSourceManifestRows(sql, batch);
   });
 }
 
@@ -337,6 +369,26 @@ function upsertDeclaredSourceManifestRow(
   `;
 }
 
+function insertDeclaredSourceManifestRows(
+  sql: SqlClient.SqlClient,
+  rows: ReadonlyArray<DeclaredSourceManifestRow>
+): Effect.Effect<unknown, unknown> {
+  return sql.unsafe(`
+    INSERT INTO declared_source_manifest (
+      source_path, source_kind, projection_table, primary_key,
+      stat_signature, content_sha256, projected_row_sha256
+    ) VALUES ${rows.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ")}
+  `, rows.flatMap((row) => [
+    row.sourcePath,
+    row.sourceKind,
+    row.projectionTable,
+    row.primaryKey,
+    row.statSignature,
+    row.contentSha256,
+    row.projectedRowSha256
+  ]));
+}
+
 function recordToManifestRow(record: DeclaredSourceManifestRecord): DeclaredSourceManifestRow {
   return {
     sourcePath: String(record.source_path),
@@ -347,4 +399,10 @@ function recordToManifestRow(record: DeclaredSourceManifestRecord): DeclaredSour
     contentSha256: String(record.content_sha256),
     projectedRowSha256: String(record.projected_row_sha256)
   };
+}
+
+function chunks<Value>(values: ReadonlyArray<Value>, size: number): ReadonlyArray<ReadonlyArray<Value>> {
+  const output: Value[][] = [];
+  for (let index = 0; index < values.length; index += size) output.push(values.slice(index, index + size));
+  return output;
 }

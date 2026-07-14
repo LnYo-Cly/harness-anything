@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import {
   actorAxesBindingCoreDigestV2,
@@ -15,7 +16,11 @@ import {
   type SemanticMutationV2
 } from "../../src/integrity/semantic-mutation-integrity-v2.ts";
 import { decodeUnionAttributionEventBody } from "../../src/local/attribution-event-source.ts";
-import { readAttributionProjection } from "../../src/projection/sqlite-attribution-projection.ts";
+import {
+  materializeAttributionProjectionFromEvents,
+  readAttributionProjection
+} from "../../src/projection/sqlite-attribution-projection.ts";
+import { queryTaskProjectionRows } from "../../src/projection/sqlite-projection-store.ts";
 import { rebuildTaskProjection } from "../../src/projection/sqlite-task-projection.ts";
 import {
   attributionEventCompleteness,
@@ -105,6 +110,104 @@ test("union event headers and mutation join rebuild identically after SQLite del
     assert.equal(existsSync(projectionPath), false);
     rebuildTaskProjection({ rootDir });
     assert.deepEqual(readAttributionProjection(rootDir), before);
+  });
+});
+
+test("attribution materialization writes each entity summary without an unresolved intermediate state", () => {
+  withTempStore((rootDir) => {
+    const taskId = "task_T";
+    const taskRoot = path.join(rootDir, "harness/tasks", taskId);
+    mkdirSync(taskRoot, { recursive: true });
+    writeFileSync(path.join(taskRoot, "INDEX.md"), [
+      "---",
+      "schema: task-package/v2",
+      `task_id: ${taskId}`,
+      "title: Set based attribution",
+      "lifecycle:",
+      "  bindingSchema: lifecycle-binding/v1",
+      "  engine: local",
+      "  status: active",
+      "  ref: ",
+      "  titleSnapshot: Set based attribution",
+      "  url: ",
+      "  bindingCreatedAt: 2026-07-13T00:00:00.000Z",
+      "  bindingFingerprint: sha256:fixture",
+      "packageDisposition: active",
+      "---",
+      ""
+    ].join("\n"), "utf8");
+    rebuildTaskProjection({ rootDir });
+    const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
+    const db = new DatabaseSync(projectionPath);
+    try {
+      db.exec(`
+        CREATE TRIGGER reject_unresolved_attribution_rewrite
+        BEFORE INSERT ON entity_attribution_summary
+        WHEN NEW.entity_kind = 'task'
+          AND NEW.entity_id = '${taskId}'
+          AND NEW.completeness = 'unresolved'
+        BEGIN SELECT RAISE(ABORT, 'attribution summary used an unresolved intermediate state'); END
+      `);
+    } finally {
+      db.close();
+    }
+
+    const event = decodeUnionAttributionEventBody(`${JSON.stringify(v1Event())}\n`);
+    materializeAttributionProjectionFromEvents(projectionPath, [event]);
+
+    const [task] = queryTaskProjectionRows(projectionPath, {});
+    assert.equal(task?.attribution.latestActor?.principal.personId, "person_zeyu");
+  });
+});
+
+test("entity attribution is stored once in the unified summary projection", () => {
+  withTempStore((rootDir) => {
+    const taskId = "task_T";
+    const taskRoot = path.join(rootDir, "harness/tasks", taskId);
+    const eventsRoot = path.join(rootDir, "harness/attribution-events");
+    mkdirSync(taskRoot, { recursive: true });
+    mkdirSync(eventsRoot, { recursive: true });
+    writeFileSync(path.join(taskRoot, "INDEX.md"), [
+      "---",
+      "schema: task-package/v2",
+      `task_id: ${taskId}`,
+      "title: Unified attribution",
+      "lifecycle:",
+      "  bindingSchema: lifecycle-binding/v1",
+      "  engine: local",
+      "  status: active",
+      "  ref: ",
+      "  titleSnapshot: Unified attribution",
+      "  url: ",
+      "  bindingCreatedAt: 2026-07-13T00:00:00.000Z",
+      "  bindingFingerprint: sha256:fixture",
+      "packageDisposition: active",
+      "---",
+      ""
+    ].join("\n"), "utf8");
+    writeFileSync(path.join(eventsRoot, "legacy-op.jsonl"), `${JSON.stringify(v1Event())}\n`, "utf8");
+
+    rebuildTaskProjection({ rootDir });
+
+    const projectionPath = path.join(rootDir, ".harness/cache/projections.sqlite");
+    const db = new DatabaseSync(projectionPath, { readOnly: true });
+    try {
+      const taskColumns = db.prepare("PRAGMA table_info(task_projection)").all() as Array<{ readonly name: string }>;
+      assert.equal(taskColumns.some((column) => column.name === "attribution_json"), false);
+      assert.deepEqual({ ...db.prepare(`
+        SELECT entity_kind, entity_id, trail_count, completeness
+        FROM entity_attribution_summary
+      `).get() }, {
+        entity_kind: "task",
+        entity_id: taskId,
+        trail_count: 1,
+        completeness: "host-only"
+      });
+    } finally {
+      db.close();
+    }
+    const [task] = queryTaskProjectionRows(projectionPath, {});
+    assert.equal(task?.attribution.latestActor?.principal.personId, "person_zeyu");
   });
 });
 

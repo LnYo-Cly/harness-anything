@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   checkTaskProjection,
   deriveRelationId,
@@ -37,6 +38,15 @@ function assertLoadBearingCoverageProjection(): void {
     writeDecision(rootDir, "dec_COVER", "wm-cover", [relation, exemptRelation]);
 
     rebuildTaskProjection({ rootDir });
+    const db = new DatabaseSync(path.join(rootDir, ".harness/cache/projections.sqlite"), { readOnly: true });
+    try {
+      for (const table of ["relation_edges", "relation_coverage", "task_fact_anchors"]) {
+        const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ readonly name: string }>;
+        assert.equal(columns.some((column) => column.name === "row_json"), false);
+      }
+    } finally {
+      db.close();
+    }
     const coverage = readDecisionFactCoverage({ rootDir, decisionId: "dec_COVER" });
     const projection = readRelationGraphProjection({ rootDir });
 
