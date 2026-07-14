@@ -175,8 +175,9 @@ export function TaskFilterBar({
 
   return (
     <section className="border-b border-border bg-surface/35 px-4 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="flex min-w-[260px] flex-1 items-center gap-2 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 focus-within:border-border-strong">
+      {/* Row 1: full-width search */}
+      <div className="flex items-center gap-2">
+        <label className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-surface-raised px-2.5 py-1.5 focus-within:border-border-strong">
           <MagnifyingGlass weight="bold" className="shrink-0 text-text-faint" />
           <input
             value={filters.query}
@@ -185,7 +186,10 @@ export function TaskFilterBar({
             className="min-w-0 flex-1 bg-transparent text-[15px] text-text outline-none placeholder:text-text-faint"
           />
         </label>
+      </div>
 
+      {/* Row 2: filter selects + toggles */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <Select
           label={t("components.taskFilterBar.module")}
           value={filters.module}
@@ -221,7 +225,8 @@ export function TaskFilterBar({
               : "border-border text-text-muted hover:bg-surface-raised"
           }`}
         >
-          {t("components.taskFilterBar.archive")}</button>
+          {t("components.taskFilterBar.archive")}
+        </button>
 
         {favorites && favoriteCount > 0 && (
           <button
@@ -247,7 +252,8 @@ export function TaskFilterBar({
             className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-1.5 text-[13px] text-text-muted hover:bg-surface-raised hover:text-text"
           >
             <X weight="bold" />
-            {t("components.taskFilterBar.clear")}</button>
+            {t("components.taskFilterBar.clear")}
+          </button>
         )}
       </div>
 

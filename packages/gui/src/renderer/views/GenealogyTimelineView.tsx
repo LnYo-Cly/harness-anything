@@ -144,6 +144,16 @@ export function GenealogyTimelineView({
   const visibleCards = layout.nodes.filter((n) => !n.isCluster).length;
   const visibleClusters = layout.nodes.filter((n) => n.isCluster).length;
 
+  const headerStatsText = tp(edges.length, {
+    one: "views.genealogyTimelineView.headerStatsOne",
+    other: "views.genealogyTimelineView.headerStatsOther",
+  }, {
+    participants: participants.length,
+  });
+  const focusPedigreeText = `${t("views.genealogyTimelineView.focusPedigree")}${ancestorCount} ${t("views.genealogyTimelineView.ancestors")}${descendantCount} ${t("views.genealogyTimelineView.descendants")}${visibleClusters > 0
+    ? t("views.genealogyTimelineView.visibleClustersDayClustersVisibleCardsCards", { visibleClusters: visibleClusters, visibleCards: visibleCards })
+    : ""}`;
+
   const filteredParticipants = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return participants;
@@ -174,28 +184,31 @@ export function GenealogyTimelineView({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col" data-testid="genealogy-timeline">
       {/* 嵌入式状态条(原全页 header 已删,facet 标签由 EntityWorkspace 提供) */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-4 py-1.5">
-        <span className="font-mono text-[12px] text-text-faint">
-          {tp(edges.length, {
-            one: "views.genealogyTimelineView.headerStatsOne",
-            other: "views.genealogyTimelineView.headerStatsOther",
-          }, {
-            participants: participants.length,
-          })}
-        </span>
-        {cycleWarning.count > 0 && (
+      <div className="flex flex-col gap-0.5 border-b border-border px-4 py-1.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
           <span
-            className="inline-flex items-center gap-1 rounded bg-danger/10 px-1.5 py-0.5 font-mono text-danger"
-            title={cycleWarning.cycles.map((c) => c.join(" → ")).join("\n")}
+            className="min-w-0 truncate font-mono text-[12px] tabular-nums text-text-faint"
+            title={headerStatsText}
           >
-            {t("views.genealogyTimelineView.cycleWarning", { count: cycleWarning.count })}
+            {headerStatsText}
           </span>
-        )}
-        <span className="font-mono text-[11px] text-text-faint">
-          {t("views.genealogyTimelineView.focusPedigree")}{ancestorCount} {t("views.genealogyTimelineView.ancestors")}{descendantCount} {t("views.genealogyTimelineView.descendants")}{visibleClusters > 0
-            ? t("views.genealogyTimelineView.visibleClustersDayClustersVisibleCardsCards", { visibleClusters: visibleClusters, visibleCards: visibleCards })
-            : ""}
-        </span>
+          {cycleWarning.count > 0 && (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 rounded bg-danger/10 px-1.5 py-0.5 font-mono text-danger"
+              title={cycleWarning.cycles.map((c) => c.join(" → ")).join("\n")}
+            >
+              {t("views.genealogyTimelineView.cycleWarning", { count: cycleWarning.count })}
+            </span>
+          )}
+        </div>
+        <div className="min-w-0">
+          <span
+            className="block truncate font-mono text-[11px] tabular-nums text-text-faint"
+            title={focusPedigreeText}
+          >
+            {focusPedigreeText}
+          </span>
+        </div>
       </div>
 
       <div className="flex items-center gap-3 border-b border-border px-4 py-1.5">
