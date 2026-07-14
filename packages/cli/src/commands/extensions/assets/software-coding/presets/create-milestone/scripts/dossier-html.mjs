@@ -1,8 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 
 export function renderMilestoneDossierHtml({ paths, artifactsDir, sourcePath, outputPath }) {
   const dossierPath = sourcePath ?? path.join(paths.milestonesRoot, "milestones-summary.md");
@@ -180,11 +177,55 @@ function renderMilestoneRow(item) {
 }
 
 function editorialShellCss() {
-  const templatePath = path.resolve(scriptDir, "..", "..", "..", "templates", "dossier.editorial.shell", "zh-CN.md");
-  const template = readOptional(templatePath);
-  const match = /<style>([\s\S]*?)<\/style>/u.exec(template);
-  if (!match) throw new Error(`Could not read editorial shell CSS at ${templatePath}`);
-  return match[1].trim();
+  // Keep an installed preset package self-contained. The renderer must not
+  // reach back into the builtin vertical's sibling template directory.
+  return `:root {
+  --bg:#faf9f6; --panel:#ffffff; --panel-2:#f5f2ec;
+  --ink:#1f1d1a; --ink-dim:#57534a; --ink-faint:#8a8478;
+  --line:#e7e3db; --line-soft:#efece5; --accent:#5b6b8c;
+  --done:#5f7a55; --defer:#a07238; --reject:#9a4a3f;
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Songti SC",Georgia,serif;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,"PingFang SC",sans-serif;
+  --mono:"SF Mono",SFMono-Regular,ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+}
+:root[data-theme="dark"] {
+  --bg:#1b1d21; --panel:#23262c; --panel-2:#2a2e35;
+  --ink:#e6e3dd; --ink-dim:#a9a39a; --ink-faint:#7d776c;
+  --line:#373b43; --line-soft:#2e3138; --accent:#8896b5;
+  --done:#9bb089; --defer:#c89a5e; --reject:#bf8074;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+html { scroll-behavior:smooth; }
+body { background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:16px; line-height:1.7; transition:background-color .25s ease,color .25s ease; }
+.wrap { max-width:1080px; margin:0 auto; padding:0 32px; }
+.topbar { position:sticky; top:0; z-index:50; background:var(--bg); border-bottom:1px solid var(--line); }
+.topbar .row { display:flex; align-items:center; justify-content:space-between; padding:14px 0; gap:16px; }
+.brand,nav { display:flex; align-items:center; gap:10px; }
+.brand .dot { width:8px; height:8px; border-radius:2px; background:var(--accent); }
+nav a { color:var(--ink-dim); text-decoration:none; font-size:13px; padding:5px 11px; }
+.theme-toggle { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--ink-dim); }
+.theme-toggle svg { width:17px; height:17px; }
+.theme-toggle .moon { display:none; }
+:root[data-theme="dark"] .theme-toggle .sun { display:none; }
+:root[data-theme="dark"] .theme-toggle .moon { display:block; }
+.hero { padding:72px 0 52px; border-bottom:1px solid var(--line); }
+.eyebrow,.small-label,.section-num { font-family:var(--mono); font-size:11px; color:var(--ink-faint); letter-spacing:.08em; text-transform:uppercase; }
+h1,h2 { font-family:var(--serif); font-weight:400; line-height:1.2; }
+h1 { font-size:clamp(30px,4.6vw,50px); margin:20px 0 24px; }
+h2 { font-size:clamp(24px,3.2vw,34px); }
+.lede { color:var(--ink-dim); font-family:var(--serif); font-size:18px; }
+code { font-family:var(--mono); font-size:.85em; background:var(--panel-2); color:var(--accent); padding:1px 5px; border:1px solid var(--line); border-radius:3px; }
+.meta-grid { display:grid; grid-template-columns:repeat(4,1fr); margin-top:28px; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+.meta-cell { padding:18px 22px; border-right:1px solid var(--line); background:var(--panel); }
+.meta-cell:last-child { border-right:0; }
+.meta-cell .k { font-family:var(--mono); font-size:10px; color:var(--ink-faint); text-transform:uppercase; }
+.meta-cell .v { font-size:19px; }
+section { padding:64px 0; border-bottom:1px solid var(--line); }
+.section-head { margin-bottom:30px; }
+.card { border:1px solid var(--line); border-radius:8px; background:var(--panel); padding:22px; }
+footer { padding:44px 0 64px; color:var(--ink-faint); }
+footer .src { font-family:var(--mono); font-size:11px; }
+@media (max-width:760px) { .wrap { padding:0 22px; } .meta-grid { grid-template-columns:1fr; } .meta-cell { border-right:0; border-bottom:1px solid var(--line); } }`;
 }
 
 function splitMarkdownRow(line) {

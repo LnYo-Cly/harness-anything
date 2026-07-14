@@ -13,6 +13,7 @@ import {
   validatePresetManifestForUse
 } from "./state.ts";
 import { decodePresetManifest, invalidExtensionResult, invalidResolvedPresetResult } from "./shared.ts";
+import { presetRuntimeRepairHint, smokePresetEntrypoints } from "./preset-smoke.ts";
 
 export function runPresetValidate(action: {
   readonly manifestPath: string;
@@ -42,11 +43,12 @@ export function runPresetValidate(action: {
 
 export function runPresetList(rootInput: HarnessLayoutInput, activeVerticalId: string): CliResult {
   const entries = discoverPresetEntries(rootInput, activeVerticalId);
-  const issues = entries.flatMap((entry) => isInvalidPreset(entry) ? entry.issues : validatePresetManifestForUse(entry.manifest).issues);
+  const validations = entries.map((entry) => validateResolvedPreset(rootInput, entry));
+  const issues = validations.flatMap((entry) => entry.issues);
   return {
     ok: issues.length === 0,
     command: "preset-list",
-    presets: entries.map(publicPresetEntrySummary),
+    presets: validations.map((entry) => entry.summary),
     issues,
     error: issues.length === 0 ? undefined : cliError(CliErrorCode.PresetManifestInvalid, "One or more resolved presets failed validation.")
   };
@@ -56,13 +58,16 @@ export function runPresetInspect(rootInput: HarnessLayoutInput, presetId: string
   const preset = resolvePresetEntry(rootInput, presetId, activeVerticalId);
   if (!preset) return presetNotFound("preset-inspect", presetId);
   if (isInvalidPreset(preset)) return invalidResolvedPresetResult("preset-inspect", preset);
-  const validation = validatePresetManifestForUse(preset.manifest);
+  const validation = validateResolvedPreset(rootInput, preset);
   return {
-    ok: validation.ok,
+    ok: validation.issues.length === 0,
     command: "preset-inspect",
-    preset: { ...publicPresetSummary(preset), manifest: preset.manifest },
+    preset: { ...validation.summary, manifest: preset.manifest },
     issues: validation.issues,
-    error: validation.ok ? undefined : cliError(CliErrorCode.PresetManifestInvalid, "Preset manifest failed validation.")
+    error: validation.issues.length === 0 ? undefined : cliError(
+      CliErrorCode.PresetManifestInvalid,
+      validation.runtimeHint || "Preset manifest failed validation."
+    )
   };
 }
 
@@ -70,13 +75,16 @@ export function runPresetCheck(rootInput: HarnessLayoutInput, presetId: string, 
   const preset = resolvePresetEntry(rootInput, presetId, activeVerticalId);
   if (!preset) return presetNotFound("preset-check", presetId);
   if (isInvalidPreset(preset)) return invalidResolvedPresetResult("preset-check", preset);
-  const validation = validatePresetManifestForUse(preset.manifest);
+  const validation = validateResolvedPreset(rootInput, preset);
   return {
-    ok: validation.ok,
+    ok: validation.issues.length === 0,
     command: "preset-check",
-    preset: publicPresetSummary(preset),
+    preset: validation.summary,
     issues: validation.issues,
-    error: validation.ok ? undefined : cliError(CliErrorCode.PresetManifestInvalid, "Preset manifest failed validation.")
+    error: validation.issues.length === 0 ? undefined : cliError(
+      CliErrorCode.PresetManifestInvalid,
+      validation.runtimeHint || "Preset manifest failed validation."
+    )
   };
 }
 
@@ -94,13 +102,35 @@ export function runPresetAudit(rootInput: HarnessLayoutInput, activeVerticalId: 
       installedVersion: preset.manifest.version,
       bundledVersion: bundledById.get(preset.manifest.id)
     }));
-  const issues = resolved.flatMap((entry) => isInvalidPreset(entry) ? entry.issues : validatePresetManifestForUse(entry.manifest).issues);
+  const validations = resolved.map((entry) => validateResolvedPreset(rootInput, entry));
+  const issues = validations.flatMap((entry) => entry.issues);
   return {
     ok: issues.length === 0,
     command: "preset-audit",
-    presets: resolved.map(publicPresetEntrySummary),
+    presets: validations.map((entry) => entry.summary),
     issues,
     report: { totalResolved: resolved.length, drift },
     error: issues.length === 0 ? undefined : cliError(CliErrorCode.PresetManifestInvalid, "One or more resolved presets failed validation.")
+  };
+}
+
+function validateResolvedPreset(
+  rootInput: HarnessLayoutInput,
+  entry: ReturnType<typeof discoverPresetEntries>[number]
+): { readonly issues: ReadonlyArray<unknown>; readonly summary: Record<string, unknown>; readonly runtimeHint: string } {
+  if (isInvalidPreset(entry)) {
+    return { issues: entry.issues, summary: publicPresetEntrySummary(entry), runtimeHint: "" };
+  }
+  const structural = validatePresetManifestForUse(entry.manifest);
+  const runtime = structural.ok ? smokePresetEntrypoints(rootInput, entry) : { ok: false as const, issues: [], entrypoints: [] };
+  const issues = [...structural.issues, ...runtime.issues];
+  return {
+    issues,
+    summary: {
+      ...publicPresetSummary(entry),
+      valid: issues.length === 0,
+      issueCount: issues.length
+    },
+    runtimeHint: presetRuntimeRepairHint(entry, runtime.issues)
   };
 }

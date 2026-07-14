@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -102,6 +103,18 @@ export function runScriptHost(options: {
       "Script manifest packages must contain only regular files and directories, never symbolic links."
     );
   }
+  const syntax = spawnSync(process.execPath, ["--check", realpathSync.native(scriptPath)], {
+    cwd: options.script.manifestRoot,
+    encoding: "utf8",
+    env: {}
+  });
+  if (syntax.status !== 0) {
+    return scriptFailure(
+      options.commandName,
+      CliErrorCode.ScriptFailed,
+      `Script command is not executable JavaScript: ${(syntax.stderr || syntax.stdout || "syntax check failed").trim()}`
+    );
+  }
 
   const outputRoot = options.outputRoot ?? path.join(layout.authoredRoot, "context");
   const scopeOptions = reportsNoOverwriteLeafConflicts(options.script.entry)
@@ -113,6 +126,19 @@ export function runScriptHost(options: {
   const writeScope = resolveDeclaredWriteScopes(options.script.entry.writes, layout, outputRoot, scopeOptions);
   if (!readScope.ok) return scriptFailure(options.commandName, CliErrorCode.ScriptScopeInvalidRead, "Script reads must declare supported project-local scopes.");
   if (!writeScope.ok) return scriptFailure(options.commandName, CliErrorCode.ScriptScopeInvalidWrite, "Script writes must declare approved authored content scopes.");
+  if (
+    options.script.entry.source === "preset" &&
+    options.dryRun === true &&
+    options.outputRoot !== undefined &&
+    options.script.entry.writes.length > 0 &&
+    !writeScope.roots.some((allowedRoot) => isPathInside(allowedRoot, options.outputRoot!))
+  ) {
+    return scriptFailure(
+      options.commandName,
+      CliErrorCode.PresetWriteScopeInvalid,
+      `Preset entrypoint ${options.script.entry.id} must declare a write scope covering its outputRoot. Next: fix entrypoint.writes, then run \`ha preset check ${String(options.script.context?.presetId ?? "<preset-id>")}\`.`
+    );
+  }
 
   const runId = `${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
   const runDir = path.join(layout.localRoot, "script-runs", runId);
