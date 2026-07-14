@@ -20,6 +20,10 @@ vertical 不会加载这些资产和脚本。
   公开仓 commit、model/source digest、工具版本、mapping 与 finding。它可以重建，绝不能
   自动反写模型。
 
+Authored model 只通过显式、经过 review 的修改更新。Snapshot 只在所属 task 运行
+`architecture-snapshot` 时刷新，比较只在运行 `architecture-check` 时发生。当前没有后台
+更新器、每次 commit 自动改写模型的机制，也不会把 import 事实自动晋升为架构意图。
+
 节点粒度应是组件或 package，而不是文件海。一个源码路径必须恰好命中一个 scope。只有
 代码、ADR/decision 或 runtime 证据支持时才建立关系。
 
@@ -71,8 +75,13 @@ commit 和工具版本应完全一致。检查只返回五种显式状态：
 
 ## Agent 查询路径
 
-对适用的修改，记录稳定 node、相关 view/flow、直接 incomers/outgoers、选择的修改层级、
-snapshot digest 与 ADR/decision 引用。`code-impact-analysis` preset 已提供这些字段。
+每个 coding task 开始时、广泛搜索源码前，先检查 architecture manifest 是否已启用。对适用
+的修改，只加载相关 view/flow，并记录 stable node、直接 incomers/outgoers、选择的修改层级、
+snapshot digest 与 ADR/decision 引用。`code-impact-analysis` preset 已提供这些字段。docs-only
+或明确局部低风险的工作可以写明理由后标 N/A。
+
+如果源码搜索出现多个可能的 owner/层级、incomers/outgoers 不确定或文档互相冲突，应停止
+搜索并回到地图，再按 stable node → view/flow → source scope → code 的顺序继续。
 
 如果环境已经提供 LikeC4 MCP，Agent 可以使用 element search、view read 与 graph query。
 MCP 只是加速器。确定性 fallback 是读取 manifest 和 `.c4` 文本，再运行

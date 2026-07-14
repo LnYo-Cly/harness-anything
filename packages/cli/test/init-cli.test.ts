@@ -55,6 +55,8 @@ test("CLI init defaults harness project name from the target root basename", () 
     assert.match(agents, /## Scaffold folders/u);
     assert.match(agents, /## Architecture-aware code changes/u);
     assert.match(agents, /architecture-manifest\.json/u);
+    assert.match(agents, /每个 coding task 开始时/u);
+    assert.match(agents, /stable node → view\/flow → source scope → code/u);
     assert.match(agents, /## Governance routing \(near-field hard gates\)/u);
     assert.match(agents, /## Repository Specifics/u);
     // D3: overlay only routes to folder READMEs, it never restates their bodies.

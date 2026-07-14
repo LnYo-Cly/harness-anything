@@ -24,6 +24,12 @@ The model and the code snapshot have different jobs:
   digests, tool versions, mappings, and findings. It is disposable and must
   never rewrite the model automatically.
 
+The authored model changes only through an explicit reviewed edit. A snapshot
+is refreshed only when `architecture-snapshot` runs for its owning task, and
+comparison happens only when `architecture-check` runs. There is no background
+updater, per-commit model rewrite, or automatic promotion from import facts to
+architecture intent.
+
 Use component or package boundaries, not a node for every file. A source path
 must match exactly one declared scope. Create only relationships supported by
 code, an ADR/decision, or runtime evidence.
@@ -81,9 +87,16 @@ model green by copying the import graph into it.
 
 ## Agent query route
 
-For an applicable change, record the stable node, relevant view or flow, direct
-incomers and outgoers, selected modification layer, snapshot digest, and any
-ADR/decision reference. The `code-impact-analysis` preset provides those fields.
+At the start of every coding task, check whether the architecture manifest is
+enabled before broad source search. For an applicable change, load only the
+relevant view or flow and record the stable node, direct incomers and outgoers,
+selected modification layer, snapshot digest, and any ADR/decision reference.
+The `code-impact-analysis` preset provides those fields. Docs-only or clearly
+local low-risk work may record N/A with a reason.
+
+When source search produces multiple plausible owners or layers, uncertain
+incomers/outgoers, or conflicting documentation, stop and return to the map.
+Resume in this order: stable node → view/flow → source scope → code.
 
 If a LikeC4 MCP server is already available, the agent may use element search,
 view reads, and graph queries. MCP is only an accelerator. The deterministic

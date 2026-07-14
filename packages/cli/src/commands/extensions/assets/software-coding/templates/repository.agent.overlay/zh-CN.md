@@ -21,8 +21,9 @@
 
 ## Architecture-aware code changes
 
-- 若存在 `harness/context/architecture/architecture-manifest.json`，选择实现层级前先读 `harness/context/architecture/README.md`，按其中的查询路由定位，并在 `code-impact-analysis.md` 记录稳定架构引用；不要把模型内容复制进 task。
-- manifest 不存在时继续普通 coding 流程。docs-only 或明确局部低风险的修改可以把架构影响记为 N/A，但必须写理由。
+- 每个 coding task 开始时、广泛搜索源码前，先检查 `harness/context/architecture/architecture-manifest.json` 是否存在。存在时先读 `harness/context/architecture/README.md`，再只加载与任务相关的稳定 view/flow，然后选择实现层级；manifest 不存在时继续普通 coding 流程。
+- 跨 package、陌生区域、写路径、runtime boundary、依赖方向或 canonical owner 不明确的任务，进入代码前必须先解析 stable node、view/flow 与 source scope，并在 `code-impact-analysis.md` 记录这些稳定引用；不要把模型事实复制进 task。docs-only 或明确局部低风险的修改可以把架构影响记为 N/A，但必须写理由。
+- 如果源码搜索出现多个可能的 owner/层级、incomers/outgoers 不确定或文档互相冲突，停止搜索并先回到地图，再按 stable node → view/flow → source scope → code 的顺序继续。
 - 对已有 manifest 且适用的 task，在实现前运行 `ha script run vertical:software-coding:architecture-check --task <task-id>`。把 `drifted`、`invalid` 或 `tool-missing` 作为证据呈现；不得隐藏模型与 snapshot 冲突，也不得把 architecture check 变成 completion gate。
 
 ## Governance routing (near-field hard gates)

@@ -17,6 +17,10 @@ Run architecture initialization explicitly before replacing the placeholders bel
 - `model/**/*.c4` owns human-authored architecture intent: semantic nodes, responsibilities, boundaries, and expected relations.
 - Generated code snapshots are observations. Store them outside the authored model and never copy them back into the model automatically.
 
+## Update Model
+
+The authored model changes only through an explicit reviewed edit. A snapshot is refreshed only when `architecture-snapshot` runs for its owning task, and comparison happens only when `architecture-check` runs. No background process rewrites either artifact, no import scan promotes itself to architecture intent, and neither command is a universal completion or CI gate.
+
 Physical manifest paths (`modelRoot`, `provider.config`, and `views[].path`) must be NFC-normalized POSIX paths relative to their resolution bases defined above, and they must be portable on Windows. Provider config and view targets are compared after NFC normalization and case folding; a collision is invalid. Source scope globs are repository-root-relative selectors rather than physical paths, so they retain glob metacharacters such as `*` and `?` while still rejecting NUL, absolute paths, traversal, backslashes, and leading `!` negation.
 
 The manifest links a source scope to a semantic node through `sourceScopes[].nodeId`. That value must resolve to exactly one node whose LikeC4 `metadata.archId` is identical. Scope globs match normalized repository-root-relative POSIX paths: includes form a union, excludes always win, and array order has no precedence. Mapping is evaluated separately for each extractor using only its `sourceScopeIds`: zero matches means `unmapped`, while more than one means an ambiguous, invalid mapping.
@@ -39,7 +43,9 @@ Agents cite the stable manifest view ID and node `archId`, not a display title.
 
 ## Agent Query Routing
 
-Before a cross-module code change, answer the smallest useful set of questions: which stable node owns the behavior, which view or flow contains it, what directly enters and leaves it, which multi-hop paths are affected, and why the selected implementation layer is canonical. Record only those references and the current snapshot digest in the task's `code-impact-analysis.md`.
+At the start of every coding task, check for the manifest before broad source search. When it is enabled, read this entry and load only the view or flow needed to answer the smallest useful set of questions: which stable node owns the behavior, what directly enters and leaves it, which multi-hop paths are affected, and why the selected implementation layer is canonical. This deeper lookup is required for cross-module, unfamiliar-area, write-path, runtime-boundary, dependency-direction, or unclear-owner work. Docs-only or clearly local low-risk work may record N/A with a reason. Record only stable references and the current snapshot digest in the task's `code-impact-analysis.md`.
+
+If source search reveals multiple plausible owners or layers, uncertain incomers/outgoers, or conflicting documentation, return to the map before continuing source search. Recover in this order: stable node → view/flow → source scope → code.
 
 When a LikeC4 MCP server is already available, use `search-element` or `read-element` to resolve the stable node, `read-view` for the declared flow, `query-graph` for direct incomers/outgoers, and the recursive graph or relationship-path tools only when the change crosses boundaries. The official server can be exposed by an active editor extension, `likec4 mcp`, or `@likec4/mcp`; MCP is an optional query accelerator, never a task prerequisite.
 

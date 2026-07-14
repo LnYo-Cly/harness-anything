@@ -19,8 +19,9 @@ Each scaffold folder owns the single source of truth for its own usage. This ent
 
 ## Architecture-aware code changes
 
-- If `harness/context/architecture/architecture-manifest.json` exists, read `harness/context/architecture/README.md` before choosing the implementation layer. Follow its query routing and record stable architecture references in `code-impact-analysis.md`; do not copy the model into the task.
-- If the manifest is absent, continue with the normal coding workflow. Docs-only or clearly local low-risk changes may record architecture impact as N/A with a reason.
+- At the start of every coding task, before broad source search, check whether `harness/context/architecture/architecture-manifest.json` exists. If it does, read `harness/context/architecture/README.md`, then load only the relevant stable view or flow before choosing the implementation layer. If the manifest is absent, continue with the normal coding workflow.
+- Cross-package, unfamiliar-area, write-path, runtime-boundary, dependency-direction, or unclear-owner work must resolve the stable node, view/flow, and source scope before entering code. Record those stable references in `code-impact-analysis.md`; do not copy model facts into the task. Docs-only or clearly local low-risk changes may record architecture impact as N/A with a reason.
+- If source search exposes multiple plausible owners or layers, uncertain incomers/outgoers, or conflicting documentation, stop and return to the map before continuing in this order: stable node → view/flow → source scope → code.
 - For an applicable task with a manifest, run `ha script run vertical:software-coding:architecture-check --task <task-id>` before implementation. Report `drifted`, `invalid`, or `tool-missing` results as evidence; do not hide a model/snapshot conflict or make architecture check a completion gate.
 
 ## Governance routing (near-field hard gates)
