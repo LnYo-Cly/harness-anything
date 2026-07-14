@@ -65,7 +65,7 @@ function decisionModuleAffinity(
   return out;
 }
 
-function labelOf(entity: Entity, row: TaskRow | DecisionRow | FactRef): string {
+function entityLabel(entity: Entity, row: TaskRow | DecisionRow | FactRef): string {
   if (entity === "task") return (row as TaskRow).title;
   if (entity === "decision") return (row as DecisionRow).title;
   const f = row as FactRef;
@@ -195,7 +195,7 @@ export async function layoutLedgerGraph(input: LedgerInput): Promise<LayoutOutpu
       data: {
         entity: meta.entity,
         raw: meta.row,
-        label: labelOf(meta.entity, meta.row),
+        label: entityLabel(meta.entity, meta.row),
         focus: false,
         expanded: false,
         hop: 0,

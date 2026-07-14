@@ -5,12 +5,12 @@ import type { GraphFilterInput, LayoutOutput } from "./graphLayoutTypes";
 import {
   partitionTaskTerritory,
   partitionDecisionTerritory,
-  partitionFactTerritory,
   GEO,
   type Section,
   type Zone,
   type Member,
 } from "./territoryPartition";
+import { partitionFactTerritory } from "./territoryPartitionFact";
 import type { Node } from "@xyflow/react";
 import { t } from "../i18n/core.ts";
 
