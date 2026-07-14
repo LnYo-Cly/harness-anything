@@ -159,8 +159,8 @@ describe("layoutCanvasEgo", () => {
 
   it("焦点渲染为卡片(expanded),其余为 chip", () => {
     expect(byId.get(FOCUS)!.data.expanded).toBe(true);
-    // G1:决策卡片宽 = 320(按 kind 分档,不再一刀切 360)。B2:改用顶层 width(不再写 style.width)。
-    expect(byId.get(FOCUS)!.width).toBe(320);
+    // D3:聚焦决策卡片宽 = CARD_W_FOCUS.decision = 380(聚焦预算大于外围)。B2:改用顶层 width。
+    expect(byId.get(FOCUS)!.width).toBe(380);
     expect(byId.get("task_C")!.data.expanded).toBe(false);
     expect(byId.get("task_C")!.width).toBe(216); // CHIP_W
   });
@@ -320,12 +320,11 @@ describe("D4 · estimateCardHeight(task 内容感知)", () => {
   });
 });
 
-// ══ G1:内容驱动尺寸 + 竖优先地板 ══
-// 节点宽按 kind 分档(fact 280 / task 300 / decision 320),高按内容估算 + 地板(W:H ≤ 0.85)
-// + 硬 cap(640)。estimateCardHeight 只返内容估高(无地板无 cap);nodeDims 叠地板与 cap。
-// B1:EgoNode body 改为始终 overflow-y-auto(Tailwind 在不溢出时不渲染滚动条),node.data 不再
-// 携带 scrollable —— 真实内容超过估高也会被滚动条兜底,而非 overflow-hidden 静默剪裁。
-describe("G1 · 内容驱动尺寸 + 竖优先地板", () => {
+// ══ D3/G1:聚焦 3:4 竖卡 + focus/peripheral 尺寸预算 + 内容驱动高度 ══
+// D3:聚焦卡片拿到更大尺寸预算(CARD_W_FOCUS + W:H ≤ 0.75 的 3:4 竖地板 + 更高 min/cap),
+// 外围展开卡片用稍松的 0.82 地板 + 560 cap 保留邻居密度。estimateCardHeight 诚实估高(去掉
+// fact 的 160px 观察段硬帽),低内容 fact 按地板定高不出滚动条,只有真实内容超过 cap 才滚。
+describe("D3/G1 · 聚焦 3:4 竖卡 + 内容驱动高度", () => {
   it("estimateCardHeight 对 decision 包含 rejected 段(原漏算)", () => {
     const dNoRej = decision("d1");
     const dWithRej = decision("d2", {
@@ -339,73 +338,111 @@ describe("G1 · 内容驱动尺寸 + 竖优先地板", () => {
     expect(hWithRej).toBeGreaterThan(hNoRej);
   });
 
-  it("expanded fact 节点 W:H ≤ 0.85(竖优先地板)", async () => {
+  // ── 聚焦卡片:3:4 竖卡,显著大于外围预算 ──
+  it("D3 · focus fact 是 3:4 竖卡(340×453),低内容无滚动条", async () => {
     const f = fact("task_x", "F1");
     const id = `fact/${f.taskId}/${f.anchor.split("/")[1] ?? f.anchor}`;
     const out = await layoutCanvasEgo({
       focusId: id,
-      tasks: [],
-      decisions: [],
-      facts: [f],
-      relations: [],
-      filters: filters(),
-      inLoopEdges: new Set(),
+      tasks: [], decisions: [], facts: [f], relations: [],
+      filters: filters(), inLoopEdges: new Set(),
       shown: new Map([[id, 0]]),
       expanded: new Set([id]),
     });
     const node = out.nodes.find((n) => n.id === id)!;
-    // B2:尺寸改用顶层 width/height(不再写 style.width/height)。
     const w = node.width as number;
     const h = node.height as number;
-    // W:H ≤ 0.85(竖优先地板),允许少许浮点。
-    expect(w / h).toBeLessThanOrEqual(0.85 + 0.01);
-    // G1 §④ 验收:fact ≤200 字时 h ≥ 280。
-    expect(h).toBeGreaterThanOrEqual(280);
+    expect(w).toBe(340); // CARD_W_FOCUS.fact
+    // 3:4 地板:round(340/0.75)=453,且 ≥ H_MIN_FOCUS.fact(420)。
+    expect(h).toBeGreaterThanOrEqual(420);
+    expect(w / h).toBeLessThanOrEqual(0.75 + 0.01); // 3:4 竖向
+    // 低内容按地板定高、未顶到 cap → body 有足够空间,不出滚动条。
+    expect(h).toBeLessThan(720);
   });
 
-  it("expanded task 节点 W:H ≤ 0.85(竖优先地板)", async () => {
+  it("D3 · focus task 是 3:4 竖卡(360×480)", async () => {
     const t = task("task_short", { title: "x" });
     const id = t.taskId;
     const out = await layoutCanvasEgo({
       focusId: id,
-      tasks: [t],
-      decisions: [],
-      facts: [],
-      relations: [],
-      filters: filters(),
-      inLoopEdges: new Set(),
+      tasks: [t], decisions: [], facts: [], relations: [],
+      filters: filters(), inLoopEdges: new Set(),
       shown: new Map([[id, 0]]),
       expanded: new Set([id]),
     });
     const node = out.nodes.find((n) => n.id === id)!;
-    const w = node.width as number;
-    const h = node.height as number;
-    expect(w / h).toBeLessThanOrEqual(0.85 + 0.01);
+    expect(node.width).toBe(360); // CARD_W_FOCUS.task
+    expect(node.height).toBeGreaterThanOrEqual(400); // H_MIN_FOCUS.task
+    expect((node.width as number) / (node.height as number)).toBeLessThanOrEqual(0.75 + 0.01);
   });
 
-  it("expanded decision 节点 W:H ≤ 0.85(竖优先地板)", async () => {
+  it("D3 · focus decision 是 3:4 竖卡(380×507)", async () => {
     const d = decision("dec_short");
     const id = `decision/${d.decisionId}`;
     const out = await layoutCanvasEgo({
       focusId: id,
-      tasks: [],
-      decisions: [d],
-      facts: [],
-      relations: [],
-      filters: filters(),
-      inLoopEdges: new Set(),
+      tasks: [], decisions: [d], facts: [], relations: [],
+      filters: filters(), inLoopEdges: new Set(),
+      shown: new Map([[id, 0]]),
+      expanded: new Set([id]),
+    });
+    const node = out.nodes.find((n) => n.id === id)!;
+    expect(node.width).toBe(380); // CARD_W_FOCUS.decision
+    expect(node.height).toBeGreaterThanOrEqual(440); // H_MIN_FOCUS.decision
+    expect((node.width as number) / (node.height as number)).toBeLessThanOrEqual(0.75 + 0.01);
+  });
+
+  // ── 外围展开卡片:更小预算 + 较松地板,保留邻居密度 ──
+  it("D3 · peripheral expanded fact 用 CARD_W + 0.82 地板(300×366)", async () => {
+    const focusTask = task("task_focus");
+    const f = fact("task_focus", "P1");
+    const factId = `fact/${f.taskId}/${f.anchor.split("/")[1] ?? f.anchor}`;
+    const relations = [rel("task/task_focus", factId, "evidenced-by")];
+    const graph = buildEgoGraph([focusTask], [], [f], relations);
+    const out = await layoutCanvasEgo({
+      focusId: "task_focus",
+      tasks: [focusTask], decisions: [], facts: [f], relations,
+      filters: filters(), inLoopEdges: new Set(),
+      shown: bfsShown(graph, "task_focus", 2, ALL_AXES),
+      expanded: new Set(["task_focus", factId]),
+    });
+    const factNode = out.nodes.find((n) => n.id === factId)!;
+    expect(factNode).toBeDefined();
+    expect(factNode.width).toBe(300); // CARD_W.fact(peripheral)
+    expect(factNode.height).toBeGreaterThanOrEqual(340); // H_MIN_PERIPH.fact
+    // 0.82 地板(比 focus 的 0.75 松),保留邻居密度。
+    expect((factNode.width as number) / (factNode.height as number)).toBeLessThanOrEqual(0.82 + 0.01);
+    // 焦点本身仍是更宽的 focus 预算。
+    const focusNode = out.nodes.find((n) => n.id === "task_focus")!;
+    expect(focusNode.width).toBeGreaterThan(factNode.width);
+  });
+
+  // ── 诚实估高:中长内容按内容定高,不出滚动条 ──
+  it("D3 · focus fact 中长文本按内容定高(诚实估高 > 地板,在 cap 内不滚)", async () => {
+    // 修复前:obs 段被 min(160,…) 压住 → est 268 < 地板 → 卡片停在地板,中等内容被迫滚。
+    // 修复后:去掉 obs 硬帽,est 随内容上抬并超过地板 → 卡片真正长高;仍在 cap 内 → 不滚。
+    const f = fact("task_mid", "M1");
+    (f as any).text = "x".repeat(500);
+    const id = `fact/${f.taskId}/${f.anchor.split("/")[1] ?? f.anchor}`;
+    const out = await layoutCanvasEgo({
+      focusId: id,
+      tasks: [], decisions: [], facts: [f], relations: [],
+      filters: filters(), inLoopEdges: new Set(),
       shown: new Map([[id, 0]]),
       expanded: new Set([id]),
     });
     const node = out.nodes.find((n) => n.id === id)!;
     const w = node.width as number;
     const h = node.height as number;
-    expect(w / h).toBeLessThanOrEqual(0.85 + 0.01);
+    expect(w).toBe(340);
+    // 内容驱动高度应高于地板(round(340/0.75)=453),且仍在 cap 内(不滚)。
+    expect(h).toBeGreaterThan(453);
+    expect(h).toBeLessThanOrEqual(720);
+    // estimateCardHeight 去掉 obs 硬帽后,中长文本的估高应远高于旧 268 上限。
+    expect(estimateCardHeight("fact", f, 340)).toBeGreaterThan(268);
   });
 
-  it("decision 三段内容(Q+chosen+rejected)高度 ≤ 630px", async () => {
-    // G1 §④ 验收:decision 三段满载不撑破硬 cap(640)。B1 后即便估高有偏差,
-    // body 始终 overflow-y-auto,真实内容超出时会出现滚动条而非被剪。
+  it("D3 · focus decision 三段内容(Q+chosen+rejected)在 cap 内不滚", async () => {
     const d = decision("dec_full", {
       question: "x".repeat(80),
       chosen: [
@@ -420,34 +457,20 @@ describe("G1 · 内容驱动尺寸 + 竖优先地板", () => {
     const id = `decision/${d.decisionId}`;
     const out = await layoutCanvasEgo({
       focusId: id,
-      tasks: [],
-      decisions: [d],
-      facts: [],
-      relations: [],
-      filters: filters(),
-      inLoopEdges: new Set(),
+      tasks: [], decisions: [d], facts: [], relations: [],
+      filters: filters(), inLoopEdges: new Set(),
       shown: new Map([[id, 0]]),
       expanded: new Set([id]),
     });
     const node = out.nodes.find((n) => n.id === id)!;
-    expect(node.height).toBeLessThanOrEqual(630);
+    expect(node.width).toBe(380);
+    expect(node.height).toBeGreaterThanOrEqual(440); // H_MIN_FOCUS.decision
+    expect(node.height).toBeLessThanOrEqual(720); // H_CAP_FOCUS,在 cap 内不滚
   });
 
-  it("硬 cap:H_CAP_ABS=640 永远不被超(即便估高顶到各段 internal cap)", async () => {
-    // 反向保护:无论内容多,节点高度都受 H_CAP_ABS 卡住;真实溢出由 body 滚动条兜底。
+  // ── 硬 cap:真实超长内容顶到 cap,body 由 overflow-y-auto 出滚动条 ──
+  it("D3 · focus 超长 decision 顶到 H_CAP_FOCUS=720", async () => {
     const huge = decision("dec_huge", {
-      question: "x".repeat(200),
-      chosen: Array.from({ length: 6 }, (_, i) => ({
-        id: `CH${i}`, text: "chosen", evidence: [],
-      })) as any,
-      rejected: Array.from({ length: 5 }, (_, i) => ({
-        id: `RJ${i}`, text: "nope", evidence: [], whyNot: "why",
-      })) as any,
-      claims: Array.from({ length: 5 }, (_, i) => ({
-        id: `CL${i}`, text: "claim",
-      })),
-    });
-    const huge2 = decision("dec_huge2", {
       question: "y".repeat(400),
       chosen: Array.from({ length: 10 }, (_, i) => ({
         id: `CH${i}`, text: "c", evidence: [],
@@ -459,21 +482,65 @@ describe("G1 · 内容驱动尺寸 + 竖优先地板", () => {
         id: `CL${i}`, text: "cl",
       })),
     });
-    const id = `decision/${huge2.decisionId}`;
+    const id = `decision/${huge.decisionId}`;
     const out = await layoutCanvasEgo({
       focusId: id,
-      tasks: [],
-      decisions: [huge2],
-      facts: [],
-      relations: [],
-      filters: filters(),
-      inLoopEdges: new Set(),
+      tasks: [], decisions: [huge], facts: [], relations: [],
+      filters: filters(), inLoopEdges: new Set(),
       shown: new Map([[id, 0]]),
       expanded: new Set([id]),
     });
     const node = out.nodes.find((n) => n.id === id)!;
-    expect(node.height).toBeLessThanOrEqual(640);
-    void huge; // huge 是对照(同样不会撑破 cap,留作文档说明)。
+    expect(node.height).toBeLessThanOrEqual(720);
+    expect(node.height).toBe(720); // 估高远超 → 顶到 cap
+  });
+
+  it("D3 · peripheral 超长 decision 顶到 H_CAP_PERIPH=560", async () => {
+    const focusTask = task("task_focus2");
+    const huge = decision("dec_huge_p", {
+      question: "y".repeat(400),
+      chosen: Array.from({ length: 10 }, (_, i) => ({
+        id: `CH${i}`, text: "c", evidence: [],
+      })) as any,
+      rejected: Array.from({ length: 10 }, (_, i) => ({
+        id: `RJ${i}`, text: "r", evidence: [], whyNot: "w",
+      })) as any,
+      claims: Array.from({ length: 10 }, (_, i) => ({
+        id: `CL${i}`, text: "cl",
+      })),
+    });
+    const decId = `decision/${huge.decisionId}`;
+    const relations = [rel(decId, "task/task_focus2", "derives")];
+    const graph = buildEgoGraph([focusTask], [huge], [], relations);
+    const out = await layoutCanvasEgo({
+      focusId: "task_focus2",
+      tasks: [focusTask], decisions: [huge], facts: [], relations,
+      filters: filters(), inLoopEdges: new Set(),
+      shown: bfsShown(graph, "task_focus2", 2, ALL_AXES),
+      expanded: new Set(["task_focus2", decId]),
+    });
+    const node = out.nodes.find((n) => n.id === decId)!;
+    expect(node).toBeDefined();
+    expect(node.height).toBeLessThanOrEqual(560); // H_CAP_PERIPH
+    expect(node.height).toBe(560); // 估高远超 → 顶到 peripheral cap
+  });
+
+  // ── override 下限夹具:防 stale localStorage / 误拖把卡片钉成细条 ──
+  it("D3 · sizeOverride 过小被夹到可读下限(focus fact → 300×420)", async () => {
+    const f = fact("task_ov", "O1");
+    const id = `fact/${f.taskId}/${f.anchor.split("/")[1] ?? f.anchor}`;
+    const out = await layoutCanvasEgo({
+      focusId: id,
+      tasks: [], decisions: [], facts: [f], relations: [],
+      filters: filters(), inLoopEdges: new Set(),
+      shown: new Map([[id, 0]]),
+      expanded: new Set([id]),
+      sizeOverrides: new Map([[id, { w: 100, h: 80 }]]),
+    });
+    const node = out.nodes.find((n) => n.id === id)!;
+    // focus fact:minW = CARD_W_FOCUS.fact - 40 = 300;minH = H_MIN_FOCUS.fact = 420。
+    expect(node.width).toBe(300);
+    expect(node.height).toBe(420);
   });
 
   // B2:NodeResizer 走 sizeOverrides 通道。override 必须原样落地为顶层 width/height,
