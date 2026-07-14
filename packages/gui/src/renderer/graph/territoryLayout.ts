@@ -1,5 +1,5 @@
 import type { TaskRow, RelationEdge, DecisionRow, FactRef } from "../model/types";
-import type { RelationCoverageRow } from "../../api/renderer-dto.ts";
+import type { RelationCoverageRow, FactAnchorRow } from "../../api/renderer-dto.ts";
 import { parseEndpoint } from "./endpoint";
 import type { GraphFilterInput, LayoutOutput } from "./graphLayoutTypes";
 import {
@@ -10,6 +10,7 @@ import {
   type Zone,
   type Member,
 } from "./territoryPartition";
+import { partitionFactTerritory } from "./territoryPartitionFact";
 import type { Node } from "@xyflow/react";
 import { t } from "../i18n/core.ts";
 
@@ -59,13 +60,15 @@ export function deriveGridCols(zoneAreaWidth: number): number {
 }
 
 export interface TerritoryInput {
-  skel: "task" | "decision";
+  skel: "task" | "decision" | "fact";
   tasks: TaskRow[];
   decisions: DecisionRow[];
   facts: FactRef[];
   relations: RelationEdge[];
   filters: GraphFilterInput;
   coverageRows?: ReadonlyArray<RelationCoverageRow>;
+  /** fact 领地的分诊信号需要 factAnchors 全集(判定孤儿证据)。 */
+  factAnchors?: ReadonlyArray<FactAnchorRow>;
   /** 已展开(不折叠)的 zone id 集;默认折叠 hot-only。 */
   expandedZones: Set<string>;
   /**
@@ -82,19 +85,25 @@ export function layoutTerritory(input: TerritoryInput): LayoutOutput {
   const partitionInput = {
     tasks: input.tasks,
     decisions: input.decisions,
+    facts: input.facts,
     relations: input.relations,
     filters,
     coverageRows: input.coverageRows,
+    factAnchors: input.factAnchors,
   };
-  const typeOn = (e: "task" | "decision") => filters.types.has(e);
+  const typeOn = (e: "task" | "decision" | "fact") => filters.types.has(e);
   const sections: Section[] =
     skel === "task"
       ? typeOn("task")
         ? partitionTaskTerritory(partitionInput)
         : []
-      : typeOn("decision")
-        ? partitionDecisionTerritory(partitionInput)
-        : [];
+      : skel === "decision"
+        ? typeOn("decision")
+          ? partitionDecisionTerritory(partitionInput)
+          : []
+        : typeOn("fact")
+          ? partitionFactTerritory(partitionInput)
+          : [];
 
   const rfNodes: Node[] = [];
   let cursorY = TOP_PAD;
@@ -133,8 +142,9 @@ export function layoutTerritory(input: TerritoryInput): LayoutOutput {
         const zh = zone.h ?? 0;
         const folded = !expandedZones.has(zone.id);
         const shown = visibleMembers(zone, folded);
-        const memberH = zone.skel === "task" ? GEO.TASK_CHIP_H : GEO.DECISION_CARD_H;
-        const memberGap = zone.skel === "task" ? GEO.TASK_CHIP_GAP : GEO.DECISION_CARD_GAP;
+        // task/fact 都是紧凑 chip 行;decision 是高卡片。
+        const memberH = zone.skel === "decision" ? GEO.DECISION_CARD_H : GEO.TASK_CHIP_H;
+        const memberGap = zone.skel === "decision" ? GEO.DECISION_CARD_GAP : GEO.TASK_CHIP_GAP;
         const memberW = ZONE_W - ZONE_BODY_PAD_X * 2;
 
         // zone 背景
@@ -263,8 +273,8 @@ function buildChipNode(
  * ZONE_MAX_BODY_H 仅作极端上界(2400,容纳 50 个 decision 卡片),正常场景触不到。
  */
 function computeBodyH(zone: Zone, folded: boolean): number {
-  const memberH = zone.skel === "task" ? GEO.TASK_CHIP_H : GEO.DECISION_CARD_H;
-  const memberGap = zone.skel === "task" ? GEO.TASK_CHIP_GAP : GEO.DECISION_CARD_GAP;
+  const memberH = zone.skel === "decision" ? GEO.DECISION_CARD_H : GEO.TASK_CHIP_H;
+  const memberGap = zone.skel === "decision" ? GEO.DECISION_CARD_GAP : GEO.TASK_CHIP_GAP;
   const shown = visibleMembers(zone, folded);
   const extra = folded && zone.members.length > shown.length ? 1 : 0;
   const h = (shown.length + extra) * memberH + Math.max(0, shown.length + extra - 1) * memberGap;

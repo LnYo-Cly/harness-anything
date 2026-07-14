@@ -64,8 +64,21 @@ export interface LayoutInput {
    *   containerWidth — D3:领地摆放区的容器宽度(像素),用于派生列数。未传 → 兜底 3 列。
    */
   territory?: {
-    skel: "task" | "decision";
+    /**
+     * 骨架轴。task/decision/fact = 单种类领地分区;unified 由 ledgerGraphLayout 独占处理
+     * (不经 layoutTerritory)。task 按 milestone / decision 按 supersede-refine 家族 + 落地 /
+     * fact 按宿主 task 模块 + 分诊示警。
+     */
+    skel: "task" | "decision" | "fact";
     expandedZones: Set<string>;
+    containerWidth?: number;
+  };
+  /**
+   * 全域三实体合图(skel="unified")。存在即走 layoutLedgerGraph —— 把 task/decision/fact
+   * 三类实体及其跨类关系组装进一张图,ELK kind-bands(decision→task→fact)分层。
+   * 与 territory/canvas 互斥。
+   */
+  ledger?: {
     containerWidth?: number;
   };
 }

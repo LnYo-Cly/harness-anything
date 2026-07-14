@@ -28,9 +28,15 @@ interface Props {
   filters: GraphFilters;
   setFilters: (f: GraphFilters | ((prev: GraphFilters) => GraphFilters)) => void;
   availableModules: string[];
+  /**
+   * D7 item2:实体类型筛选段是否可见。单种类领地(task/decision/fact)下,类型由 skel
+   * 子开关独占(隐藏此段,避免一个维度两处控件);聚光灯 / 全域(unified)下保留 —— 在
+   * 那里 types 才真正收窄邻居/成员。默认 true(向后兼容)。
+   */
+  showEntityTypes?: boolean;
 }
 
-export function GraphFilterPanel({ filters, setFilters, availableModules }: Props) {
+export function GraphFilterPanel({ filters, setFilters, availableModules, showEntityTypes = true }: Props) {
   const toggleModule = (mod: string) => {
     setFilters((prev) => {
       const next = new Set(prev.modules);
@@ -60,14 +66,16 @@ export function GraphFilterPanel({ filters, setFilters, availableModules }: Prop
   // 聚光灯模式下压住焦点卡片,领地模式下压住第一个领地块。收起态是一颗 pill,
   // 上面标出「已收窄」的筛选数,状态一眼可见,画布还给内容。
   const [open, setOpen] = useState(false);
+  // D7 item2:types 只在 showEntityTypes 时计入「已收窄」徽标 —— 单种类领地下 types
+  // 由 skel 独占,filter.types 恒为 `{skel}`,把它算进 narrowed 会谎报「1 个收窄」。
   const narrowed =
     AXIS_ORDER.filter((a) => !filters.axes[a]).length +
-    (3 - filters.types.size) +
+    (showEntityTypes ? Math.max(0, 3 - filters.types.size) : 0) +
     Math.max(0, availableModules.length - filters.modules.size);
 
   return (
     <div
-      className={`flex flex-col rounded-lg border border-border bg-surface shadow-sm pointer-events-auto ${open ? "gap-3 w-[260px]" : ""}`}
+      className={`flex flex-col rounded-lg border border-border bg-surface shadow-sm pointer-events-auto ${open ? "gap-3 w-[300px]" : ""}`}
     >
       <button
         type="button"
@@ -158,31 +166,33 @@ export function GraphFilterPanel({ filters, setFilters, availableModules }: Prop
           </div>
         </div>
 
-        {/* Entity Type Filter */}
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-1.5 text-[11px] text-text-muted font-mono uppercase tracking-wide">
-            <Graph weight="bold" />
-            <span>{t("components.graphFilterPanel.entityTypes")}</span>
+        {/* Entity Type Filter — D7 item2:单种类领地下隐藏(skel 独占类型)。 */}
+        {showEntityTypes && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-1.5 text-[11px] text-text-muted font-mono uppercase tracking-wide">
+              <Graph weight="bold" />
+              <span>{t("components.graphFilterPanel.entityTypes")}</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {(["decision", "task", "fact"] as const).map((t) => {
+                const active = filters.types.has(t);
+                return (
+                  <button
+                    key={t}
+                    onClick={() => toggleType(t)}
+                    className={`px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${
+                      active
+                        ? "bg-stale/10 text-stale border border-stale/30"
+                        : "bg-surface-raised text-text-muted border border-border hover:bg-border/50"
+                    }`}
+                  >
+                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {(["decision", "task", "fact"] as const).map((t) => {
-              const active = filters.types.has(t);
-              return (
-                <button
-                  key={t}
-                  onClick={() => toggleType(t)}
-                  className={`px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${
-                    active
-                      ? "bg-stale/10 text-stale border border-stale/30"
-                      : "bg-surface-raised text-text-muted border border-border hover:bg-border/50"
-                  }`}
-                >
-                  {t.charAt(0).toUpperCase() + t.slice(1)}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

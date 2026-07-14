@@ -220,6 +220,10 @@ export function useGraphLayout(input: GraphLayoutInput): GraphLayoutOutput {
 
   useEffect(() => {
     const ac = new AbortController();
+    // 调度三态:territory(task/decision/fact 单种类) / ledger(unified 全域) / canvas(spotlight)。
+    // unified 走 ledgerGraphLayout;其余 territory skel 走 layoutTerritory;spotlight 走 canvas。
+    const isUnified = viewMode === "territory" && skel === "unified";
+    const isTerritory = viewMode === "territory" && !isUnified;
     computeGraphLayout({
       tasks,
       relations,
@@ -232,9 +236,11 @@ export function useGraphLayout(input: GraphLayoutInput): GraphLayoutOutput {
       filters,
       inLoopNodes: EMPTY_LOOP,
       inLoopEdges: EMPTY_LOOP,
-      ...(viewMode === "territory"
-        ? { territory: { skel, expandedZones, containerWidth } }
-        : { canvas: { shown, expanded, sizeOverrides } }),
+      ...(isTerritory
+        ? { territory: { skel: skel as "task" | "decision" | "fact", expandedZones, containerWidth } }
+        : isUnified
+          ? { ledger: { containerWidth } }
+          : { canvas: { shown, expanded, sizeOverrides } }),
     })
       .then(({ nodes: rfNodes, edges: rfEdges, cycleWarning: warning, resolvedFocusId: rid }) => {
         if (ac.signal.aborted) return;

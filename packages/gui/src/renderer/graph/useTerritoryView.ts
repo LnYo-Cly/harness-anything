@@ -16,7 +16,11 @@ import { useState, useCallback } from "react";
  */
 
 export type ViewMode = "territory" | "spotlight";
-export type TerritorySkel = "task" | "decision";
+/**
+ * 领地骨架轴。task/decision/fact 为单种类投影(各自分区成块);unified 为「全域」三实体
+ * 合图(decision→task→fact 分带)。skel 同时是单种类领地的类型所有权(skel 即类型)。
+ */
+export type TerritorySkel = "task" | "decision" | "fact" | "unified";
 
 export interface TerritoryView {
   skel: TerritorySkel;

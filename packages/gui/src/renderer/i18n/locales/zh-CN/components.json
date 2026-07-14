@@ -33,6 +33,8 @@
   "components.territoryModeBar.genealogy": "演化史",
   "components.territoryModeBar.task": "任务",
   "components.territoryModeBar.decisionMaking": "决策",
+  "components.territoryModeBar.fact": "事实",
+  "components.territoryModeBar.unified": "全域",
   "components.mockBadge.viewStillUsesDemoData": "此视图仍使用演示数据",
   "components.presetCard.activating": "激活中",
   "components.presetCard.inheritanceChain": "继承链",

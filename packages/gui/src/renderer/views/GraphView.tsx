@@ -163,15 +163,6 @@ function GraphViewInner({
     });
   }, [availableModules]);
 
-  const layoutInputFilters: GraphFilterInput = useMemo(
-    () => ({
-      modules: filters.modules,
-      types: filters.types,
-      axes: filters.axes,
-    }),
-    [filters],
-  );
-
   // 无限画布 ego 状态机(焦点 / 累积可见集 / 已展开卡片 / 焦点历史 / 换焦点即居中)。
   const {
     focusId,
@@ -205,6 +196,20 @@ function GraphViewInner({
     toggleZone,
   } = useTerritoryView(openFocus, onViewModeChange);
 
+  // D7 item2:单种类领地(task/decision/fact)下,类型由 skel 独占 —— 强制 types={skel};
+  // 聚光灯 / 全域(unified)下用 filter.types 真收窄邻居。需在 useTerritoryView 之后(消费 skel)。
+  const layoutInputFilters: GraphFilterInput = useMemo(
+    () => ({
+      modules: filters.modules,
+      types:
+        viewMode === "territory" && (skel === "task" || skel === "decision" || skel === "fact")
+          ? new Set<string>([skel])
+          : filters.types,
+      axes: filters.axes,
+    }),
+    [filters, viewMode, skel],
+  );
+
   // 布局调度(异步 + AbortController)外置到 useGraphLayout;GraphView 只消费结果。
   // 传 containerWidth(D3 领地列数)和 sizeOverrides(D4 卡片尺寸)过布局链。
   const { nodes, edges, cycleWarning, error, resolvedFocusId } = useGraphLayout({
@@ -232,12 +237,14 @@ function GraphViewInner({
 
   // 单击 chip = 就地展开成卡片并长出邻居(累积,永不重排已有画布)。
   // territory 模式下 territoryChip 单击 → 切到聚光灯(enterSpotlight);fold chip → toggleZone。
+  // unified(全域)模式下 ego 节点单击 → enterSpotlight(整图是总览,深入靠聚光灯)。
   const onNodeClick = useCallback(
     (_evt: any, node: any) => {
       if (node.type === "territoryChip") {
         const d = node.data ?? {};
-        if (d.entity === "fold" && d.zoneId) {
-          toggleZone(d.zoneId);
+        if (d.entity === "fold") {
+          // fold chip:领地 fold → toggleZone;全域 fold(无 zoneId)→ 仅提示,不跳。
+          if (d.zoneId) toggleZone(d.zoneId);
           return;
         }
         if (d.navRef) enterSpotlight(d.navRef);
@@ -248,19 +255,27 @@ function GraphViewInner({
         return;
       }
       if (node.type !== "ego") return;
+      // 全域总览:点任一节点 → 进聚光灯深入(ego 状态机在这里不适用,整图无焦点)。
+      if (viewMode === "territory" && skel === "unified") {
+        const navRef = node.data?.navRef;
+        if (navRef) enterSpotlight(navRef);
+        return;
+      }
       if (node.data?.expanded) return;
       expandNode(node.id);
     },
-    [expandNode, toggleZone, enterSpotlight],
+    [expandNode, toggleZone, enterSpotlight, viewMode, skel],
   );
 
   // 双击 = 设为画布中心(openFocus:重排前后各 2 跳,推历史)。
+  // 仅聚光灯有意义;领地/全域(territory viewMode)下 ego 状态机不适用,忽略。
   const onNodeDoubleClick = useCallback(
     (_evt: any, node: any) => {
+      if (viewMode === "territory") return;
       if (node.type !== "ego" || typeof node.id !== "string") return;
       openFocus(node.id);
     },
-    [openFocus],
+    [openFocus, viewMode],
   );
 
   const onEdgeClick = useCallback((_: any, edge: any) => {
@@ -483,6 +498,7 @@ function GraphViewInner({
               filters={filters}
               setFilters={setFilters}
               availableModules={availableModules}
+              showEntityTypes={viewMode === "spotlight" || skel === "unified"}
             />
           </Panel>
         </ReactFlow>

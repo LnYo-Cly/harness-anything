@@ -1,5 +1,5 @@
-import type { TaskRow, RelationEdge, DecisionRow } from "../model/types";
-import type { RelationCoverageRow } from "../../api/renderer-dto.ts";
+import type { TaskRow, RelationEdge, DecisionRow, FactRef } from "../model/types";
+import type { RelationCoverageRow, FactAnchorRow } from "../../api/renderer-dto.ts";
 import { endpointToNodeId } from "./endpoint";
 import { type SemanticAxis } from "./constants";
 import type { GraphFilterInput } from "./graphLayoutTypes";
@@ -20,7 +20,7 @@ import { t as translate } from "../i18n/core.ts";
  *              再按 landing(派生的 task 落到哪个 milestone)二次分区;无落地=示警区。
  */
 
-export type TerritorySkel = "task" | "decision";
+export type TerritorySkel = "task" | "decision" | "fact" | "unified";
 
 // ── 几何常量(与 territoryLayout.ts 共享)──
 const TASK_CHIP_H = 30;
@@ -49,8 +49,8 @@ export const GEO = {
 // ── 内部结构 ──
 export interface Member {
   id: string;
-  entity: "task" | "decision";
-  row: TaskRow | DecisionRow;
+  entity: "task" | "decision" | "fact";
+  row: TaskRow | DecisionRow | FactRef;
   label: string;
   color?: string;
   dimmed: boolean;
@@ -61,6 +61,8 @@ export interface Member {
   derivedCount?: number;
   riskTier?: string;
   urgency?: string;
+  /** fact 特有:失效/孤儿/被替代 等分诊信号(空数组=健康)。 */
+  factSignals?: string[];
 }
 
 export interface Zone {
@@ -69,7 +71,7 @@ export interface Zone {
   axis: SemanticAxis;
   virtual: boolean;
   unlanded: boolean;
-  skel: "task" | "decision";
+  skel: "task" | "decision" | "fact";
   statusCounts?: Record<string, number>;
   isAllDone?: boolean;
   stateCounts?: Record<string, number>;
@@ -92,9 +94,12 @@ export interface Section {
 export interface PartitionInput {
   tasks: TaskRow[];
   decisions: DecisionRow[];
+  facts: FactRef[];
   relations: RelationEdge[];
   filters: GraphFilterInput;
   coverageRows?: ReadonlyArray<RelationCoverageRow>;
+  /** fact 领地的分诊信号需要 factAnchors 全集(判定孤儿证据)。 */
+  factAnchors?: ReadonlyArray<FactAnchorRow>;
 }
 
 // ══ task 领地 ══
@@ -467,7 +472,7 @@ function decisionScore(d: DecisionRow | undefined): number {
   return s;
 }
 
-function daysAgo(iso: string): number {
+export function daysAgo(iso: string): number {
   if (!iso) return 999;
   const t = new Date(iso).getTime();
   if (Number.isNaN(t)) return 999;

@@ -3,6 +3,7 @@ import { edgePassesAxisFilter, pickDefaultFocus } from "./graphLayoutShared";
 import type { LayoutInput, LayoutOutput } from "./graphLayoutTypes";
 import { layoutCanvasEgo } from "./canvasEgoLayout";
 import { layoutTerritory } from "./territoryLayout";
+import { layoutLedgerGraph } from "./ledgerGraphLayout";
 import { layoutSimpleEgo } from "./simpleEgoLayout";
 import { layoutThreeLane } from "./threeLaneLayout";
 
@@ -72,8 +73,22 @@ export async function computeGraphLayout(input: LayoutInput): Promise<LayoutOutp
       relations: validEdges,
       filters,
       coverageRows,
+      factAnchors: input.factAnchors,
       expandedZones: input.territory.expandedZones,
       containerWidth: input.territory.containerWidth,
+    });
+  }
+
+  // 全域三实体合图(skel="unified"):存在 ledger 入参即走 layoutLedgerGraph ——
+  // 把 task/decision/fact 三类实体及其跨类关系组装进一张图,ELK kind-bands 分层。
+  // 与 territory/canvas 互斥。
+  if (input.ledger) {
+    return layoutLedgerGraph({
+      tasks,
+      decisions: decisions ?? [],
+      facts: facts ?? [],
+      relations: validEdges,
+      filters,
     });
   }
 

@@ -25,6 +25,15 @@ import type { ViewMode } from "../graph/useTerritoryView.ts";
  * 选择条由本组件在画布之上渲染:演化史不是画布覆盖层,旧 facet tab 在画布之上才能在
  * 演化史视图下也保持可见。
  *
+ * D6 焦点连续性:focusedEntityRef 在领地/聚光灯/演化史三态间始终保留 —— 切模式不丢焦点。
+ *   - 聚光灯→演化史:focusedEntityRef 经 props 传给 GenealogyTimelineView.focusRef,直接显
+ *     该 decision 的谱系(不需重选)。
+ *   - 演化史→聚光灯:genealogy 侧栏的 onFocusChange 已把当前 decision 写回 focusedEntityRef;
+ *     GraphView 重新挂载时 useEgoCanvas 的 bootstrap effect 据 focusRef 复焦点。
+ *   - 领地→聚光灯:territory chip / 全域节点单击 → enterSpotlight(navRef) 同步切模式 + 复焦。
+ *   - 聚光灯历史 back/forward/clear:useEgoCanvas.stepHistory / clearFocus 上行 onFocusChange,
+ *     同步 AppLocation.focusedEntityRef —— 否则历史导航后演化史会开在陈旧 decision 上。
+ *
  * 演化史仅 decision 有谱系(GENEALOGY_KINDS 只认 decision↔decision)。非 decision 焦点时
  * 演化史按钮置灰 + tooltip(三选项常驻,不像旧 facet tab 那样隐藏 —— 不假装万物皆有谱系,
  * 但保持模式条的稳定心智)。
