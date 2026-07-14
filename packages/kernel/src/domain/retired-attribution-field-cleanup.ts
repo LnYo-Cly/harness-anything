@@ -24,12 +24,18 @@ const expectedKeys = {
 } as const satisfies Record<RetiredAttributionDocumentKind, ReadonlyArray<string>>;
 
 export function hasRetiredAttributionFields(body: string, documentKind: RetiredAttributionDocumentKind): boolean {
+  return findRetiredAttributionFields(body, documentKind).length > 0;
+}
+
+export function findRetiredAttributionFields(
+  body: string,
+  documentKind: RetiredAttributionDocumentKind
+): ReadonlyArray<string> {
   const frontmatter = frontmatterSpans(body);
   const keys = new Set<string>(expectedKeys[documentKind]);
-  return frontmatter.lines.some((line) => {
-    const key = topLevelKey(line.content);
-    return key !== null && keys.has(key);
-  });
+  return frontmatter.lines
+    .map((line) => topLevelKey(line.content))
+    .filter((key): key is string => key !== null && keys.has(key));
 }
 
 export function countContentPinArbitersInDocument(body: string): number {
