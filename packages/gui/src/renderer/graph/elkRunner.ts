@@ -24,6 +24,11 @@ export interface ElkNodeInput {
   id: string;
   width: number;
   height: number;
+  /**
+   * D7 unified:ELK kind-band 分区索引。设置后激活 elk.partitioning,把同类实体强制归入
+   * 同一图层范围(decision=0 / task=1 / fact=2 → 左→中→右),减少跨类交叉。
+   */
+  partition?: number;
 }
 export interface ElkEdgeInput {
   id: string;
@@ -84,10 +89,21 @@ export async function runElkLayout(
   }
   try {
     const elk = new ELK();
+    const hasPartitions = nodes.some((n) => n.partition !== undefined);
+    const layoutOptions: Record<string, string> = hasPartitions
+      ? { ...ELK_OPTIONS, "elk.partitioning.activate": "true" }
+      : ELK_OPTIONS;
     const graph: ElkNode = {
       id: "root",
-      layoutOptions: ELK_OPTIONS,
-      children: nodes.map((n) => ({ id: n.id, width: n.width, height: n.height })),
+      layoutOptions,
+      children: nodes.map((n) => ({
+        id: n.id,
+        width: n.width,
+        height: n.height,
+        ...(n.partition !== undefined
+          ? { layoutOptions: { "elk.partitioning.partition": String(n.partition) } }
+          : {}),
+      })),
       edges: edges.map((e) => ({
         id: e.id,
         sources: e.sources,

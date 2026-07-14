@@ -11,6 +11,7 @@ export const guiVitestManifest = [
   "packages/gui/test/graphNavigation.vitest.ts",
   "packages/gui/test/canvas-ego-layout.vitest.ts",
   "packages/gui/test/territory-layout.vitest.ts",
+  "packages/gui/test/ledger-graph-layout.vitest.ts",
   "packages/gui/test/entitySearch.vitest.ts",
   "packages/gui/test/commandPalette-render.vitest.ts"
 ];

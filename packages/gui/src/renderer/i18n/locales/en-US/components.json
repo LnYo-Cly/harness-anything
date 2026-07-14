@@ -33,6 +33,8 @@
   "components.territoryModeBar.genealogy": "Lineage",
   "components.territoryModeBar.task": "Task",
   "components.territoryModeBar.decisionMaking": "Decision",
+  "components.territoryModeBar.fact": "Fact",
+  "components.territoryModeBar.unified": "All",
   "components.mockBadge.viewStillUsesDemoData": "This view still uses demo data",
   "components.presetCard.activating": "Activating",
   "components.presetCard.inheritanceChain": "inheritance chain",

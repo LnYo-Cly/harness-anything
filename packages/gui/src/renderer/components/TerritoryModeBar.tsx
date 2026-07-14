@@ -52,10 +52,11 @@ export function TerritoryModeBar({
 }
 
 /**
- * Territory 模式下的骨架轴(任务/决策)切换 —— 画布内浮层 Panel。
+ * Territory 模式下的骨架轴(任务/决策/事实/全域)切换 —— 画布内浮层 Panel。
  *
  * 与 3 态选择条分离:skel 是领地内部的布局轴,只在 GraphView 渲染且 viewMode==="territory"
  * 时才有意义,所以它留在 ReactFlow Panel 里(GraphView 挂载/卸载时随之出现/消失)。
+ * D7:4-way —— 单种类(task/decision/fact)各自分区;全域(unified)= 三实体合图。
  */
 export function TerritorySkelToggle({
   skel,
@@ -72,6 +73,12 @@ export function TerritorySkelToggle({
         </ModeBtn>
         <ModeBtn active={skel === "decision"} onClick={() => onSkelChange("decision")}>
           {t("components.territoryModeBar.decisionMaking")}
+        </ModeBtn>
+        <ModeBtn active={skel === "fact"} onClick={() => onSkelChange("fact")}>
+          {t("components.territoryModeBar.fact")}
+        </ModeBtn>
+        <ModeBtn active={skel === "unified"} onClick={() => onSkelChange("unified")}>
+          {t("components.territoryModeBar.unified")}
         </ModeBtn>
       </div>
     </Panel>

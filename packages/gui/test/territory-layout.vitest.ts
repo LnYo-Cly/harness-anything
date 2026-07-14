@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { layoutTerritory, deriveGridCols } from "../src/renderer/graph/territoryLayout";
-import type { TaskRow, DecisionRow, RelationEdge } from "../src/renderer/model/types";
+import type { TaskRow, DecisionRow, FactRef, RelationEdge } from "../src/renderer/model/types";
 import type { GraphFilterInput } from "../src/renderer/graph/graphLayoutTypes";
 
 // ── 精简工厂 ──
@@ -27,6 +27,17 @@ const decision = (id: string, extra: Partial<DecisionRow> = {}): DecisionRow =>
     claims: [],
     ...extra,
   }) as unknown as DecisionRow;
+
+const fact = (taskId: string, factId: string, extra: Partial<FactRef> = {}): FactRef =>
+  ({
+    anchor: `${taskId}/${factId}`,
+    taskId,
+    category: "finding",
+    text: `Fact ${factId}`,
+    at: "2026-07-10",
+    confidence: "high",
+    ...extra,
+  }) as unknown as FactRef;
 
 const rel = (from: string, to: string, kind: RelationEdge["kind"]): RelationEdge =>
   ({ from, to, kind, provenance: "local-document" }) as RelationEdge;
@@ -348,6 +359,118 @@ describe("layoutTerritory · decision skel", () => {
     });
     const ns = out.nodes;
     expectNoOverlap(ns);
+  });
+});
+
+// ══ FACT 领地 ══
+describe("layoutTerritory · fact skel", () => {
+  it("健康 fact 按宿主 task 模块分区", () => {
+    const tasks = [
+      task("t_a", { module: "gui" }),
+      task("t_b", { module: "kernel" }),
+    ];
+    const facts = [
+      fact("t_a", "F1"),
+      fact("t_a", "F2"),
+      fact("t_b", "F3"),
+    ];
+    const out = layoutTerritory({
+      skel: "fact",
+      tasks,
+      decisions: [],
+      facts,
+      relations: [],
+      filters: filters(),
+      expandedZones: new Set(),
+    });
+    const zoneTitles = out.nodes
+      .filter((n) => n.type === "territoryZone" && n.data?.variant === "zone")
+      .map((n) => n.data.title);
+    expect(zoneTitles).toContain("gui");
+    expect(zoneTitles).toContain("kernel");
+    // gui zone 有 2 条 fact chip
+    const guiChips = out.nodes.filter(
+      (n) => n.type === "territoryChip" && n.data?.entity === "fact" && n.id.includes("t_a"),
+    );
+    expect(guiChips.length).toBe(2);
+  });
+
+  it("失效 fact(invalidated-by)进示警区,健康 fact 进模块区", () => {
+    const tasks = [task("t1", { module: "m" })];
+    const facts = [
+      fact("t1", "F_ok"),
+      fact("t1", "F_bad"),
+    ];
+    const relations = [
+      rel("fact/t1/F_bad", "decision/dec_X", "invalidated-by"),
+    ];
+    const out = layoutTerritory({
+      skel: "fact",
+      tasks,
+      decisions: [],
+      facts,
+      relations,
+      filters: filters(),
+      expandedZones: new Set(),
+    });
+    const sections = out.nodes.filter((n) => n.type === "territoryZone" && n.data?.variant === "section");
+    // 示警区(first section)
+    expect(sections.length).toBeGreaterThanOrEqual(2);
+    // 失效 fact chip 在示警区,健康 fact chip 在模块区
+    const badChip = out.nodes.find((n) => n.type === "territoryChip" && n.id.includes("F_bad"));
+    const okChip = out.nodes.find((n) => n.type === "territoryChip" && n.id.includes("F_ok"));
+    expect(badChip).toBeDefined();
+    expect(okChip).toBeDefined();
+    // 失效 fact 应被标记 dimmed
+    expect(badChip?.data?.dimmed).toBe(true);
+    expect(okChip?.data?.dimmed).toBe(false);
+  });
+
+  it("未挂接 task 的 fact 进「未挂接任务」分区", () => {
+    const facts = [fact("ghost", "F1")]; // host task "ghost" 不在 tasks 列表
+    const out = layoutTerritory({
+      skel: "fact",
+      tasks: [],
+      decisions: [],
+      facts,
+      relations: [],
+      filters: filters(),
+      expandedZones: new Set(),
+    });
+    const zones = out.nodes.filter((n) => n.type === "territoryZone" && n.data?.variant === "zone");
+    // 单一 zone = 未挂接 task 区
+    expect(zones.length).toBe(1);
+    expect(zones[0].data.unlanded).toBe(true);
+  });
+
+  it("类型过滤:关掉 fact 后 fact 领地空", () => {
+    const facts = [fact("t1", "F1")];
+    const out = layoutTerritory({
+      skel: "fact",
+      tasks: [task("t1")],
+      decisions: [],
+      facts,
+      relations: [],
+      filters: filters({ types: new Set(["task", "decision"]) }),
+      expandedZones: new Set(),
+    });
+    expect(out.nodes.length).toBe(0);
+  });
+
+  it("fact chip 的 navRef 形如 fact/<task>/<id>(可被 enterSpotlight 消费)", () => {
+    const facts = [fact("t1", "F1")];
+    const out = layoutTerritory({
+      skel: "fact",
+      tasks: [task("t1")],
+      decisions: [],
+      facts,
+      relations: [],
+      filters: filters(),
+      expandedZones: new Set(),
+    });
+    const chip = out.nodes.find((n) => n.type === "territoryChip" && n.data?.entity === "fact");
+    expect(chip).toBeDefined();
+    expect(chip?.data?.navRef).toMatch(/^fact\//);
   });
 });
 
