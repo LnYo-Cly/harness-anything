@@ -9,6 +9,7 @@ import {
   inLoopEdge,
   statusColor,
 } from "./graphLayoutShared";
+import { runElkLayout, centerOnFocus, translateRoutes } from "./elkRunner";
 import type { Node, Edge } from "@xyflow/react";
 import { Position } from "@xyflow/react";
 import { t as translate } from "../i18n/core.ts";
@@ -260,7 +261,19 @@ function nodeDims(
   return { w: CHIP_W, h: CHIP_H };
 }
 
-export function layoutCanvasEgo(input: CanvasEgoInput): LayoutOutput {
+/**
+ * 跑 ego 布局。
+ *
+ * 流程:
+ *   1. 老的确定性列布局(BFS 分级 + barycenter 排序)先算一版位置 + 组装 rfNodes/rfEdges。
+ *      这一版作为 ELK 失败时的降级,也贡献 hiddenCount / hop / degree 等节点 data。
+ *   2. 跑 ELK Layered 拿正交路由 + ELK 自己的节点位置。成功则用 ELK 的位置覆盖(经
+ *      焦点位移让 focus 落在原点),并把 bend points 写进 edge.data.route 给 InteractiveEdge。
+ *   3. ELK 失败 → 保留列布局 + getSmoothStepPath(InteractiveEdge 的兜底)。
+ *
+ * 因此是 async —— useGraphLayout/computeGraphLayout 早就是 async,这里只是接入。
+ */
+export async function layoutCanvasEgo(input: CanvasEgoInput): Promise<LayoutOutput> {
   const { focusId, filters, shown, expanded } = input;
   const sizeOverrides = input.sizeOverrides;
   const { byId, adj, synthEdges } = buildEgoGraph(
@@ -428,6 +441,47 @@ export function layoutCanvasEgo(input: CanvasEgoInput): LayoutOutput {
     emit(edge, axisForKind(edge.kind), `rel_${i}`);
   });
   for (const { edge, key } of synthEdges) emit(edge, "execution", key);
+
+  // ── C:ELK 正交路由 ──
+  // 节点尺寸已经定型(B 的 nodeDims),把它和边列表喂给 ELK。成功则位置由 ELK 接管
+  // (focus 平移到原点保留「焦点居中」语义),边的 bend points 写进 data.route 供
+  // InteractiveEdge 直接消费。失败则保留上面的列布局 + 默认 smoothstep 兜底。
+  const dimsMap = new Map<string, { width: number; height: number }>();
+  for (const n of rfNodes) {
+    const w = (n.width as number | undefined) ?? CHIP_W;
+    const h = (n.height as number | undefined) ?? CHIP_H;
+    dimsMap.set(n.id, { width: w, height: h });
+  }
+  const elkInputNodes = rfNodes.map((n) => ({
+    id: n.id,
+    width: dimsMap.get(n.id)!.width,
+    height: dimsMap.get(n.id)!.height,
+  }));
+  const elkInputEdges = rfEdges.map((e) => ({
+    id: e.id,
+    sources: [e.source],
+    targets: [e.target],
+  }));
+  const elkResult = await runElkLayout(elkInputNodes, elkInputEdges);
+  if (elkResult) {
+    // C(P0 修复):节点与边折线必须共享同一个 focus-centering transform。此前的调用顺序
+    // 先 centerOnFocus 位移 positions,再让 translateRoutes 从已位移的 positions 反推 delta
+    // → 得到 ≈0 → 提前 return → 折线留在 raw ELK 坐标,边飘离卡片。现在 centerOnFocus
+    // 返回它应用过的 delta,translateRoutes 直接复用同一个 delta。
+    const delta = centerOnFocus(elkResult.positions, focusId, dimsMap);
+    translateRoutes(elkResult.routes, delta);
+    for (const n of rfNodes) {
+      const p = elkResult.positions.get(n.id);
+      if (p) n.position = p;
+    }
+    for (const e of rfEdges) {
+      const route = elkResult.routes.get(e.id);
+      if (route && route.points.length >= 2) {
+        // 保留原 data(含 axis / 关系元数据),仅附 route。InteractiveEdge 优先读 route。
+        e.data = { ...(e.data as Record<string, unknown>), route: route.points };
+      }
+    }
+  }
 
   const normalizedEdges = rfEdges.map((e) => ({ from: e.source, to: e.target }));
   const cycleWarning = findRelationCycles(normalizedEdges);

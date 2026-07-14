@@ -79,8 +79,9 @@ export async function computeGraphLayout(input: LayoutInput): Promise<LayoutOutp
 
   // 无限画布 ego(dec_01KXBGJQFQARSZHHQW1WADFDNC):存在 canvas 累积态即统一走
   // 分层列布局(三类实体一视同仁,decision 的 claim 内联进卡片而非炸成 claim 节点)。
+  // C:layoutCanvasEgo 现在是 async —— 内部跑 ELK 拿正交边路由。
   if (input.canvas) {
-    return layoutCanvasEgo({
+    return await layoutCanvasEgo({
       focusId: resolvedFocusId,
       tasks,
       decisions,
