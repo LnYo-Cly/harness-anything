@@ -7,10 +7,12 @@ import { isInvalidPreset, materializePresetTaskDocuments, resolvePresetEntry } f
 import type { ProjectHarnessSettings } from "./settings.ts";
 
 export interface TaskContractDocumentRequirement {
+  readonly slot: string;
+  readonly templateRef: string;
   readonly materializeAs: string;
   readonly requiredAnchors: ReadonlyArray<string>;
   readonly fallbackUsed: boolean;
-  readonly locale: string;
+  readonly locale: "zh-CN" | "en-US";
 }
 
 export type TaskContractDocumentResolution = {
@@ -56,6 +58,8 @@ export function resolveTaskContractDocuments(
     return {
       ok: true,
       documents: snapshot.documents.map((document) => ({
+        slot: document.slot,
+        templateRef: document.templateRef,
         materializeAs: document.materializeAs,
         requiredAnchors: document.requiredAnchors,
         fallbackUsed: false,

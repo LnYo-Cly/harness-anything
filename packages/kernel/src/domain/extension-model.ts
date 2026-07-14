@@ -1,4 +1,5 @@
 import type { PresetManifest, TemplateCatalog, TemplateSelection, VerticalDefinition } from "../schemas/registry.ts";
+import { markdownHeadingSections } from "../markdown/section.ts";
 import { createEntityKindRegistry } from "./entity-kind-registry.ts";
 
 export interface ExtensionValidationIssue {
@@ -14,6 +15,7 @@ export interface ExtensionValidationIssue {
     | "missing_parent_preset"
     | "missing_profile"
     | "missing_required_anchor"
+    | "missing_section_permission"
     | "missing_template"
     | "custom_vertical_forbidden"
     | "duplicate_materialized_path"
@@ -24,6 +26,8 @@ export interface ExtensionValidationIssue {
     | "preset_extends_cycle"
     | "status_mapping_forbidden"
     | "template_locale_structure_mismatch"
+    | "duplicate_section_permission"
+    | "invalid_section_permission"
     | "template_body_unavailable"
     | "unknown_extension_field"
     | "vertical_contract_entity_disabled"
@@ -61,6 +65,7 @@ export interface MaterializedTemplatePlan {
   readonly locale: "zh-CN" | "en-US";
   readonly fallbackUsed: boolean;
   readonly requiredAnchors: ReadonlyArray<string>;
+  readonly sectionPermissions: TemplateCatalog["documents"][number]["sectionPermissions"];
   readonly body: string;
 }
 
@@ -115,6 +120,7 @@ export function validateTemplateCatalog(catalog: TemplateCatalog, options: Templ
       issues.push(issue("missing_fallback_locale", `Fallback locale ${document.fallbackLocale} is not present for ${documentKey}.`, `${documentPath}.fallbackLocale`));
     }
 
+    const materializedHeadingAnchors = new Set<string>();
     for (const [variantIndex, variant] of document.locales.entries()) {
       const variantPath = `${documentPath}.locales[${variantIndex}]`;
       if (!sameStringSet(variant.anchors, document.requiredAnchors)) {
@@ -122,11 +128,40 @@ export function validateTemplateCatalog(catalog: TemplateCatalog, options: Templ
       }
       const body = options.resolveBody?.({ document, locale: variant, documentIndex, localeIndex: variantIndex });
       if (body !== undefined) {
+        for (const section of markdownHeadingSections(body)) materializedHeadingAnchors.add(section.anchor);
         for (const anchor of document.requiredAnchors) {
           if (!body.includes(anchor)) {
             issues.push(issue("missing_required_anchor", `Locale ${variant.locale} body is missing anchor ${anchor}.`, `${variantPath}.bodyPath`));
           }
         }
+      }
+    }
+
+    const permissionAnchors = new Set<string>();
+    for (const [permissionIndex, permission] of document.sectionPermissions.entries()) {
+      const permissionPath = `${documentPath}.sectionPermissions[${permissionIndex}]`;
+      if (permissionAnchors.has(permission.anchor)) {
+        issues.push(issue("duplicate_section_permission", `Duplicate section permission for ${permission.anchor}.`, permissionPath));
+      }
+      permissionAnchors.add(permission.anchor);
+      if (!/^#{1,6}\s+\S/u.test(permission.anchor)) {
+        issues.push(issue("invalid_section_permission", `Section permission ${permission.anchor} must name a markdown heading for ${documentKey}.`, permissionPath));
+      }
+      if (permission.writeMode === "free-prose" && !permission.semanticClass) {
+        issues.push(issue("invalid_section_permission", `Free-prose section ${permission.anchor} must declare semanticClass.`, permissionPath));
+      }
+      if (permission.writeMode !== "free-prose" && permission.semanticClass) {
+        issues.push(issue("invalid_section_permission", `${permission.writeMode} section ${permission.anchor} cannot declare semanticClass.`, permissionPath));
+      }
+    }
+    for (const anchor of document.requiredAnchors.filter((candidate) => /^#{1,6}\s+/u.test(candidate))) {
+      if (!permissionAnchors.has(anchor)) {
+        issues.push(issue("missing_section_permission", `Heading ${anchor} must declare a section write permission.`, `${documentPath}.sectionPermissions`));
+      }
+    }
+    for (const anchor of materializedHeadingAnchors) {
+      if (!permissionAnchors.has(anchor)) {
+        issues.push(issue("missing_section_permission", `Materialized heading ${anchor} must declare a section write permission.`, `${documentPath}.sectionPermissions`));
       }
     }
   }
@@ -275,6 +310,7 @@ export function planTemplateMaterialization(request: MaterializationRequest): Ma
       locale: selected.locale,
       fallbackUsed: selected.locale !== request.locale,
       requiredAnchors: document.requiredAnchors,
+      sectionPermissions: document.sectionPermissions,
       body
     });
   }
@@ -352,7 +388,12 @@ function validateTemplateCatalogShape(input: unknown, path: string, issues: Exte
   if (Array.isArray(input.documents)) {
     for (const [index, document] of input.documents.entries()) {
       const documentPath = `${path}.documents[${index}]`;
-      validateObjectKeys(document, documentPath, ["id", "version", "documentKind", "slot", "materializeAs", "frontmatterSchema", "requiredAnchors", "fallbackLocale", "locales"], issues);
+      validateObjectKeys(document, documentPath, ["id", "version", "documentKind", "slot", "materializeAs", "frontmatterSchema", "requiredAnchors", "sectionPermissions", "fallbackLocale", "locales"], issues);
+      if (isRecord(document) && Array.isArray(document.sectionPermissions)) {
+        for (const [permissionIndex, permission] of document.sectionPermissions.entries()) {
+          validateObjectKeys(permission, `${documentPath}.sectionPermissions[${permissionIndex}]`, ["anchor", "writeMode", "semanticClass"], issues);
+        }
+      }
       if (isRecord(document) && Array.isArray(document.locales)) {
         for (const [localeIndex, locale] of document.locales.entries()) {
           validateObjectKeys(locale, `${documentPath}.locales[${localeIndex}]`, ["locale", "anchors", "bodyPath"], issues);

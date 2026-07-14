@@ -49,6 +49,31 @@ test("script ingest rejects a canonical file modified after staging instead of o
   });
 });
 
+test("script ingest compiles staged task prose and rejects machine-written section tampering", () => {
+  withFixture(({ rootDir }) => {
+    const taskId = "task_01KX3W4V1EDPHPTGWYYBQQ2J75";
+    const taskRoot = path.join(rootDir, "harness", "tasks", taskId);
+    write(path.join(taskRoot, "INDEX.md"), scriptTaskIndex(taskId));
+    write(path.join(taskRoot, "task_plan.md"), scriptPlanBody("Original goal."));
+    write(path.join(taskRoot, "progress.md"), scriptProgressBody("Original log."));
+    commitHarness(rootDir, "seed managed task documents");
+
+    const stage = createCanonicalScriptStage(rootDir, path.join(rootDir, ".harness/runs/managed"), taskRoot);
+    write(path.join(stage.outputRoot, "task_plan.md"), scriptPlanBody("Staged goal."));
+    const op = requiredIngestOp(stage, "managed-prose");
+    const payload = op.payload as {
+      readonly semanticMutationPlan: { readonly mutations: ReadonlyArray<{ readonly entityKind: string; readonly action: string; readonly identity: unknown }> };
+    };
+    assert.deepEqual(payload.semanticMutationPlan.mutations.map((mutation) => [
+      mutation.entityKind, mutation.action, mutation.identity
+    ]), [["task", "document", { taskId }]]);
+
+    write(path.join(stage.outputRoot, "progress.md"), scriptProgressBody("Tampered prose."));
+    assert.throws(() => scriptIngestOp(stage, [stage.outputRoot], "managed-machine-tamper"),
+      /SEMANTIC_DIFF_REQUIRED:machine-written section requires typed command/u);
+  });
+});
+
 test("canonical stage construction rejects a protected recursive scope containing a symlink", {
   skip: process.platform === "win32"
 }, () => {
@@ -209,4 +234,23 @@ function commitHarness(rootDir: string, message: string): void {
   const harnessRoot = path.join(rootDir, "harness");
   execFileSync("git", ["-C", harnessRoot, "add", "."]);
   execFileSync("git", ["-C", harnessRoot, "commit", "-m", message], { stdio: "ignore" });
+}
+
+function scriptTaskIndex(taskId: string): string {
+  return [
+    "---", "schema: task-package/v2", `task_id: ${taskId}`, "status: active", "urgency: medium",
+    "vertical: software/coding", "preset: standard-task", "---", "# Task", ""
+  ].join("\n");
+}
+
+function scriptPlanBody(goal: string): string {
+  return [
+    "# Plan", "", "## Goal", goal, "## Context", "Context.", "## Constraints", "Constraints.",
+    "## Checkpoint", "Checkpoint.", "## CI/Gate Authority Stop Condition", "Stop.",
+    "## Implementation Plan", "Plan.", "## Verification", "Verify.", ""
+  ].join("\n");
+}
+
+function scriptProgressBody(log: string): string {
+  return ["# Progress", "", "## Log", "", log, "", "## Evidence", "", "None.", ""].join("\n");
 }

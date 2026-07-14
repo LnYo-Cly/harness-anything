@@ -45,6 +45,7 @@ export interface RegistryMutationIntent {
   readonly identity: EntityIdentity;
   readonly action: string;
   readonly storageContext?: EntityStorageContext;
+  readonly additionalStorageContexts?: ReadonlyArray<EntityStorageContext>;
 }
 
 export interface RegistryMutationPlanInput {
@@ -160,9 +161,10 @@ export function compileRegistryMutationPlan(
     seenMutations.add(key);
   }
   const mutations = compiled.map((entry) => entry.mutation);
-  const targets = uniqueSorted(compiled.flatMap((entry) => entry.storage.targets), storageTargetKey);
+  const storages = compiled.flatMap((entry) => [entry.storage, ...entry.additionalStorage]);
+  const targets = uniqueSorted(storages.flatMap((storage) => storage.targets), storageTargetKey);
   const touchedPaths = targets.flatMap((target) => target.path ? [target.path] : []);
-  const consistencyScopes = [...new Set(compiled.map((entry) => entry.storage.consistencyScope))]
+  const consistencyScopes = [...new Set(storages.map((storage) => storage.consistencyScope))]
     .sort(compareUtf8Bytes);
   const mutationSet: RegistrySemanticMutationSet = { registryVersion: input.registryVersion, mutations };
   const storagePlan: StoragePlan = {
@@ -214,7 +216,7 @@ function compileIntent(
   registry: WritableEntityRegistry,
   registryVersion: number,
   intent: RegistryMutationIntent
-): { readonly mutation: RegistrySemanticMutation; readonly storage: LocatedEntityStorage } {
+): { readonly mutation: RegistrySemanticMutation; readonly storage: LocatedEntityStorage; readonly additionalStorage: ReadonlyArray<LocatedEntityStorage> } {
   if (!isCanonicalEntityKind(intent.entityKind)) throw new Error(`UNKNOWN_ENTITY_KIND:${intent.entityKind}`);
   const registration = registry.registrations.get(intent.entityKind);
   if (!registration) throw new Error(`ENTITY_KIND_NOT_WRITABLE:${intent.entityKind}`);
@@ -228,12 +230,18 @@ function compileIntent(
   const canonicalRef = registration.identityCodec.codec.encode(intent.identity);
   const decodedIdentity = registration.identityCodec.codec.decode(canonicalRef);
   const storage = registration.storageLocator.locator.locate(decodedIdentity, intent.storageContext ?? {});
+  const additionalStorage = (intent.additionalStorageContexts ?? []).map((context) => (
+    registration.storageLocator.status === "ready"
+      ? registration.storageLocator.locator.locate(decodedIdentity, context)
+      : storage
+  ));
   return {
     mutation: {
       entity: { registryVersion, entityKind: intent.entityKind, canonicalRef },
       action: { registryVersion, action: intent.action }
     },
-    storage
+    storage,
+    additionalStorage
   };
 }
 

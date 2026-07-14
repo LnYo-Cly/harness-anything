@@ -1,4 +1,11 @@
-import type { RegistryMutationPlanInput } from "../../../kernel/src/index.ts";
+import {
+  entityRegistry,
+  stablePayloadHash,
+  type RegistryMutationPlanInput,
+  type SemanticDiffCandidateTree,
+  type SemanticDiffDocumentPolicy,
+  type SemanticDiffMutationIntent
+} from "../../../kernel/src/index.ts";
 import {
   SemanticAdmissionErrorV2,
   bytesEqual,
@@ -19,6 +26,18 @@ interface SemanticHostedDocumentSnapshotV2 {
   readonly revision: bigint;
   readonly blobDigest: Uint8Array;
 }
+
+export interface ManagedSemanticDiffRegistrationV2 {
+  readonly kind: "task" | "decision" | "fact" | "relation";
+  readonly semanticDiff: typeof entityRegistry.task.semanticDiff;
+}
+
+export const managedSemanticDiffRegistrationsV2: ReadonlyArray<ManagedSemanticDiffRegistrationV2> = [
+  { kind: "task", semanticDiff: entityRegistry.task.semanticDiff },
+  { kind: "decision", semanticDiff: entityRegistry.decision.semanticDiff },
+  { kind: "fact", semanticDiff: entityRegistry.fact.semanticDiff },
+  { kind: "relation", semanticDiff: entityRegistry.relation.semanticDiff }
+];
 
 export function semanticAdmissionV2(code: string, message = code): SemanticAdmissionErrorV2 {
   return new SemanticAdmissionErrorV2(code, message);
@@ -90,6 +109,66 @@ export function semanticMutationPlanV2(
   mutations: RegistryMutationPlanInput["mutations"]
 ): RegistryMutationPlanInput {
   return { registryVersion: 1, mutations };
+}
+
+export function compileManagedCandidateTreeV2(
+  base: SemanticDiffCandidateTree,
+  candidate: SemanticDiffCandidateTree,
+  documentPolicies: ReadonlyArray<SemanticDiffDocumentPolicy>,
+  registrations: ReadonlyArray<ManagedSemanticDiffRegistrationV2> = managedSemanticDiffRegistrationsV2
+): RegistryMutationPlanInput {
+  const relevantKinds = managedSemanticKindsForCandidate(base, candidate);
+  const intents = registrations.filter((registration) => relevantKinds.has(registration.kind)).flatMap((registration) =>
+    registration.semanticDiff.compile(base, candidate, { documentPolicies }));
+  return semanticMutationPlanV2(mergeSemanticDiffIntentsV2(intents));
+}
+
+function managedSemanticKindsForCandidate(
+  base: SemanticDiffCandidateTree,
+  candidate: SemanticDiffCandidateTree
+): ReadonlySet<ManagedSemanticDiffRegistrationV2["kind"]> {
+  const baseBodies = new Map(base.documents.map((document) => [document.path, document.body]));
+  const candidateBodies = new Map(candidate.documents.map((document) => [document.path, document.body]));
+  const kinds = new Set<ManagedSemanticDiffRegistrationV2["kind"]>();
+  for (const documentPath of new Set([...baseBodies.keys(), ...candidateBodies.keys()])) {
+    if (baseBodies.get(documentPath) === candidateBodies.get(documentPath)) continue;
+    if (/^tasks\/[^/]+\/facts\.md$/u.test(documentPath)) {
+      kinds.add("fact");
+      kinds.add("relation");
+    } else if (/^tasks\/[^/]+\//u.test(documentPath)) {
+      kinds.add("task");
+    } else if (/^decisions\/decision-[^/]+\/decision\.md$/u.test(documentPath)) {
+      kinds.add("decision");
+    }
+  }
+  return kinds;
+}
+
+function mergeSemanticDiffIntentsV2(
+  intents: ReadonlyArray<SemanticDiffMutationIntent>
+): ReadonlyArray<RegistryMutationPlanInput["mutations"][number]> {
+  const byMutation = new Map<string, RegistryMutationPlanInput["mutations"][number]>();
+  for (const intent of intents) {
+    const key = `${intent.entityKind}\0${stablePayloadHash(intent.identity)}\0${intent.action}`;
+    const existing = byMutation.get(key);
+    const contexts = [
+      ...(existing?.storageContext ? [existing.storageContext] : []),
+      ...(existing?.additionalStorageContexts ?? []),
+      ...(intent.storageContext ? [intent.storageContext] : []),
+      ...(intent.additionalStorageContexts ?? [])
+    ];
+    const uniqueContexts = [...new Map(contexts.map((context) => [stablePayloadHash(context), context])).values()];
+    byMutation.set(key, {
+      entityKind: intent.entityKind,
+      identity: intent.identity,
+      action: intent.action,
+      ...(uniqueContexts[0] ? { storageContext: uniqueContexts[0] } : {}),
+      ...(uniqueContexts.length > 1 ? { additionalStorageContexts: uniqueContexts.slice(1) } : {})
+    });
+  }
+  return [...byMutation.values()].sort((left, right) => Buffer.from(
+    `${left.entityKind}\0${stablePayloadHash(left.identity)}\0${left.action}`
+  ).compare(Buffer.from(`${right.entityKind}\0${stablePayloadHash(right.identity)}\0${right.action}`)));
 }
 
 export function nullableSemanticBytesEqualV2(

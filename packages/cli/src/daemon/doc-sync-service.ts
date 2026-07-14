@@ -8,8 +8,11 @@ import {
   type EntityId,
   type HarnessLayoutInput,
   type HarnessLayoutOverrides,
+  type SemanticDiffCandidateTree,
+  type SemanticDiffDocumentPolicy,
   type WriteCoordinator
 } from "../../../kernel/src/index.ts";
+import { compileManagedCandidateTreeV2 } from "../../../application/src/index.ts";
 import {
   classifyStaticZones,
   classifyTouchedZones,
@@ -26,6 +29,7 @@ import {
   type RegistryRow,
   type TouchedZone
 } from "../../../application/src/doc-sync.ts";
+import { resolveManagedSectionPolicy } from "../commands/extensions/managed-section-policy.ts";
 
 export interface DocSyncServiceOptions {
   readonly rootDir: string;
@@ -171,7 +175,14 @@ export function validateDocSyncSubmitRequest(input: { readonly rootInput: Harnes
       continue;
     }
     const baseBody = currentHeadBody;
-    const zones = classifyTouchedZones(change.path, currentSha === null ? "added" : "modified", baseBody, body, registry.rows);
+    const zones = classifyTouchedZones(
+      change.path,
+      currentSha === null ? "added" : "modified",
+      baseBody,
+      body,
+      registry.rows,
+      resolveManagedSectionPolicy(input.rootInput, change.path)
+    );
     const okZones = zones.filter((zone): zone is Extract<TouchedZone, { readonly ok: true }> => zone.ok);
     unresolvedTouches.push(...zones.flatMap((zone) => zone.ok ? [] : [{ path: change.path, reason: zone.reason, bearing: zone.bearing, zoneClass: zone.zoneClass }]));
     forbiddenTouches.push(...forbiddenTouchesForZones(change.path, okZones));
@@ -182,8 +193,21 @@ export function validateDocSyncSubmitRequest(input: { readonly rootInput: Harnes
       baseBlobSha256: change.baseBlobSha256,
       newBlobSha256: computedNewSha,
       body,
+      baseBody,
       zoneClassesTouched: [...new Set(okZones.map((zone) => zone.zoneClass))]
     });
+  }
+
+  let semanticMutationPlan: ReturnType<typeof compileManagedCandidateTreeV2> = { registryVersion: 1, mutations: [] };
+  if (conflicts.length === 0 && forbiddenTouches.length === 0 && unresolvedTouches.length === 0) {
+    try {
+      semanticMutationPlan = compileDocSyncSemanticPlan(input.rootInput, acceptedChanges);
+    } catch (error) {
+      unresolvedTouches.push({
+        path: acceptedChanges[0]?.path ?? "candidate-tree",
+        reason: error instanceof Error ? error.message : "SEMANTIC_DIFF_AMBIGUOUS"
+      });
+    }
   }
 
   return {
@@ -192,7 +216,8 @@ export function validateDocSyncSubmitRequest(input: { readonly rootInput: Harnes
     forbiddenTouches,
     unresolvedTouches,
     conflicts,
-    currentLedgerSha
+    currentLedgerSha,
+    semanticMutationPlan
   };
 }
 
@@ -252,6 +277,7 @@ async function submitDocSyncRequest(options: DocSyncServiceOptions, request: Doc
         kind: "doc_sync_submit",
         payload: {
           baseLedgerSha: request.payload.baseLedgerSha,
+          semanticMutationPlan: validation.semanticMutationPlan,
           writes: validation.acceptedChanges.map((change) => ({
             path: change.path,
             body: change.body,
@@ -283,11 +309,58 @@ async function submitDocSyncRequest(options: DocSyncServiceOptions, request: Doc
   }
 }
 
+function compileDocSyncSemanticPlan(
+  rootInput: HarnessLayoutInput,
+  changes: ReadonlyArray<AppliedChangePlan>
+): ReturnType<typeof compileManagedCandidateTreeV2> {
+  if (changes.length === 0) return { registryVersion: 1, mutations: [] };
+  const layout = resolveHarnessLayout(rootInput);
+  const resolved = changes.map((change) => ({ change, policy: resolveManagedSectionPolicy(rootInput, change.path) }));
+  if (resolved.some(({ change, policy }) => policy === null && isManagedSemanticDocument(change.path))) {
+    throw new Error("SEMANTIC_DIFF_REQUIRED: candidate tree contains an undeclared managed document");
+  }
+  const managed = resolved.filter((entry): entry is { readonly change: AppliedChangePlan; readonly policy: SemanticDiffDocumentPolicy } => entry.policy !== null);
+  if (managed.length === 0) return { registryVersion: 1, mutations: [] };
+  const contextDocuments = [...new Set(managed.flatMap(({ change }) => {
+    const match = /^(tasks\/[^/]+)\//u.exec(change.path);
+    return match?.[1] ? [`${match[1]}/INDEX.md`] : [];
+  }))].sort().map((indexPath) => {
+    const body = headBlobBody(layout.authoredRoot, indexPath)
+      ?? (existsSync(path.join(layout.authoredRoot, indexPath)) ? readFileSync(path.join(layout.authoredRoot, indexPath), "utf8") : null);
+    if (body === null) throw new Error(`SEMANTIC_DIFF_REQUIRED: task identity context missing: ${indexPath}`);
+    return { path: indexPath, body };
+  });
+  const baseTree: SemanticDiffCandidateTree = {
+    documents: [...managed.map(({ change }) => ({ path: change.path, body: change.baseBody })), ...contextDocuments]
+  };
+  const candidateTree: SemanticDiffCandidateTree = {
+    documents: [...managed.map(({ change }) => ({ path: change.path, body: change.body })), ...contextDocuments]
+  };
+  return compileManagedCandidateTreeV2(
+    baseTree,
+    candidateTree,
+    managed.map((entry) => entry.policy)
+  );
+}
+
+function isManagedSemanticDocument(documentPath: string): boolean {
+  return /^decisions\/decision-[^/]+\/decision\.md$/u.test(documentPath)
+    || /^tasks\/[^/]+\/[^/]+\.md$/u.test(documentPath)
+    || documentPath === "modules.json";
+}
+
 function inspectDirtyFile(rootDir: string, authoredRoot: string, entry: DirtyEntry, rows: ReadonlyArray<RegistryRow>) {
   const absolutePath = path.join(authoredRoot, entry.path);
   const currentBody = existsSync(absolutePath) && entry.status !== "deleted" ? readFileSync(absolutePath, "utf8") : null;
   const baseBody = gitBlobText(authoredRoot, ["show", `HEAD:${entry.path}`]);
-  const zones = classifyTouchedZones(entry.path, entry.status, baseBody, currentBody, rows);
+  const zones = classifyTouchedZones(
+    entry.path,
+    entry.status,
+    baseBody,
+    currentBody,
+    rows,
+    resolveManagedSectionPolicy({ rootDir, layoutOverrides: { authoredRoot: path.relative(rootDir, authoredRoot) } }, entry.path)
+  );
   const okZones = zones.filter((zone): zone is Extract<TouchedZone, { readonly ok: true }> => zone.ok);
   const forbiddenTouches = forbiddenTouchesForZones(entry.path, okZones);
   const unresolvedTouches = zones.flatMap((zone) => zone.ok ? [] : [{ path: entry.path, reason: zone.reason, bearing: zone.bearing, zoneClass: zone.zoneClass }]);

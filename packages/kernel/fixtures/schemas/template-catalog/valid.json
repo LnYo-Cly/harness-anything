@@ -5,7 +5,10 @@
     "title": "Software Coding Core Templates",
     "version": "1.0.0",
     "owner": "harness-anything",
-    "locales": ["zh-CN", "en-US"]
+    "locales": [
+      "zh-CN",
+      "en-US"
+    ]
   },
   "documents": [
     {
@@ -15,18 +18,47 @@
       "slot": "task.flow",
       "materializeAs": "task_flow.md",
       "frontmatterSchema": "task-package/v2",
-      "requiredAnchors": ["## Goal", "## Steps", "## Gates"],
+      "requiredAnchors": [
+        "## Goal",
+        "## Steps",
+        "## Gates"
+      ],
       "fallbackLocale": "en-US",
       "locales": [
         {
           "locale": "zh-CN",
-          "anchors": ["## Goal", "## Steps", "## Gates"],
+          "anchors": [
+            "## Goal",
+            "## Steps",
+            "## Gates"
+          ],
           "bodyPath": "templates/task.flow/zh-CN.md"
         },
         {
           "locale": "en-US",
-          "anchors": ["## Goal", "## Steps", "## Gates"],
+          "anchors": [
+            "## Goal",
+            "## Steps",
+            "## Gates"
+          ],
           "bodyPath": "templates/task.flow/en-US.md"
+        }
+      ],
+      "sectionPermissions": [
+        {
+          "anchor": "## Goal",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Steps",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
+        },
+        {
+          "anchor": "## Gates",
+          "writeMode": "free-prose",
+          "semanticClass": "host-prose-only"
         }
       ]
     }

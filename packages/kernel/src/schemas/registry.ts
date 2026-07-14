@@ -205,6 +205,11 @@ export const TemplateCatalogSchema = Schema.Struct({
     materializeAs: Schema.String,
     frontmatterSchema: Schema.String,
     requiredAnchors: StringArray,
+    sectionPermissions: Schema.Array(Schema.Struct({
+      anchor: Schema.String,
+      writeMode: Schema.Literal("free-prose", "machine-written", "forbidden"),
+      semanticClass: Schema.optional(Schema.Literal("host-prose-only", "entity-bearing"))
+    })),
     fallbackLocale: LocaleSchema,
     locales: Schema.Array(Schema.Struct({
       locale: LocaleSchema,

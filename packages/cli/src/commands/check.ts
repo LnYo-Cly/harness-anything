@@ -1,8 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { isCloseoutPlaceholderMarkdown, isTaskDocumentPlaceholderMarkdown, parseReviewMarkdown, type TaskDocumentPlaceholderPolicy } from "../../../application/src/index.ts";
-import { findEntityRefs } from "../../../kernel/src/index.ts";
-import { checkTaskProjection } from "../../../kernel/src/index.ts";
+import { checkTaskProjection, extractMarkdownSection, findEntityRefs, markdownHeadingSections } from "../../../kernel/src/index.ts";
 import type { HarnessLayoutInput, HarnessLayoutOverrides } from "../../../kernel/src/index.ts";
 import { listTaskIndexPaths, normalizeRelativeDocumentPath, resolveHarnessLayout } from "../../../kernel/src/index.ts";
 import { readFrontmatter, readScalar } from "../../../kernel/src/index.ts";
@@ -12,6 +11,7 @@ import type { CheckProfile, CliResult, CommandRegistryEntry } from "../cli/types
 import { buildResolvableEntityIndex } from "./check-entity-refs.ts";
 import { profileIssue, type ProfileValidationIssue } from "./check-profile-types.ts";
 import { validateJournalActorAttribution } from "./actor-attribution-checker.ts";
+import { resolveLiveTaskSectionPolicies } from "./check-live-section-policy.ts";
 import { resolveTaskContractDocuments } from "./check-task-contract.ts";
 import { validateGateArchitectureRetrospectiveGate } from "./gate-retro-checker.ts";
 import { readProjectHarnessSettings, settingsIssue, type ProjectHarnessSettings } from "./settings.ts";
@@ -376,6 +376,8 @@ function validateMetadataDrivenTaskPackage(
   const profile = readScalar(frontmatter, "profile") || undefined;
   const contract = resolveTaskContractDocuments(rootInput, taskDir, relativeTaskDir, vertical, presetId, profile, settings);
   if (!contract.ok) return contract.issues;
+  const livePolicy = resolveLiveTaskSectionPolicies(rootInput, relativeTaskDir, vertical, presetId, profile, contract.documents);
+  if (!livePolicy.ok) return livePolicy.issues;
   const issues: ProfileValidationIssue[] = [];
   for (const document of contract.documents) {
     let safeDocumentPath: string;
@@ -426,6 +428,41 @@ function validateMetadataDrivenTaskPackage(
           "Restore the required anchor or rebuild the document from the selected template."
         ));
       }
+    }
+    const liveDocument = livePolicy.documents.get(document.materializeAs);
+    if (!liveDocument) {
+      issues.push(profileIssue(
+        "metadata-template",
+        "metadata_section_permission_missing",
+        "hard-fail",
+        `${relativeDocumentPath} has no active template section policy.`,
+        "Restore an active template declaration for this frozen contract document."
+      ));
+      continue;
+    }
+    const permissions = new Map(liveDocument.sectionPermissions.map((permission) => [permission.anchor, permission]));
+    for (const section of markdownHeadingSections(body)) {
+      if (permissions.has(section.anchor)) continue;
+      issues.push(profileIssue(
+        "metadata-template",
+        "metadata_section_permission_missing",
+        "hard-fail",
+        `${relativeDocumentPath} contains undeclared section ${section.anchor}.`,
+        "Declare the heading in the selected template sectionPermissions before canonical writes are allowed."
+      ));
+    }
+    for (const permission of liveDocument.sectionPermissions) {
+      if (permission.writeMode !== "forbidden") continue;
+      const templateSection = extractMarkdownSection(liveDocument.body, permission.anchor);
+      const actualSection = extractMarkdownSection(body, permission.anchor);
+      if (templateSection === actualSection) continue;
+      issues.push(profileIssue(
+        "metadata-template",
+        "metadata_forbidden_section_changed",
+        "hard-fail",
+        `${relativeDocumentPath} changed forbidden section ${permission.anchor}.`,
+        "Restore the template-owned section; forbidden sections have no canonical prose write road."
+      ));
     }
     if (document.fallbackUsed) {
       issues.push(profileIssue(

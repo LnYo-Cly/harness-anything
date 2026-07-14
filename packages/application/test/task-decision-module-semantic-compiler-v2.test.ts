@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   assertMutationClaimMatchesV2,
   canonicalPayloadDigestV2,
+  compileManagedCandidateTreeV2,
   encodeFactRelationCommandPayloadV2,
   encodeTaskDecisionModuleCommandPayloadV2,
   makeFactRelationSemanticCompilerV2,
@@ -47,12 +48,12 @@ const registry = createWritableEntityRegistry([
 ]);
 const stateDigest = Buffer.alloc(32, 0x11);
 
-test("task/decision/module register only their OQ-3 actions and remain typed-only", () => {
+test("task/decision register W5 semanticDiff while non-markdown module stays typed-only", () => {
   assert.deepEqual(entityRegistry.task.mutationContract, { status: "ready", actions: ["create", "transition", "append", "document"] });
   assert.deepEqual(entityRegistry.decision.mutationContract, { status: "ready", actions: ["propose", "state", "amend", "relation"] });
   assert.deepEqual(entityRegistry.module.mutationContract, { status: "ready", actions: ["register", "unregister", "step"] });
-  assert.equal(entityRegistry.task.semanticDiff.status, "typed-only");
-  assert.equal(entityRegistry.decision.semanticDiff.status, "typed-only");
+  assert.equal(entityRegistry.task.semanticDiff.status, "ready");
+  assert.equal(entityRegistry.decision.semanticDiff.status, "ready");
   assert.equal(entityRegistry.module.semanticDiff.status, "typed-only");
   assert.equal(entityRegistry.module.projectionFacet.status, "ready");
   assert.deepEqual(entityRegistry.module.projectionFacet.status === "ready"
@@ -63,6 +64,75 @@ test("task/decision/module register only their OQ-3 actions and remain typed-onl
     identityField: "moduleKey",
     materialization: "mutation-index"
   });
+});
+
+test("managed heading regions merge multi-file task prose without guessing the subject from its path", () => {
+  const taskId = "task_T";
+  const indexPath = `tasks/${taskId}-folder/INDEX.md`;
+  const planPath = `tasks/${taskId}-folder/task_plan.md`;
+  const briefPath = `tasks/${taskId}-folder/brief.md`;
+  const base = {
+    documents: [
+      { path: indexPath, body: taskIndex(taskId, "active") },
+      { path: planPath, body: managedBody("Plan", "## Goal", "Old goal") },
+      { path: briefPath, body: managedBody("Brief", "## Summary", "Old summary") }
+    ]
+  };
+  const candidate = {
+    documents: [
+      { path: indexPath, body: taskIndex(taskId, "active") },
+      { path: planPath, body: managedBody("Plan", "## Goal", "New goal") },
+      { path: briefPath, body: managedBody("Brief", "## Summary", "New summary") }
+    ]
+  };
+  const mutationPlan = compileManagedCandidateTreeV2(base, candidate, [
+    freeProsePolicy(planPath, "## Goal"),
+    freeProsePolicy(briefPath, "## Summary")
+  ], [{ kind: "task", semanticDiff: entityRegistry.task.semanticDiff }]);
+  assert.equal(mutationPlan.mutations.length, 1);
+  assert.deepEqual(mutationPlan.mutations[0]?.identity, { taskId });
+  assert.equal(mutationPlan.mutations[0]?.action, "document");
+  const compiled = compileRegistryMutationPlan(createWritableEntityRegistry([entityRegistry.task]), mutationPlan);
+  assert.deepEqual(compiled.storagePlan.touchedPaths, [briefPath, planPath]);
+
+  assert.throws(() => compileManagedCandidateTreeV2({
+    documents: [{ path: planPath, body: managedBody("Plan", "## Goal", "Old goal") }]
+  }, {
+    documents: [{ path: planPath, body: managedBody("Plan", "## Goal", "New goal") }]
+  }, [freeProsePolicy(planPath, "## Goal")], [{ kind: "task", semanticDiff: entityRegistry.task.semanticDiff }]), /SEMANTIC_DIFF_REQUIRED:task identity must come from INDEX\.md/u);
+});
+
+test("managed heading regions fail closed on undeclared, duplicate, machine-written, and forbidden edits", () => {
+  const documentPath = "tasks/task_T-folder/task_plan.md";
+  const index = { path: "tasks/task_T-folder/INDEX.md", body: taskIndex("task_T", "active") };
+  const compile = (baseBody: string, candidateBody: string, writeMode: "free-prose" | "machine-written" | "forbidden") =>
+    compileManagedCandidateTreeV2({ documents: [index, { path: documentPath, body: baseBody }] }, {
+      documents: [index, { path: documentPath, body: candidateBody }]
+    }, [{
+      path: documentPath,
+      sections: [{
+        anchor: "## Goal",
+        writeMode,
+        ...(writeMode === "free-prose" ? { semanticClass: "host-prose-only" as const } : {})
+      }]
+    }], [{ kind: "task", semanticDiff: entityRegistry.task.semanticDiff }]);
+
+  assert.throws(() => compile(
+    managedBody("Plan", "## Goal", "Old"),
+    `${managedBody("Plan", "## Goal", "New")}\n## Surprise\n\nUndeclared.\n`,
+    "free-prose"
+  ), /SEMANTIC_DIFF_REQUIRED:undeclared section/u);
+  assert.throws(() => compile(
+    managedBody("Plan", "## Goal", "Old"),
+    `${managedBody("Plan", "## Goal", "New")}\n## Goal\n\nDuplicate.\n`,
+    "free-prose"
+  ), /SEMANTIC_DIFF_AMBIGUOUS:duplicate heading/u);
+  assert.throws(() => compile(
+    managedBody("Plan", "## Goal", "Old"), managedBody("Plan", "## Goal", "New"), "machine-written"
+  ), /SEMANTIC_DIFF_REQUIRED:machine-written section requires typed command/u);
+  assert.throws(() => compile(
+    managedBody("Plan", "## Goal", "Old"), managedBody("Plan", "## Goal", "New"), "forbidden"
+  ), /SEMANTIC_DIFF_REQUIRED:forbidden section changed/u);
 });
 
 test("all task actions compile to one exact package-hosted StoragePlan", async () => {
@@ -508,6 +578,17 @@ function taskIndex(taskId: string, status: string): string {
     "provenance:", "  - {runtime: codex, sessionId: session-w3, boundAt: 2026-07-14T00:00:00.000Z}",
     "---", "", `# ${taskId}`, ""
   ].join("\n");
+}
+
+function managedBody(title: string, anchor: string, body: string): string {
+  return [`# ${title}`, "", anchor, "", body, ""].join("\n");
+}
+
+function freeProsePolicy(pathValue: string, anchor: string) {
+  return {
+    path: pathValue,
+    sections: [{ anchor, writeMode: "free-prose" as const, semanticClass: "host-prose-only" as const }]
+  };
 }
 
 function snapshot(body: string): HostedDocumentSnapshotV2 {

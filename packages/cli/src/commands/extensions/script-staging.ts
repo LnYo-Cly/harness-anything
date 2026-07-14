@@ -7,8 +7,11 @@ import {
   stablePayloadHash,
   type EntityId,
   type HarnessLayoutInput,
+  type SemanticDiffCandidateTree,
+  type SemanticDiffDocumentPolicy,
   type WriteOp
 } from "../../../../kernel/src/index.ts";
+import { compileManagedCandidateTreeV2 } from "../../../../application/src/index.ts";
 import {
   listGeneratedFiles,
   permissionPathsForScope,
@@ -17,6 +20,7 @@ import {
   scopeRootIsRecursive,
   type ResolvedScopeSet
 } from "./script-scope.ts";
+import { resolveManagedSectionPolicy } from "./managed-section-policy.ts";
 
 export interface CanonicalScriptStage {
   readonly rootInput: HarnessLayoutInput;
@@ -25,6 +29,7 @@ export interface CanonicalScriptStage {
   readonly realLayout: ReturnType<typeof resolveHarnessLayout>;
   readonly realOutputRoot: string;
   readonly baseline: ReadonlyMap<string, string>;
+  readonly baselineBodies: ReadonlyMap<string, string>;
 }
 
 export class ScriptStageScopeError extends Error {
@@ -36,6 +41,10 @@ export class ScriptStageScopeError extends Error {
     this.name = "ScriptStageScopeError";
     this.scopeMode = scopeMode;
   }
+}
+
+export class ScriptSemanticDiffError extends Error {
+  readonly code = "script_semantic_diff_rejected" as const;
 }
 
 export function createCanonicalScriptStage(
@@ -75,14 +84,16 @@ export function createCanonicalScriptStage(
     outputRoot,
     realLayout,
     realOutputRoot,
-    baseline: new Map()
+    baseline: new Map(),
+    baselineBodies: new Map()
   };
   assertProtectedStageScopes(stageWithoutBaseline, options.protectedScopes ?? []);
-  const baseline = new Map(listGeneratedFiles(layout.authoredRoot).map((filePath) => [
+  const baselineBodies = new Map(listGeneratedFiles(layout.authoredRoot).map((filePath) => [
     filePath,
-    sha256Text(readFileSync(filePath, "utf8"))
+    readFileSync(filePath, "utf8")
   ]));
-  return { rootInput: stagedRootInput, layout, outputRoot, realLayout, realOutputRoot, baseline };
+  const baseline = new Map([...baselineBodies].map(([filePath, body]) => [filePath, sha256Text(body)]));
+  return { rootInput: stagedRootInput, layout, outputRoot, realLayout, realOutputRoot, baseline, baselineBodies };
 }
 
 function assertProtectedStageScopes(
@@ -187,13 +198,79 @@ export function scriptIngestOp(
     }];
   });
   if (writes.length === 0) return undefined;
+  let semanticMutationPlan: ReturnType<typeof compileManagedCandidateTreeV2>;
+  try {
+    semanticMutationPlan = compileStagedSemanticPlan(stage, writes);
+  } catch (error) {
+    throw new ScriptSemanticDiffError(error instanceof Error ? error.message : "SEMANTIC_DIFF_AMBIGUOUS");
+  }
   const entityId = scriptRunEntityId(operationId);
   return {
     opId: `script-${operationId}-${stablePayloadHash({ entityId, writes }).slice(0, 16)}`,
     entityId,
     kind: "script_ingest",
-    payload: { writes }
+    payload: { writes, semanticMutationPlan }
   };
+}
+
+function compileStagedSemanticPlan(
+  stage: CanonicalScriptStage,
+  writes: ReadonlyArray<{ readonly path: string; readonly body: string; readonly baseBlobSha256: string | null }>
+): ReturnType<typeof compileManagedCandidateTreeV2> {
+  const managedWrites = writes.filter((write) => isManagedDocumentCandidate(write.path));
+  if (managedWrites.length === 0) return { registryVersion: 1, mutations: [] };
+  const policies = managedWrites.map((write) => resolveManagedSectionPolicy(stage.rootInput, write.path));
+  const missingPolicyIndex = policies.findIndex((policy) => policy === null);
+  if (missingPolicyIndex !== -1) {
+    const rejectedPath = managedWrites[missingPolicyIndex]!.path;
+    if (/^tasks\/[^/]+\/(?:INDEX\.md|executions\/|reviews\/)/u.test(rejectedPath)) {
+      throw new Error(`SEMANTIC_DIFF_REQUIRED: script_ingest cannot write Task typed-authority path: ${rejectedPath}`);
+    }
+    throw new Error(`SEMANTIC_DIFF_REQUIRED: script touched an undeclared managed region: ${rejectedPath}`);
+  }
+  const contextDocuments = taskIndexContexts(stage, managedWrites.map((write) => write.path));
+  const baseTree: SemanticDiffCandidateTree = {
+    documents: [
+      ...managedWrites.map((write) => ({
+        path: write.path,
+        body: stage.baselineBodies.get(path.join(stage.layout.authoredRoot, write.path)) ?? null
+      })),
+      ...contextDocuments
+    ]
+  };
+  const candidateTree: SemanticDiffCandidateTree = {
+    documents: [
+      ...managedWrites.map((write) => ({ path: write.path, body: write.body })),
+      ...contextDocuments
+    ]
+  };
+  return compileManagedCandidateTreeV2(
+    baseTree,
+    candidateTree,
+    policies as ReadonlyArray<SemanticDiffDocumentPolicy>
+  );
+}
+
+function taskIndexContexts(
+  stage: CanonicalScriptStage,
+  documentPaths: ReadonlyArray<string>
+): ReadonlyArray<{ readonly path: string; readonly body: string }> {
+  return [...new Set(documentPaths.flatMap((documentPath) => {
+    const match = /^(tasks\/[^/]+)\//u.exec(documentPath);
+    return match?.[1] ? [`${match[1]}/INDEX.md`] : [];
+  }))].sort().map((indexPath) => {
+    const absolutePath = path.join(stage.layout.authoredRoot, indexPath);
+    if (!existsSync(absolutePath)) throw new Error(`SEMANTIC_DIFF_REQUIRED: task identity context missing: ${indexPath}`);
+    return { path: indexPath, body: readFileSync(absolutePath, "utf8") };
+  });
+}
+
+function isManagedDocumentCandidate(documentPath: string): boolean {
+  return /^decisions\/decision-[^/]+\/decision\.md$/u.test(documentPath)
+    || /^tasks\/[^/]+\/[^/]+\.md$/u.test(documentPath)
+    || documentPath === "modules.json"
+    || /^sessions\/[^/]+\.md$/u.test(documentPath)
+    || /^tasks\/[^/]+\/(?:executions|reviews)\//u.test(documentPath);
 }
 
 function scriptRunEntityId(operationId: string): EntityId {

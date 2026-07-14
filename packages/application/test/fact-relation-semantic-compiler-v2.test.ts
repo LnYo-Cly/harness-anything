@@ -11,6 +11,7 @@ import {
   canonicalPayloadDigestV2,
   encodeFactRelationCommandPayloadV2,
   makeFactRelationSemanticCompilerV2,
+  makeTransparentSemanticDiffCompilerV2,
   semanticMutationEnvelopeV2Schema,
   semanticMutationSetDigestV2,
   semanticRequestDigestV2,
@@ -33,20 +34,79 @@ import {
   actorAxesBindingCoreDigestV2,
   encodeCanonicalCbor,
   entityRegistry,
+  formatFactFlowRecord,
   formatRelationFlowRecord,
   semanticMutationWireV2,
-  type EntityRelationRecord
+  type EntityRelationRecord,
+  type FactRecord
 } from "../../kernel/src/index.ts";
 
 const registry = createWritableEntityRegistry([entityRegistry.fact, entityRegistry.relation]);
 const existingDigest = Buffer.alloc(32, 0x11);
 
-test("fact/relation registry enables only the OQ-3 entity-level actions and remains typed-only", () => {
+test("fact/relation registry enables OQ-3 actions and W5 managed semanticDiff", () => {
   assert.deepEqual(entityRegistry.fact.mutationContract, { status: "ready", actions: ["create", "invalidate"] });
   assert.deepEqual(entityRegistry.relation.mutationContract, { status: "ready", actions: ["create", "retire"] });
-  assert.equal(entityRegistry.fact.semanticDiff.status, "typed-only");
-  assert.equal(entityRegistry.relation.semanticDiff.status, "typed-only");
+  assert.equal(entityRegistry.fact.semanticDiff.status, "ready");
+  assert.equal(entityRegistry.relation.semanticDiff.status, "ready");
   assert.doesNotThrow(() => createWritableEntityRegistry([entityRegistry.fact, entityRegistry.relation]));
+});
+
+test("transparent authority refuses entity-bearing records disguised as host-only prose", async () => {
+  const documentPath = "tasks/task_T/facts.md";
+  const indexPath = "tasks/task_T/INDEX.md";
+  const baseBody = "# Facts\n\n## Records\n\n";
+  const fact = transparentFact();
+  const candidateBody = `${baseBody}${formatFactFlowRecord(fact)}\n`;
+  const baseBytes = Buffer.from(baseBody);
+  const candidateBytes = Buffer.from(candidateBody);
+  const baseDigest = canonicalPayloadDigestV2(baseBytes);
+  const timings: Array<{ readonly durationNs: bigint; readonly fileCount: number; readonly decodedBytes: bigint }> = [];
+  const compiler = makeTransparentSemanticDiffCompilerV2({
+    operationKind: "doc_sync_submit",
+    readDocument: async (document) => document === documentPath
+      ? { body: baseBody, epoch: "epoch-w5", revision: 1n, blobDigest: baseDigest }
+      : document === indexPath
+        ? { body: "---\ntask_id: task_T\n---\n# Task\n", epoch: "epoch-w5", revision: 1n, blobDigest: Buffer.alloc(32) }
+        : null,
+    resolveDocumentPolicy: ({ path: policyPath }) => ({
+      path: policyPath,
+      sections: [{ anchor: "## Records", writeMode: "free-prose", semanticClass: "entity-bearing" }]
+    }),
+    reportSemanticDiffTiming: (sample) => timings.push(sample)
+  });
+  const transparent = (interpretation: "host-prose-only" | "full-semantic"): SemanticMutationEnvelopeV2 => ({
+    ...envelope(factCreatePayload(), []),
+    intent: {
+      kind: "transparent-file",
+      interpretation,
+      files: [{
+        path: documentPath,
+        mediaType: "text/markdown",
+        base: {
+          workspaceEpoch: "epoch-w5",
+          revision: 1n,
+          blobDigest: baseDigest,
+          bytes: { kind: "inline", size: BigInt(baseBytes.length), bytes: baseBytes }
+        },
+        candidate: {
+          blobDigest: canonicalPayloadDigestV2(candidateBytes),
+          bytes: { kind: "inline", size: BigInt(candidateBytes.length), bytes: candidateBytes }
+        }
+      }]
+    }
+  });
+
+  await assert.rejects(compiler.compile(transparent("host-prose-only")), (error: unknown) => (
+    error instanceof Error && "code" in error && error.code === "SEMANTIC_DIFF_AMBIGUOUS"
+  ));
+  const compiled = await compiler.compile(transparent("full-semantic"));
+  assert.deepEqual(compiled.mutationPlan.mutations.map((mutation) => [mutation.entityKind, mutation.action, mutation.identity]), [
+    ["fact", "create", { taskId: "task_T", factId: fact.fact_id }]
+  ]);
+  assert.equal(timings.length, 2);
+  assert.equal(timings.every((sample) => sample.fileCount === 1 && sample.durationNs >= 0n), true);
+  assert.equal(timings[1]?.decodedBytes, BigInt(baseBytes.length + candidateBytes.length));
 });
 
 test("fact create and invalidate compile exact hosted mutations without standalone entity files", async () => {
@@ -349,6 +409,19 @@ function factCreatePayload(): FactRelationCommandPayloadV2 {
     memoryClass: "episodic",
     memoryTags: [],
     provenance: [{ runtime: "codex", sessionId: "session-w2", boundAt: "2026-07-13T00:00:00.000Z" }]
+  };
+}
+
+function transparentFact(): FactRecord {
+  return {
+    fact_id: "F-AAAA1111",
+    statement: "Transparent entity-bearing fact.",
+    source: "W5 test",
+    observedAt: "2026-07-14T00:00:00.000Z",
+    confidence: "high",
+    memoryClass: "semantic",
+    memoryTags: [],
+    provenance: [{ runtime: "codex", sessionId: "session-w5", boundAt: "2026-07-14T00:00:00.000Z" }]
   };
 }
 

@@ -349,6 +349,26 @@ test("V2 forced-command admission recomputes mutations and anchors one exact ord
     assert.equal(git(rootDir, env, "rev-parse", "HEAD"), headAfterBatch, "semantic failures reject before PREPARED/publication");
     assert.equal(consumed, 2, "semantic failures do not consume token operation slots");
 
+    for (const kind of ["doc_sync_submit", "script_ingest"] as const) {
+      const legacyDraft: AuthorityOperationEnvelope = {
+        ...operationEnvelope(`opaque-${kind}`, `task-opaque-${kind}`, "denied\n"),
+        claimedDigest: "pending",
+        operation: {
+          opId: `opaque-${kind}`,
+          entityId: taskEntityId(`task-opaque-${kind}`),
+          kind,
+          payload: { writes: [{ path: "tasks/task-opaque/task_plan.md", body: "denied\n" }] }
+        }
+      };
+      const legacy = { ...legacyDraft, claimedDigest: canonicalAuthorityRequestDigest(legacyDraft) };
+      const legacyReceipt = await service.submit(legacy);
+      assert.equal(legacyReceipt.tag, "REJECTED");
+      assert.equal(legacyReceipt.tag === "REJECTED" ? legacyReceipt.reason : "", "SEMANTIC_DIFF_REQUIRED");
+      assert.equal((await operationRegistry.get(workspaceId, legacy.opId))?.state, "REJECTED");
+    }
+    assert.equal(git(rootDir, env, "rev-parse", "HEAD"), headAfterBatch, "opaque transparent roads reject before publication");
+    assert.equal(consumed, 2, "opaque transparent roads reject before token consumption");
+
     const childFactory = loopbackV2ChildFactory(service, changeLog, v2SchemaTuple);
     const client = new PersistentSshAuthorityClient({
       target: { destination: "authority.internal", fixedCommand: "ha-authority-connect" },
