@@ -284,6 +284,10 @@
         {
           "file": "packages/cli/src/daemon/doc-sync-service.ts",
           "command": "git"
+        },
+        {
+          "file": "packages/cli/src/commands/core/task-contract-history.ts",
+          "command": "git"
         }
       ],
       "evidence": [
