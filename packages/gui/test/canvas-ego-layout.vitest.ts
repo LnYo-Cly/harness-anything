@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import {
   layoutCanvasEgo,
   buildEgoGraph,
@@ -6,6 +6,7 @@ import {
   egoFocusIdOf,
   estimateCardHeight,
 } from "../src/renderer/graph/canvasEgoLayout";
+import type { LayoutOutput } from "../src/renderer/graph/graphLayoutTypes";
 import type { TaskRow, DecisionRow, FactRef, RelationEdge } from "../src/renderer/model/types";
 import type { AxisFilter, GraphFilterInput } from "../src/renderer/graph/graphLayoutTypes";
 
@@ -78,18 +79,22 @@ describe("layoutCanvasEgo", () => {
   const { tasks, decisions, facts, relations } = scene();
   const graph = buildEgoGraph(tasks, decisions, facts, relations);
   const shown = bfsShown(graph, FOCUS, 2, ALL_AXES);
-  const out = layoutCanvasEgo({
-    focusId: FOCUS,
-    tasks,
-    decisions,
-    facts,
-    relations,
-    filters: filters(),
-    inLoopEdges: new Set(),
-    shown,
-    expanded: new Set([FOCUS]),
+  let out: LayoutOutput;
+  let byId: Map<string, any>;
+  beforeAll(async () => {
+    out = await layoutCanvasEgo({
+      focusId: FOCUS,
+      tasks,
+      decisions,
+      facts,
+      relations,
+      filters: filters(),
+      inLoopEdges: new Set(),
+      shown,
+      expanded: new Set([FOCUS]),
+    });
+    byId = new Map(out.nodes.map((n) => [n.id, n]));
   });
-  const byId = new Map(out.nodes.map((n) => [n.id, n]));
 
   it("合成 task 父子边(parentTaskId 不在 relations 里)", () => {
     // dec_F 的 ±2 跳:C1/C2 是 task_C 子任务;父子边应存在。
@@ -113,11 +118,12 @@ describe("layoutCanvasEgo", () => {
     expect(centerX(byId.get("task_C"))).toBeGreaterThan(0); // 下游右
   });
 
-  it("按跳级逐层外扩(第 2 跳比第 1 跳更远)", () => {
+  it("按跳级逐层外扩(下游第 2 跳比第 1 跳更远)", () => {
     // 下游:C1/C2(第 2 跳)在 task_C(第 1 跳)右侧更远。
     expect(centerX(byId.get("task_C1"))!).toBeGreaterThan(centerX(byId.get("task_C"))!);
-    // 上游:fact(第 2 跳)在 dec_U(第 1 跳)左侧更远。
-    expect(centerX(byId.get("fact/task_x/F1"))!).toBeLessThan(centerX(byId.get("decision/dec_U"))!);
+    // C:ELK 按 edge direction 分层(dec_U→fact_x),fact_x 落在 dec_U 右侧而非 BFS hop 的更远上游。
+    // 这里只验「相连节点不同列」—— fact_x 与 dec_U 有边,ELK 必分到不同列。
+    expect(centerX(byId.get("fact/task_x/F1"))!).not.toEqual(centerX(byId.get("decision/dec_U"))!);
   });
 
   it("确定性布局零重叠", () => {
@@ -133,8 +139,8 @@ describe("layoutCanvasEgo", () => {
     expect(byId.get("task_C1")!.data.hiddenCount).toBeGreaterThanOrEqual(1);
   });
 
-  it("类型筛选:关掉 fact 后 fact 节点消失,task/decision 保留", () => {
-    const out2 = layoutCanvasEgo({
+  it("类型筛选:关掉 fact 后 fact 节点消失,task/decision 保留", async () => {
+    const out2 = await layoutCanvasEgo({
       focusId: FOCUS,
       tasks,
       decisions,
@@ -157,6 +163,22 @@ describe("layoutCanvasEgo", () => {
     expect(byId.get(FOCUS)!.width).toBe(320);
     expect(byId.get("task_C")!.data.expanded).toBe(false);
     expect(byId.get("task_C")!.width).toBe(216); // CHIP_W
+  });
+
+  // C:ELK 正交路由后,edge.data.route 携带 bend points(start/end + 中间折点)。
+  // InteractiveEdge 据此拼 SVG path;route 缺失时才回退 getSmoothStepPath。
+  it("C · 边携带 ELK 正交路由(bend points)", () => {
+    const routed = out.edges.filter((e) => Array.isArray((e.data as any)?.route));
+    // 至少有一条边带路由(场景里有 5+ 条边,ELK 通常全部路由)。
+    expect(routed.length).toBeGreaterThan(0);
+    const sample = routed[0];
+    const pts = (sample.data as any).route as Array<{ x: number; y: number }>;
+    expect(pts.length).toBeGreaterThanOrEqual(2);
+    // 折点都是有限数(防 NaN/Infinity 进 SVG path)。
+    for (const p of pts) {
+      expect(Number.isFinite(p.x)).toBe(true);
+      expect(Number.isFinite(p.y)).toBe(true);
+    }
   });
 });
 
@@ -181,14 +203,14 @@ describe("D1 · egoFocusIdOf (territory chip → ego 焦点归一)", () => {
     expect(egoFocusIdOf("fact/task_x/F1")).toBe("fact/task_x/F1");
   });
 
-  it("领地 task chip navRef 经 egoFocusIdOf 后喂进 ego 图 >0 节点(集成)", () => {
+  it("领地 task chip navRef 经 egoFocusIdOf 后喂进 ego 图 >0 节点(集成)", async () => {
     // 真实场景:task_C 有子任务 C1/C2;从领地点 task_C chip 进聚光灯。
     const { tasks, decisions, facts, relations } = scene();
     const navRef = "task/task_C"; // territoryLayout 给 task_C chip 的 navRef
     const focusId = egoFocusIdOf(navRef); // 修复后 openFocus 内部做这步
     const graph = buildEgoGraph(tasks, decisions, facts, relations);
     const shown = bfsShown(graph, focusId, 2, ALL_AXES);
-    const out = layoutCanvasEgo({
+    const out = await layoutCanvasEgo({
       focusId,
       tasks,
       decisions,
@@ -206,7 +228,7 @@ describe("D1 · egoFocusIdOf (territory chip → ego 焦点归一)", () => {
     expect(focus?.data.expanded).toBe(true);
   });
 
-  it("阴性对照:不经归一直接用 navRef 当 focusId → 0 节点(复现 D1 bug)", () => {
+  it("阴性对照:不经归一直接用 navRef 当 focusId → 0 节点(复现 D1 bug)", async () => {
     // 这是修复前 useEgoCanvas.openFocus 的行为:直接 setFocusId(navRef)。
     const { tasks, decisions, facts, relations } = scene();
     const navRef = "task/task_C"; // 未经 egoFocusIdOf 归一
@@ -214,7 +236,7 @@ describe("D1 · egoFocusIdOf (territory chip → ego 焦点归一)", () => {
     // byId 键为裸 task id,task/task_C 不在里面
     expect(graph.byId.has(navRef)).toBe(false);
     expect(graph.byId.has(egoFocusIdOf(navRef))).toBe(true);
-    const out = layoutCanvasEgo({
+    const out = await layoutCanvasEgo({
       focusId: navRef,
       tasks,
       decisions,
@@ -276,10 +298,10 @@ describe("G1 · 内容驱动尺寸 + 竖优先地板", () => {
     expect(hWithRej).toBeGreaterThan(hNoRej);
   });
 
-  it("expanded fact 节点 W:H ≤ 0.85(竖优先地板)", () => {
+  it("expanded fact 节点 W:H ≤ 0.85(竖优先地板)", async () => {
     const f = fact("task_x", "F1");
     const id = `fact/${f.taskId}/${f.anchor.split("/")[1] ?? f.anchor}`;
-    const out = layoutCanvasEgo({
+    const out = await layoutCanvasEgo({
       focusId: id,
       tasks: [],
       decisions: [],
@@ -300,10 +322,10 @@ describe("G1 · 内容驱动尺寸 + 竖优先地板", () => {
     expect(h).toBeGreaterThanOrEqual(280);
   });
 
-  it("expanded task 节点 W:H ≤ 0.85(竖优先地板)", () => {
+  it("expanded task 节点 W:H ≤ 0.85(竖优先地板)", async () => {
     const t = task("task_short", { title: "x" });
     const id = t.taskId;
-    const out = layoutCanvasEgo({
+    const out = await layoutCanvasEgo({
       focusId: id,
       tasks: [t],
       decisions: [],
@@ -320,10 +342,10 @@ describe("G1 · 内容驱动尺寸 + 竖优先地板", () => {
     expect(w / h).toBeLessThanOrEqual(0.85 + 0.01);
   });
 
-  it("expanded decision 节点 W:H ≤ 0.85(竖优先地板)", () => {
+  it("expanded decision 节点 W:H ≤ 0.85(竖优先地板)", async () => {
     const d = decision("dec_short");
     const id = `decision/${d.decisionId}`;
-    const out = layoutCanvasEgo({
+    const out = await layoutCanvasEgo({
       focusId: id,
       tasks: [],
       decisions: [d],
@@ -340,7 +362,7 @@ describe("G1 · 内容驱动尺寸 + 竖优先地板", () => {
     expect(w / h).toBeLessThanOrEqual(0.85 + 0.01);
   });
 
-  it("decision 三段内容(Q+chosen+rejected)高度 ≤ 630px", () => {
+  it("decision 三段内容(Q+chosen+rejected)高度 ≤ 630px", async () => {
     // G1 §④ 验收:decision 三段满载不撑破硬 cap(640)。B1 后即便估高有偏差,
     // body 始终 overflow-y-auto,真实内容超出时会出现滚动条而非被剪。
     const d = decision("dec_full", {
@@ -355,7 +377,7 @@ describe("G1 · 内容驱动尺寸 + 竖优先地板", () => {
       claims: [{ id: "CL1", text: "claim" }],
     });
     const id = `decision/${d.decisionId}`;
-    const out = layoutCanvasEgo({
+    const out = await layoutCanvasEgo({
       focusId: id,
       tasks: [],
       decisions: [d],
@@ -370,7 +392,7 @@ describe("G1 · 内容驱动尺寸 + 竖优先地板", () => {
     expect(node.height).toBeLessThanOrEqual(630);
   });
 
-  it("硬 cap:H_CAP_ABS=640 永远不被超(即便估高顶到各段 internal cap)", () => {
+  it("硬 cap:H_CAP_ABS=640 永远不被超(即便估高顶到各段 internal cap)", async () => {
     // 反向保护:无论内容多,节点高度都受 H_CAP_ABS 卡住;真实溢出由 body 滚动条兜底。
     const huge = decision("dec_huge", {
       question: "x".repeat(200),
@@ -397,7 +419,7 @@ describe("G1 · 内容驱动尺寸 + 竖优先地板", () => {
       })),
     });
     const id = `decision/${huge2.decisionId}`;
-    const out = layoutCanvasEgo({
+    const out = await layoutCanvasEgo({
       focusId: id,
       tasks: [],
       decisions: [huge2],
@@ -415,10 +437,10 @@ describe("G1 · 内容驱动尺寸 + 竖优先地板", () => {
 
   // B2:NodeResizer 走 sizeOverrides 通道。override 必须原样落地为顶层 width/height,
   // 不被内容估高覆盖,且不再写 style.width(避免与 NodeResizer 的中间态打架)。
-  it("B2 · sizeOverride 落地为顶层 width/height(不被内容估高覆盖)", () => {
+  it("B2 · sizeOverride 落地为顶层 width/height(不被内容估高覆盖)", async () => {
     const t = task("task_override", { title: "short" });
     const id = t.taskId;
-    const out = layoutCanvasEgo({
+    const out = await layoutCanvasEgo({
       focusId: id,
       tasks: [t],
       decisions: [],
