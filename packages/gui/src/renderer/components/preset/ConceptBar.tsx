@@ -16,10 +16,19 @@ export function ConceptBar() {
         ))}
         <span className="ml-1 text-[10px] text-text-faint">{t("components.conceptBar.materializedFlow")}</span>
       </div>
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-        <span className="text-[11px] text-text-muted">
-          {t("components.conceptBar.verticalSaysWhichOneUseDecisionMaking")}</span>
-        <span className="text-[10px] text-text-faint">{t("components.conceptBar.statusMappingBelongsEngineNotPage")}</span>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span
+          className="truncate text-[11px] text-text-muted"
+          title={t("components.conceptBar.verticalSaysWhichOneUseDecisionMaking")}
+        >
+          {t("components.conceptBar.verticalSaysWhichOneUseDecisionMaking")}
+        </span>
+        <span
+          className="truncate text-[10px] text-text-faint"
+          title={t("components.conceptBar.statusMappingBelongsEngineNotPage")}
+        >
+          {t("components.conceptBar.statusMappingBelongsEngineNotPage")}
+        </span>
       </div>
     </div>
   );

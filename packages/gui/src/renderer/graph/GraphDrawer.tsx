@@ -113,52 +113,68 @@ export function GraphDrawer({
 
   return (
     <aside className="flex w-[26rem] shrink-0 flex-col overflow-y-auto border-l border-border bg-surface">
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
-        <GitBranch weight="duotone" className="shrink-0 text-text-muted" />
-        <span className="font-mono ui-meta text-text-muted">{focusNode.id}</span>
-        <span className="rounded bg-surface-raised px-1.5 py-0.5 text-[11px] text-text-faint">
-          {focusNode.entity}
-        </span>
-        {onNavigateEntity && (
-          <button
-            onClick={() =>
-              onNavigateEntity(
-                focusNode.entity === "task"
-                  ? `task/${focusNode.id}`
-                  : focusNode.id,
-              )
-            }
-            title={t("graph.graphDrawer.openSidebarTaskDetailsDecisionDecisionPool")}
-            className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-text-muted hover:border-border-strong hover:text-text"
+      <div className="flex flex-col gap-1.5 border-b border-border px-3 py-2.5">
+        {/* Row 1: icon + id + entity pill + close */}
+        <div className="flex min-w-0 items-center gap-2">
+          <GitBranch weight="duotone" className="shrink-0 text-text-muted" />
+          <span
+            className="min-w-0 flex-1 truncate font-mono ui-meta text-text-muted"
+            title={focusNode.id}
           >
-            <ArrowsOutSimple weight="bold" className="text-[11px]" />
-            {t("graph.graphDrawer.open")}</button>
+            {focusNode.id}
+          </span>
+          <span className="shrink-0 rounded bg-surface-raised px-1.5 py-0.5 text-[11px] text-text-faint">
+            {focusNode.entity}
+          </span>
+          <button
+            onClick={onClose}
+            title={t("graph.graphDrawer.exitDrawerEsc")}
+            className="ml-auto grid size-6 shrink-0 place-items-center rounded text-text-faint hover:bg-surface-raised hover:text-text"
+          >
+            <X weight="bold" />
+          </button>
+        </div>
+        {/* Row 2: action buttons */}
+        {(onNavigateEntity || onSetAsFocus) && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {onNavigateEntity && (
+              <button
+                onClick={() =>
+                  onNavigateEntity(
+                    focusNode.entity === "task"
+                      ? `task/${focusNode.id}`
+                      : focusNode.id,
+                  )
+                }
+                title={t("graph.graphDrawer.openSidebarTaskDetailsDecisionDecisionPool")}
+                className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-text-muted hover:border-border-strong hover:text-text"
+              >
+                <ArrowsOutSimple weight="bold" className="text-[11px]" />
+                {t("graph.graphDrawer.open")}
+              </button>
+            )}
+            {onSetAsFocus && (
+              isFocused ? (
+                <span
+                  title={t("graph.graphDrawer.nodeAlreadyFocused")}
+                  className="inline-flex items-center gap-1 rounded border border-accent/40 bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent"
+                >
+                  <Crosshair weight="bold" className="text-[11px]" />
+                  {t("graph.graphDrawer.focus")}
+                </span>
+              ) : (
+                <button
+                  onClick={onSetAsFocus}
+                  title={t("graph.graphDrawer.setNodeAsFocusGraphDoubleClicking")}
+                  className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-text-muted hover:border-accent hover:text-accent"
+                >
+                  <Crosshair weight="bold" className="text-[11px]" />
+                  {t("graph.graphDrawer.setFocus")}
+                </button>
+              )
+            )}
+          </div>
         )}
-        {onSetAsFocus && (
-          isFocused ? (
-            <span
-              title={t("graph.graphDrawer.nodeAlreadyFocused")}
-              className="inline-flex items-center gap-1 rounded border border-accent/40 bg-accent/10 px-1.5 py-0.5 text-[11px] text-accent"
-            >
-              <Crosshair weight="bold" className="text-[11px]" />
-              {t("graph.graphDrawer.focus")}</span>
-          ) : (
-            <button
-              onClick={onSetAsFocus}
-              title={t("graph.graphDrawer.setNodeAsFocusGraphDoubleClicking")}
-              className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-text-muted hover:border-accent hover:text-accent"
-            >
-              <Crosshair weight="bold" className="text-[11px]" />
-              {t("graph.graphDrawer.setFocus")}</button>
-          )
-        )}
-        <button
-          onClick={onClose}
-          title={t("graph.graphDrawer.exitDrawerEsc")}
-          className="ml-auto grid size-6 place-items-center rounded text-text-faint hover:bg-surface-raised hover:text-text"
-        >
-          <X weight="bold" />
-        </button>
       </div>
 
       <div className="flex flex-col gap-3 px-3 py-3">

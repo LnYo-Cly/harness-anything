@@ -57,7 +57,7 @@ export function AppSidebar({
   inboxCount,
 }: AppSidebarProps) {
   return (
-    <aside className="flex max-h-[42dvh] w-full shrink-0 flex-col overflow-y-auto border-b border-border bg-surface md:max-h-none md:w-56 md:overflow-visible md:border-r md:border-b-0">
+    <aside className="flex max-h-[42dvh] w-full shrink-0 flex-col overflow-y-auto border-b border-border bg-surface md:max-h-none md:w-64 md:overflow-visible md:border-r md:border-b-0">
       <div className="flex items-center gap-2 px-3 pt-3 pb-1">
         <span className="font-mono text-[11px] font-semibold tracking-wide text-text-muted">
           HARNESS

@@ -33,9 +33,10 @@ const AXIS_VAR: Record<Entity, string> = {
 };
 const KD_LETTER: Record<Entity, string> = { task: "T", decision: "D", fact: "F" };
 
-// NodeResizer 下限:卡片不能拖到比 chip 还小(否则内容无法装下)。
-const CARD_MIN_W = 240;
-const CARD_MIN_H = 100;
+// NodeResizer 下限:卡片不能拖到比 chip 还小(否则内容无法装下)。D3:抬高到可读门槛,
+// 避免 stale localStorage / 误拖把卡片钉成不可读的细条(layout 的 nodeDims 还有同源的下限夹具)。
+const CARD_MIN_W = 280;
+const CARD_MIN_H = 240;
 
 const HANDLE_CLS =
   "!h-2 !w-2 !min-w-2 !min-h-2 !border-0 !bg-[var(--color-border-strong)]";
@@ -128,6 +129,8 @@ export function EgoNode({ data, selected }: any) {
       />
       <Handles />
       {/* header */}
+      {/* D1-item3:动作按钮改 icon-only(配 title+aria-label),使英文长串("Set as center"/
+          "Details ↗")在 CARD_MIN_W=280 下不再挤出 header。tooltip 保留完整文案,中文同样适用。*/}
       <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-2.5 py-1.5">
         <span
           className="grid h-[18px] shrink-0 place-items-center rounded px-1.5 font-mono text-[9px] font-bold uppercase tracking-wide"
@@ -135,28 +138,31 @@ export function EgoNode({ data, selected }: any) {
         >
           {entity}
         </span>
-        <span className="ml-auto flex items-center gap-1">
+        <span className="ml-auto flex min-w-0 items-center gap-1">
           {data.onRefocus && !focus && (
             <button
               onClick={stop(data.onRefocus, data.id ?? undefined)}
               title={t("graph.egoNode.setCenterCanvas2JumpsBeforeAfter")}
-              className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-text-muted hover:border-[var(--color-border-strong)] hover:text-text"
+              aria-label={t("graph.egoNode.setAsCenter")}
+              className="grid size-5 place-items-center rounded text-text-muted hover:bg-surface-raised hover:text-text"
             >
-              <Crosshair weight="bold" className="text-[10px]" />
-              {t("graph.egoNode.setAsCenter")}</button>
+              <Crosshair weight="bold" className="text-[11px]" />
+            </button>
           )}
           {data.onNavigate && (
             <button
               onClick={stop(data.onNavigate, data.navRef)}
               title={t("graph.egoNode.openExclusiveDetailsPageTaskDetailsDecision")}
-              className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-text-muted hover:border-accent hover:text-accent"
+              aria-label={t("graph.egoNode.details")}
+              className="grid size-5 place-items-center rounded text-text-muted hover:bg-surface-raised hover:text-accent"
             >
-              <ArrowsOutSimple weight="bold" className="text-[10px]" />
-              {t("graph.egoNode.details")}</button>
+              <ArrowsOutSimple weight="bold" className="text-[11px]" />
+            </button>
           )}
           <button
             onClick={stop(data.onCollapse, data.id ?? undefined)}
             title={t("graph.egoNode.collapseKeepExpandedNeighbors")}
+            aria-label={t("graph.egoNode.collapseKeepExpandedNeighbors")}
             className="grid size-5 place-items-center rounded text-text-faint hover:bg-surface-raised hover:text-text"
           >
             <X weight="bold" className="text-[11px]" />
@@ -183,9 +189,9 @@ export function EgoNode({ data, selected }: any) {
       </div>
 
       {/* footer */}
-      <div className="flex shrink-0 items-center justify-between border-t border-border px-2.5 py-1 font-mono text-[10px] text-text-faint">
-        <span>{t("graph.egoNode.degreeHop", { degree: data.degree ?? 0, hop: data.hop ?? 0 })}</span>
-        {data.hiddenCount > 0 && <span>{t("graph.egoNode.hiddenNotExpanded", { count: data.hiddenCount })}</span>}
+      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border px-2.5 py-1 font-mono text-[10px] text-text-faint">
+        <span className="min-w-0 truncate">{t("graph.egoNode.degreeHop", { degree: data.degree ?? 0, hop: data.hop ?? 0 })}</span>
+        {data.hiddenCount > 0 && <span className="min-w-0 shrink-0 truncate">{t("graph.egoNode.hiddenNotExpanded", { count: data.hiddenCount })}</span>}
       </div>
     </div>
   );

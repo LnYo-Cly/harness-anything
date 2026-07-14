@@ -53,21 +53,22 @@ export function NavButton({
   return (
     <button
       onClick={onClick}
-      className={`flex min-w-fit items-center gap-2 rounded-md px-2.5 py-1.5 text-[15px] ${
+      title={label}
+      className={`flex min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[15px] leading-snug ${
         active
           ? "bg-surface-raised text-text"
           : "text-text-muted hover:bg-surface-raised/60 hover:text-text"
       }`}
     >
-      <span className="text-base">{icon}</span>
-      {label}
+      <span className="shrink-0 text-base">{icon}</span>
+      <span className="min-w-0 truncate">{label}</span>
       {isNew && (
-        <span className="rounded border border-accent px-1 font-mono text-[10px] leading-[1.4] text-accent">
+        <span className="shrink-0 rounded border border-accent px-1 font-mono text-[10px] leading-[1.4] text-accent">
           {t("components.shellChrome.new")}
         </span>
       )}
       {badge !== undefined && badge > 0 && (
-        <span className="ml-auto rounded bg-accent px-1.5 font-mono text-[11px] font-semibold text-accent-fg">
+        <span className="ml-auto shrink-0 rounded bg-accent px-1.5 font-mono text-[11px] font-semibold tabular-nums text-accent-fg">
           {badge}
         </span>
       )}
@@ -110,7 +111,7 @@ export function ProjectSummary({
         <span className="block truncate font-mono text-[13px] text-text-faint">
           {project.preset} · {t("components.shellChrome.taskCount", { count: projectTasks.length })}
         </span>
-        <span className="mt-1 flex flex-wrap gap-1.5 font-mono text-[12px]">
+        <span className="mt-1 flex flex-wrap gap-1.5 font-mono text-[12px] tabular-nums">
           <span className="text-accent">{t("components.shellChrome.reviewCount", { count: review })}</span>
           <span className={blocked > 0 ? "text-status-blocked" : "text-text-faint"}>
             {t("components.shellChrome.blockedCount", { count: blocked })}
@@ -134,10 +135,11 @@ export function ProjectSummary({
 /** 挂在 mock 视图顶部的横幅,让操作者一眼分辨真假数据 */
 export function MockViewBanner() {
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-stale/30 bg-stale/10 px-4 py-2">
+    <div className="flex shrink-0 flex-wrap items-start gap-2 border-b border-stale/30 bg-stale/10 px-4 py-2">
       <MockBadge />
-      <span className="font-mono text-[12px] text-text-muted">
-        {t("components.shellChrome.demonstrationDataCurrentProjectHomepageStillContains")}</span>
+      <span className="min-w-0 flex-1 font-mono text-[12px] leading-snug text-text-muted">
+        {t("components.shellChrome.demonstrationDataCurrentProjectHomepageStillContains")}
+      </span>
     </div>
   );
 }

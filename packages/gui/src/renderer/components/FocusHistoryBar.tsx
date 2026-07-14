@@ -95,8 +95,12 @@ export function FocusHistoryBar({
           </button>
         </>
       ) : (
-        <span className="px-2 font-mono text-text-faint">
-          {t("components.focusHistoryBar.defaultFocusedEgoDoubleClickNodeClick")}</span>
+        <span
+          className="min-w-0 flex-1 truncate px-2 font-mono text-text-faint"
+          title={t("components.focusHistoryBar.defaultFocusedEgoDoubleClickNodeClick")}
+        >
+          {t("components.focusHistoryBar.defaultFocusedEgoDoubleClickNodeClick")}
+        </span>
       )}
     </div>
   );

@@ -174,17 +174,29 @@ export function egoFocusIdOf(ref: string): string {
 // 节点尺寸(确定性布局用)。chip 紧凑一条;card 按 kind 分档宽,高按内容估算 +
 // 竖优先地板 + 硬 cap。body 的 overflow 始终由 EgoNode 挂 overflow-y-auto(B1),
 // 这里只算几何尺寸,不再产出 scrollable 标志。
+//
+// D3:聚焦卡片用 3:4 竖卡(W:H ≤ 0.75),尺寸预算显著大于外围卡片,使聚焦实体可读无需
+// 滚动细条;外围卡片保持稍松的地板以保留邻居密度。CHIP_W=216 不变(chip 靠 truncate+
+// title 兜底,用户要的是卡片更高而非 chip 更宽)。
 const CHIP_W = 216;
 const CHIP_H = 46;
-// 内容驱动宽:按 kind 分档(fact 窄 / task 中 / decision 宽),不再是一刀切 360。
-const CARD_W: Record<Entity, number> = { fact: 280, task: 300, decision: 320 };
+// 外围展开卡片宽(按 kind 分档)。
+const CARD_W: Record<Entity, number> = { fact: 300, task: 320, decision: 340 };
+// 聚焦卡片宽(更大预算:聚焦实体是阅读主体)。
+const CARD_W_FOCUS: Record<Entity, number> = { fact: 340, task: 360, decision: 380 };
 const GAP_X = 72;
 const GAP_Y = 36;
-// 竖优先地板:W:H ≤ 0.85(防横条)。短内容也按此垫高,但不再强制统一比例。
-const W_H_FLOOR = 0.85;
-// 硬 cap:节点最大高度。超出此高 → 节点保持 640,body 区由 overflow-y-auto 出滚动条。
+// 竖优先地板(防横条 + 保可读)。focus 3:4(W:H ≤ 0.75);peripheral 稍松以保留邻居密度。
+const W_H_FLOOR_FOCUS = 0.75;
+const W_H_FLOOR_PERIPH = 0.82;
+// 内容驱动的最低高度(即便窄内容也垫到此高,避免聚焦卡片缩成不可读的细条)。
+const H_MIN_FOCUS: Record<Entity, number> = { fact: 420, task: 400, decision: 440 };
+const H_MIN_PERIPH: Record<Entity, number> = { fact: 340, task: 320, decision: 360 };
+// 硬 cap:超出此高 → 节点保持 cap 高,body 区由 overflow-y-auto 出滚动条。focus 比 peripheral
+// 更高,使中等内容无需滚动;只有真正超长内容才触发内部滚动。
 // (B1 后,真实内容超过估高也会被 overflow-y-auto 兜底,不会静默剪裁。)
-const H_CAP_ABS = 640;
+const H_CAP_FOCUS = 720;
+const H_CAP_PERIPH = 560;
 
 /** cpl = chars per line,从卡片宽派生(padding 24 + 字宽 8.5px)。 */
 function charsPerLine(w: number): number {
@@ -197,31 +209,46 @@ function charsPerLine(w: number): number {
  * D4:task 高度修复前是常量 150(无视标题长度)—— 长标题被截、内容溢出。
  * 现在按标题行数 + body 徽章/新鲜度/meta 的固定开销估算,与 decision/fact 同源。
  * decision 补上 rejected 段(types.ts:145 早已必填,但估高漏算 → 三段满载被压扁)。
+ *
+ * D3:估高要「诚实」——
+ *   - 传入实际卡片宽(focus 比 peripheral 宽,cpl 随之派生);
+ *   - 共享 CHROME=120(header 32 + title 区 32 + footer 24 + paddings/gaps 32);
+ *   - fact 去掉观察段的 min(160,…) 硬帽,让中等长文本真正把卡片撑高到内容所需,
+ *     而不是被压在地板之下被迫出滚动条(用户痛点「只能看到一小片」)。
+ *     只有真实内容超过 H_CAP_* 时,overflow-y-auto 才出滚动条。
+ *   - decision 各段的 internal cap 略放宽(真实内容由硬 H_CAP 兜底)。
  */
-export function estimateCardHeight(entity: Entity, row: TaskRow | DecisionRow | FactRef): number {
-  const w = CARD_W[entity];
-  const cpl = charsPerLine(w);
+export function estimateCardHeight(
+  entity: Entity,
+  row: TaskRow | DecisionRow | FactRef,
+  w?: number,
+): number {
+  const cardW = w ?? CARD_W[entity];
+  const cpl = charsPerLine(cardW);
   const LINE = 22;
+  const CHROME = 120; // header + title 区 + footer + paddings/gaps
   if (entity === "task") {
     const t = row as TaskRow;
-    // header(32) + body(badges 24 + freshness 20 + meta 20 + gaps 16 ≈ 80) + footer(20) ≈ 130
-    // + title 每行 22px(按宽派生 cpl,约 32 字符/行 @ w=300)
+    // body:徽章(24)+ freshness(20)+ meta(20)+ gaps ≈ 80
     const titleLines = Math.max(1, Math.ceil((t.title ?? "").length / cpl));
-    return 130 + titleLines * LINE;
+    return CHROME + titleLines * LINE + 80;
   }
   if (entity === "fact") {
     const f = row as FactRef;
-    // 卡片宽 280 时 cpl≈30;obs 段每行 20px,head 28 + 行数 × 20
-    const obs = Math.min(160, 56 + Math.ceil((f.text?.length ?? 0) / Math.max(20, cpl - 4)) * 20);
-    return 108 + obs;
+    // category 行(20)+ 观察框(border+pad 32 + head 16 + 行×20)+ meta 框(taskId+anchor 2 行 ≈ 64)
+    const obsCpl = Math.max(20, cpl - 4);
+    const obsLines = Math.max(1, Math.ceil((f.text?.length ?? 0) / obsCpl));
+    const obsBox = 16 + 16 + obsLines * 20; // head + 上下 pad + 文本行
+    const metaBox = 16 + 16 + 2 * 16; // taskId 行 + anchor 行 + 上下 pad
+    return CHROME + 20 + obsBox + metaBox;
   }
   const d = row as DecisionRow;
-  let h = 130;
-  if (d.question) h += Math.min(96, 34 + Math.ceil(d.question.length / Math.max(20, cpl - 6)) * 20);
-  if (d.chosen && d.chosen.length) h += Math.min(120, 34 + d.chosen.length * 26);
-  // 补 rejected:types.ts:145 标注 ⚠ 必填非空,each entry 24px(head 30 + 行 × 24)。
-  if (d.rejected && d.rejected.length) h += Math.min(120, 30 + d.rejected.length * 24);
-  if (d.claims && d.claims.length) h += Math.min(120, 30 + d.claims.length * 24);
+  let h = CHROME + 20; // state 行
+  if (d.question) h += Math.min(160, 32 + Math.ceil(d.question.length / Math.max(20, cpl - 6)) * 20);
+  if (d.chosen && d.chosen.length) h += Math.min(200, 32 + d.chosen.length * 26);
+  // 补 rejected:types.ts:145 标注 ⚠ 必填非空,each entry 28px(head 32 + 行 × 28,含 whyNot 余量)。
+  if (d.rejected && d.rejected.length) h += Math.min(200, 32 + d.rejected.length * 28);
+  if (d.claims && d.claims.length) h += Math.min(200, 32 + d.claims.length * 24);
   return h;
 }
 
@@ -233,9 +260,13 @@ export interface CardDims {
 /**
  * 节点尺寸:override(用户拖拽)> 内容估高 + 地板 + cap > chip 默认。
  *
- * 地板 = round(w / 0.85):竖优先,防横条(W:H > 0.85)。短内容会被垫到此高度,
- * 但不再强制统一比例(避免短 fact 撑成 9:16 的留白装腔)。
- * cap = H_CAP_ABS(640):DecisionBody 三段满载 ≈ 586,留余地不滚;超出才滚。
+ * D3:聚焦节点(isFocus)拿到显著更大的尺寸预算——更宽(CARD_W_FOCUS)+ 3:4 竖地板
+ * (W_H_FLOOR_FOCUS=0.75)+ 更高 min(420/400/440)+ 更高 cap(720)。外围展开节点用稍松的
+ * 0.82 地板 + 560 cap,保留邻居密度。低内容 fact 因此按内容/地板定高、不出滚动条;只有
+ * 真实内容超过 cap 时 overflow-y-auto 才出滚动条。
+ *
+ * override 仍尊重用户拖拽,但下限不得低于可读门槛(focus 用 H_MIN_FOCUS,periph 用 H_MIN_PERIPH),
+ * 避免 stale localStorage / 误拖把卡片钉成不可读的细条。
  *
  * B1:不再返 scrollable 标志 —— EgoNode body 始终 overflow-y-auto,内容低于盒子时
  * Tailwind 不渲染滚动条,超出时自动出。任何估高偏差都降级到「滚动条出现」而非「文本消失」。
@@ -245,18 +276,22 @@ function nodeDims(
   expanded: boolean,
   row: NodeMeta["row"] | undefined,
   override?: { w: number; h: number },
+  isFocus = false,
 ): CardDims {
+  const minH = isFocus ? H_MIN_FOCUS[entity] : H_MIN_PERIPH[entity];
   if (override) {
-    // 用户已拖拽:尊重其选择(他们看到的就是真相)。即使拖得比内容小,body 的
-    // overflow-y-auto 会兜底出滚动条,不会被剪。
-    return { w: override.w, h: override.h };
+    // 用户已拖拽:尊重其选择,但下限不低于可读门槛(防细条)。即便拖得比内容小,body 的
+    // overflow-y-auto 也会兜底出滚动条,不会被剪。
+    const minW = isFocus ? CARD_W_FOCUS[entity] - 40 : 280;
+    return { w: Math.max(override.w, minW), h: Math.max(override.h, minH) };
   }
   if (expanded && row) {
-    const w = CARD_W[entity];
-    const estimated = estimateCardHeight(entity, row);
-    const floored = Math.max(estimated, Math.round(w / W_H_FLOOR));
-    const h = Math.min(floored, H_CAP_ABS);
-    return { w, h };
+    const w = isFocus ? CARD_W_FOCUS[entity] : CARD_W[entity];
+    const estimated = estimateCardHeight(entity, row, w);
+    const floorRatio = isFocus ? W_H_FLOOR_FOCUS : W_H_FLOOR_PERIPH;
+    const floored = Math.max(estimated, Math.round(w / floorRatio), minH);
+    const cap = isFocus ? H_CAP_FOCUS : H_CAP_PERIPH;
+    return { w, h: Math.min(floored, cap) };
   }
   return { w: CHIP_W, h: CHIP_H };
 }
@@ -287,7 +322,7 @@ export async function layoutCanvasEgo(input: CanvasEgoInput): Promise<LayoutOutp
   const typeOn = (entity: Entity): boolean => filters.types.has(entity);
   const dimOf = (id: string) => {
     const meta = byId.get(id);
-    return nodeDims(meta?.entity ?? "task", expanded.has(id), meta?.row, sizeOverrides?.get(id));
+    return nodeDims(meta?.entity ?? "task", expanded.has(id), meta?.row, sizeOverrides?.get(id), id === focusId);
   };
 
   // ── 可见集:shown 中通过类型过滤者;焦点恒可见(不被自身类型开关抹掉) ──
@@ -378,7 +413,7 @@ export async function layoutCanvasEgo(input: CanvasEgoInput): Promise<LayoutOutp
     if (!meta) continue;
     const center = pos.get(id) ?? { x: 0, y: 0 };
     const isExpanded = expanded.has(id);
-    const { w, h } = nodeDims(meta.entity, isExpanded, meta.row, sizeOverrides?.get(id));
+    const { w, h } = nodeDims(meta.entity, isExpanded, meta.row, sizeOverrides?.get(id), id === focusId);
     let hiddenCount = 0;
     for (const a of adj.get(id) ?? []) {
       if (

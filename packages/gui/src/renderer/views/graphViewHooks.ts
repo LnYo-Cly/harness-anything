@@ -274,8 +274,10 @@ export function useGraphLayout(input: GraphLayoutInput): GraphLayoutOutput {
 
 // ══ 换焦点即居中 ══
 
-// 焦点卡片(360 宽)+ 左右各一列 chip 同屏可读所用的缩放。
-const FOCUS_ZOOM = 0.9;
+// D3:居中不再缩小焦点卡片 —— 顶部 chrome(模式栏 + 图例 + 焦点历史)已吃掉固定纵向预算,
+// 0.9 的缩放再叠 10% 缩小,让本就被垫高的 3:4 聚焦卡片更难读。1.0 兑现「以它为中心」且保持
+// 真实尺寸;左右邻居列仍由 fitView/手动 pan 容纳。
+const FOCUS_ZOOM = 1.0;
 
 /**
  * 换焦点时把焦点节点摆进视口正中 —— 兑现「以它为中心」,同时躲开左上角 Filters 面板
