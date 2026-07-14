@@ -21,6 +21,7 @@ Describe the proposed behavior change and the evidence that motivates it.
 
 ## Architecture Context
 
+- Map entry check: manifest present/enabled, README read before broad source search, or manifest absent:
 - Applicability: enabled, or N/A for docs-only / clearly local low-risk work (reason required):
 - Manifest and check state: absent (`not-configured`), `fresh`, `drifted`, `invalid`, or `tool-missing`:
 - Stable node ID(s) and canonical owner:
@@ -31,6 +32,7 @@ Describe the proposed behavior change and the evidence that motivates it.
 - Model/snapshot conflicts that must remain visible:
 - Related ADR paths and canonical `decision/<id>` references:
 - Query evidence: LikeC4 MCP tool used, or CLI/text-model fallback:
+- Recovery trace when ownership or impact was unclear: stable node → view/flow → source scope → code (or not needed):
 
 ## Compatibility and Data
 

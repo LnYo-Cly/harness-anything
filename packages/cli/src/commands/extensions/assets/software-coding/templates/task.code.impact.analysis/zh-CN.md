@@ -21,6 +21,7 @@
 
 ## Architecture Context
 
+- 地图入口检查：manifest 存在/启用且在广泛搜索源码前已读 README，或 manifest 不存在：
 - 适用性：enabled；若为 docs-only / 明确局部低风险工作则可填 N/A（必须写理由）：
 - Manifest 与 check 状态：absent (`not-configured`)、`fresh`、`drifted`、`invalid` 或 `tool-missing`：
 - 稳定 node ID 与 canonical owner：
@@ -31,6 +32,7 @@
 - 必须保持可见的模型/snapshot 冲突：
 - 关联 ADR 路径与 canonical `decision/<id>` 引用：
 - 查询证据：使用的 LikeC4 MCP tool，或 CLI/文本模型 fallback：
+- owner 或影响面不清时的恢复轨迹：stable node → view/flow → source scope → code（或未触发）：
 
 ## Compatibility and Data
 

@@ -152,10 +152,19 @@ test("CLI coding routes architecture-aware impact without requiring MCP or a man
     assert.match(overlay.document.body, /## Architecture-aware code changes/u);
     assert.match(overlay.document.body, /architecture-manifest\.json/u);
     assert.match(overlay.document.body, /architecture-check --task <task-id>/u);
+    assert.match(overlay.document.body, /N\/A/u);
+    assert.match(overlay.document.body, /completion gate/u);
+    assert.doesNotMatch(overlay.document.body, /component\.kernel/u);
   }
+  assert.match(overlayEn.document.body, /At the start of every coding task/u);
+  assert.match(overlayEn.document.body, /stable node → view\/flow → source scope → code/u);
+  assert.match(overlayZh.document.body, /每个 coding task 开始时/u);
+  assert.match(overlayZh.document.body, /stable node → view\/flow → source scope → code/u);
   assert.match(guideEn.document.body, /`likec4 mcp`/u);
   assert.match(guideEn.document.body, /`query-graph`/u);
   assert.match(guideEn.document.body, /MCP is an optional query accelerator/u);
+  assert.match(guideEn.document.body, /No background process rewrites either artifact/u);
+  assert.match(guideEn.document.body, /return to the map before continuing source search/u);
   for (const impact of [impactEn, impactZh]) {
     assert.match(impact.document.body, /## Architecture Context/u);
     for (const state of ["not-configured", "fresh", "drifted", "invalid", "tool-missing"]) {
@@ -163,6 +172,7 @@ test("CLI coding routes architecture-aware impact without requiring MCP or a man
     }
     assert.match(impact.document.body, /Snapshot digest/u);
     assert.match(impact.document.body, /decision\/<id>/u);
+    assert.match(impact.document.body, /stable node → view\/flow → source scope → code/u);
   }
 });
 
