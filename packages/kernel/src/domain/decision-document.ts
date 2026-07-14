@@ -12,7 +12,12 @@ export interface DecisionDocumentTaskWrite {
 
 export type DecisionDocumentWriteMode =
   | { readonly kind: "snapshot"; readonly expectedWatermark?: string | null; readonly appendBody?: string }
-  | { readonly kind: "append_relation"; readonly relation: EntityRelationRecord };
+  | { readonly kind: "append_relation"; readonly relation: EntityRelationRecord }
+  | {
+      readonly kind: "append_content_pin";
+      readonly expectedWatermark: string | null;
+      readonly pin: NonNullable<DecisionPackage["contentPins"]>[number];
+    };
 
 export interface DecisionDocumentPayload {
   readonly decision: DecisionPackage;

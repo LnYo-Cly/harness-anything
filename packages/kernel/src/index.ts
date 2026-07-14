@@ -78,8 +78,10 @@ export type {
 } from "./integrity/semantic-mutation-integrity-v2.ts";
 export {
   computeDecisionContentDigest,
-  decisionContentCanonicalization
+  decisionContentCanonicalization,
+  decisionContentDigestFields
 } from "./integrity/decision-content-digest.ts";
+export type { DecisionContentDigestField } from "./integrity/decision-content-digest.ts";
 export { validateOutputEvidence } from "./local/output-evidence-validator.ts";
 export { readUnionAttributionEvents } from "./local/attribution-event-source.ts";
 export { makeCodeDocGitEvidenceResolver } from "./git/code-doc-git-evidence.ts";

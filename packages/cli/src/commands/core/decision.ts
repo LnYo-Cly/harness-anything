@@ -14,9 +14,10 @@ import { runReckon } from "./decision-reckon.ts";
 import { runDecisionRelate, runDecisionRelationReplace, runDecisionRelationRetire } from "./decision-relate.ts";
 import { acceptEvidenceFloorHint, decisionFailure, decisionHasAcceptEvidenceFloor, decisionResult, withDecisionBodyEmptyWarning } from "./decision-shared.ts";
 import { applyClaimFulfillments } from "./decision-claim-fulfillment.ts";
+import { verifyDecisionContentPins } from "./decision-content-pin-verifier.ts";
 
 type DecisionAction = Extract<ParsedCommand["action"], { readonly kind:
-  | "decision-propose" | "decision-accept" | "decision-reject" | "decision-defer" | "decision-supersede" | "decision-amend" | "decision-relate" | "decision-reckon" | "decision-relation-retire" | "decision-relation-replace" | "decision-retire"
+  | "decision-verify" | "decision-repin" | "decision-propose" | "decision-accept" | "decision-reject" | "decision-defer" | "decision-supersede" | "decision-amend" | "decision-relate" | "decision-reckon" | "decision-relation-retire" | "decision-relation-replace" | "decision-retire"
 }>;
 type TransitionAction = Extract<DecisionAction, { readonly kind: "decision-accept" | "decision-reject" | "decision-defer" | "decision-supersede" | "decision-retire" }>;
 
@@ -25,10 +26,13 @@ export const runDecisionCommand: CommandRunner = (context, command) => {
     return runDecisionQueryCommand(context, command);
   }
   const action = command.action as DecisionAction;
+  if (action.kind === "decision-verify") return runDecisionVerify(context.layoutInput, action);
   const service = context.decisionWriteService;
   switch (action.kind) {
     case "decision-propose":
       return runPropose(context.layoutInput, service, action);
+    case "decision-repin":
+      return runDecisionRepin(context.layoutInput, service, action);
     case "decision-accept":
     case "decision-reject":
     case "decision-defer":
@@ -47,6 +51,58 @@ export const runDecisionCommand: CommandRunner = (context, command) => {
       return runDecisionRelationReplace(context, service, action);
   }
 };
+
+function runDecisionRepin(
+  rootInput: Parameters<typeof readDecisionDocument>[0],
+  service: DecisionWriteService,
+  action: Extract<DecisionAction, { readonly kind: "decision-repin" }>
+): Effect.Effect<CliResult, WriteError> {
+  return readDecisionDocument(rootInput, action.decisionId).pipe(
+    Effect.flatMap((document) => service.repinForMigration({
+      current: document.decision,
+      opIdPrefix: `amend-after-pin-${action.decisionId}`
+    }).pipe(Effect.match({
+      onFailure: (error): CliResult => decisionFailure("decision-repin", action.decisionId, error),
+      onSuccess: (result): CliResult => decisionResult(rootInput, "decision-repin", result.decisionId, result.state, false)
+    }))),
+    Effect.catchAll(() => Effect.succeed({
+      ok: false,
+      command: "decision-repin",
+      decisionId: action.decisionId,
+      error: cliError(CliErrorCode.DecisionReadFailed, `decision document could not be read: ${action.decisionId}`)
+    } satisfies CliResult))
+  );
+}
+
+function runDecisionVerify(
+  rootInput: Parameters<typeof readDecisionDocument>[0],
+  action: Extract<DecisionAction, { readonly kind: "decision-verify" }>
+): Effect.Effect<CliResult> {
+  return Effect.sync(() => {
+    const report = verifyDecisionContentPins(rootInput, { decisionIds: action.decisionIds });
+    const decisionId = action.decisionIds?.[0];
+    if (decisionId && report.checkedDecisionCount === 0) {
+      return {
+        ok: false,
+        command: "decision-verify",
+        decisionId,
+        error: cliError(CliErrorCode.DecisionReadFailed, `decision not found: ${decisionId}`)
+      } satisfies CliResult;
+    }
+    return {
+      ok: true,
+      command: "decision-verify",
+      ...(decisionId ? { decisionId } : {}),
+      rows: report.checkedDecisionCount,
+      warnings: report.warnings.map((warning) => ({
+        severity: "warning" as const,
+        code: warning.code,
+        message: warning.message
+      })),
+      report
+    } satisfies CliResult;
+  });
+}
 
 function runTransition(
   rootInput: Parameters<typeof readDecisionDocument>[0],

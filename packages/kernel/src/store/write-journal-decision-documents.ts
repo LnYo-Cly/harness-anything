@@ -33,11 +33,46 @@ export function writeDecisionDocument(rootInput: HarnessLayoutInput, op: WriteOp
   if (existsSync(targetPath) && readDecisionWatermark(readFileSync(targetPath, "utf8")) === op.opId) {
     return;
   }
+  if (op.payload.writeMode?.kind === "append_content_pin") {
+    writeFileDurably(targetPath, appendDecisionContentPinDocument(targetPath, op));
+    return;
+  }
   const materialized = op.payload.writeMode?.kind === "append_relation"
     ? appendDecisionRelationPayload(targetPath, op.payload)
     : casSnapshotPayload(targetPath, op);
   mkdirSync(path.dirname(targetPath), { recursive: true });
   writeFileDurably(targetPath, serializeDecisionDocument(materialized.payload, op.opId, materialized.bodyTail));
+}
+
+function appendDecisionContentPinDocument(targetPath: string, op: WriteOp): string {
+  if (!isDecisionDocumentPayload(op.payload) || op.payload.writeMode?.kind !== "append_content_pin") {
+    rejectWrite("append content pin requires decision document payload", op.entityId);
+  }
+  if (!existsSync(targetPath)) rejectWrite("append content pin requires an existing decision document", op.entityId);
+  const currentDocument = readFileSync(targetPath, "utf8");
+  const currentWatermark = readDecisionWatermark(currentDocument);
+  const expectedWatermark = op.payload.writeMode.expectedWatermark;
+  if (currentWatermark !== expectedWatermark) {
+    rejectCasWatermarkMismatch({ entityId: op.entityId, expectedWatermark, currentWatermark });
+  }
+  const pinLine = serializedLastContentPinLine(op.payload, op.opId);
+  const contentPins = /^contentPins:\r?\n(?<entries>(?:  - [^\r\n]*(?:\r?\n|$))+)/mu.exec(currentDocument);
+  if (!contentPins?.groups?.entries) rejectWrite("append content pin requires an existing contentPins block", op.entityId);
+  const lineEnding = currentDocument.includes("\r\n") ? "\r\n" : "\n";
+  const entries = contentPins.groups.entries;
+  const appendedEntries = `${entries.replace(/\r?\n$/u, "")}${lineEnding}${pinLine}${lineEnding}`;
+  return currentDocument
+    .replace(/^_coordinatorWatermark:.*$/mu, `_coordinatorWatermark: ${op.opId}`)
+    .replace(entries, appendedEntries);
+}
+
+function serializedLastContentPinLine(payload: DecisionDocumentPayload, watermark: string): string {
+  const serialized = serializeDecisionDocument(payload, watermark);
+  const block = /^contentPins:\r?\n(?<entries>(?:  - [^\r\n]*(?:\r?\n|$))+)/mu.exec(serialized);
+  const lines = block?.groups?.entries?.trimEnd().split(/\r?\n/u);
+  const line = lines?.at(-1);
+  if (!line) rejectWrite("append content pin payload does not serialize a content pin");
+  return line;
 }
 
 export function decisionDocumentTargetPath(rootInput: HarnessLayoutInput, op: Pick<WriteOp, "entityId" | "payload">): string {

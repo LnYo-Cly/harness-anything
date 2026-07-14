@@ -9,7 +9,7 @@ const DecisionIdSchema = Schema.String.pipe(Schema.pattern(/^dec_[A-Za-z0-9_-]+$
 const AnchorIdSchema = Schema.String.pipe(Schema.pattern(/^[A-Za-z][A-Za-z0-9_-]*$/u));
 const DecisionRiskTierSchema = Schema.Literal("low", "medium", "high");
 const DecisionUrgencySchema = Schema.Literal("low", "medium", "high");
-const DecisionContentPinActionSchema = Schema.Literal("accept", "reject", "defer", "supersede", "retire");
+const DecisionContentPinActionSchema = Schema.Literal("accept", "reject", "defer", "supersede", "retire", "amend");
 const DecisionContentDigestSchema = Schema.String.pipe(Schema.pattern(/^sha256:[a-f0-9]{64}$/u));
 export const decisionClaimFulfillments = ["evidenced", "delivered", "standing-policy"] as const;
 export type DecisionClaimFulfillment = (typeof decisionClaimFulfillments)[number];
@@ -44,7 +44,9 @@ const DecisionContentPinSchema = Schema.Struct({
   arbiter: ActorRefSchema,
   canonicalization: Schema.Literal("decision-content/v1"),
   digest: DecisionContentDigestSchema
-}).pipe(Schema.filter((pin) => pin.state === contentPinState(pin.action)));
+}).pipe(Schema.filter((pin) => pin.action === "amend"
+  ? pin.state !== "proposed"
+  : pin.state === contentPinState(pin.action)));
 
 export const DecisionPackageSchema = Schema.Struct({
   schema: Schema.Literal("decision-package/v1"),
@@ -85,5 +87,7 @@ function contentPinState(action: typeof DecisionContentPinActionSchema.Type): ty
     case "supersede":
     case "retire":
       return "retired";
+    case "amend":
+      throw new Error("amend pins preserve the current decided state");
   }
 }

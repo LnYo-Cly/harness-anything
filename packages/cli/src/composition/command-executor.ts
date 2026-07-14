@@ -19,8 +19,7 @@ import { actionTaskId } from "../cli/parse-args.ts";
 import { requiresConflictMarkerPreflight, runRegisteredCommand } from "../cli/runner-registry.ts";
 import type { CliResult, ParsedCommand } from "../cli/types.ts";
 import { leaseEnforcementEnabled } from "../commands/settings.ts";
-import { CliActorAttributionError, type CliActorAttribution } from "./actor-attribution.ts";
-import { migrationWriteAttribution } from "./actor-attribution.ts";
+import { CliActorAttributionError, migrationWriteAttribution, type CliActorAttribution } from "./actor-attribution.ts";
 import { CliPrincipalResolutionError, resolveCliTaskHolderPrincipal, resolveLocalCliActorAttribution } from "./local-principal.ts";
 import {
   defaultCliAdapterProvider,
@@ -180,14 +179,20 @@ export async function runRegisteredCommandWithCliComposition(
       provenanceSessionExporter: makeSessionExporter(),
       syncExportedSession
     }, boundAt)
-  }), enforceTaskLease(), makeTaskHolder, getTaskHolderPrincipal), makeArtifactStore, getCurrentSessionProbe, makeSessionExporter, syncExportedSession, makeWriteCoordinator, makeMigrationWriteCoordinator, getActorAttribution, getTaskHolderPrincipal, () => makeDecisionWriteService({
-    rootInput: layoutInput,
-    coordinator: makeWriteCoordinator(operationalActor("decision-cli")),
-    attribution: getActorAttribution().writeAttribution,
-    currentSessionProbe: getCurrentSessionProbe(),
-    provenanceSessionExporter: makeSessionExporter(),
-    syncExportedSession
-  }), () => withOptionalFactLeaseGuard(makeFactWriteService({
+  }), enforceTaskLease(), makeTaskHolder, getTaskHolderPrincipal), makeArtifactStore, getCurrentSessionProbe, makeSessionExporter, syncExportedSession, makeWriteCoordinator, makeMigrationWriteCoordinator, getActorAttribution, getTaskHolderPrincipal, () => {
+    const attribution = getActorAttribution().writeAttribution;
+    const repin = command.action.kind === "decision-repin" ? command.action : undefined;
+    return makeDecisionWriteService({
+      rootInput: layoutInput,
+      coordinator: repin
+        ? makeMigrationWriteCoordinator(operationalActor("decision-content-repin"), repin.migrationEvidence)
+        : makeWriteCoordinator(operationalActor("decision-cli")),
+      attribution: repin ? migrationWriteAttribution(attribution, repin.migrationEvidence) : attribution,
+      currentSessionProbe: getCurrentSessionProbe(),
+      provenanceSessionExporter: makeSessionExporter(),
+      syncExportedSession
+    });
+  }, () => withOptionalFactLeaseGuard(makeFactWriteService({
     rootInput: layoutInput,
     coordinator: makeWriteCoordinator(operationalActor("fact-cli")),
     currentSessionProbe: getCurrentSessionProbe(),

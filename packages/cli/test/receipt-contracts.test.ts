@@ -214,6 +214,10 @@ test("optional receipt contract fields carry non-empty absence reasons", () => {
     field: "data.reviewContract",
     reason: "Compatibility-only legacy review.md gate evidence; it never authorizes completion."
   }, {
+    command: "decision-verify",
+    field: "data.decisionId",
+    reason: "Only emitted when verifying one decision; --all emits aggregate rows without a single decision id."
+  }, {
     command: "session-sync",
     field: "paths.primary",
     reason: "Present when at least one legacy Session requires conversion."

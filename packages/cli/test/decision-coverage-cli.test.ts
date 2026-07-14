@@ -576,11 +576,15 @@ test("CLI decision conformance reports refuted claims independently from uncover
 });
 
 function decisionConformanceFindings(result: Record<string, any>): ReadonlyArray<Record<string, any>> {
+  return decisionConformanceReport(result).findings;
+}
+
+function decisionConformanceReport(result: Record<string, any>): Record<string, any> {
   const entry = result.report.scriptChecks.find((scriptCheck: Record<string, any>) => (
     scriptCheck.scriptId === "vertical:software-coding:decision-conformance"
   ));
   assert.ok(entry);
-  return entry.report.findings;
+  return entry.report;
 }
 
 function hasDecisionConformanceFinding(result: Record<string, any>, type: string, ref: string): boolean {

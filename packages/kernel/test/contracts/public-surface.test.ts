@@ -92,6 +92,7 @@ const publicRuntimeSurface = [
   "decisionAmendableFields",
   "decisionClaimFulfillments",
   "decisionContentCanonicalization",
+  "decisionContentDigestFields",
   "decisionEntityId",
   "decisionFieldContracts",
   "decisionIdFromEntityId",
