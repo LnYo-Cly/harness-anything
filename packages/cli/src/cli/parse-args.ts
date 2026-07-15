@@ -1,4 +1,4 @@
-import { commandRegistry, findCommandHelpMatch } from "./command-registry.ts";
+import { findCommandHelpContext, findCommandHelpMatch } from "./command-registry.ts";
 import { cliError, CliErrorCode } from "./error-codes.ts";
 import { applyJsonInputLayer } from "./json-input.ts";
 import { parseRegisteredCommand } from "./parser-registry.ts";
@@ -20,7 +20,7 @@ export function parseArgs(argv: ReadonlyArray<string>): { readonly ok: true; rea
   if (parsed) return attachDaemonOverrides(attachActor(attachDaemonRepoId(attachLayoutOverrides(parsed, layoutOverrides), daemonRepoId), actor), daemonMode, daemonProfile);
   return {
     ok: false,
-    error: cliError(CliErrorCode.UnknownCommand, `Supported commands: ${commandRegistry.map((entry) => entry.primary).join("; ")}, template list, template render, preset validate, vertical validate.`)
+    error: cliError(CliErrorCode.UnknownCommand, unknownCommandHint(args))
   };
 }
 
@@ -78,8 +78,23 @@ function parseHelpRequest(
   }
   return {
     ok: false,
-    error: cliError(CliErrorCode.UnknownHelpTopic, `Unknown help topic: ${topic.join(" ")}`)
+    error: cliError(CliErrorCode.UnknownHelpTopic, unknownHelpTopicHint(topic))
   };
+}
+
+function unknownCommandHint(args: ReadonlyArray<string>): string {
+  return focusedUnknownHint("command", args);
+}
+
+function unknownHelpTopicHint(topic: ReadonlyArray<string>): string {
+  return focusedUnknownHint("help topic", topic);
+}
+
+function focusedUnknownHint(label: string, tokens: ReadonlyArray<string>): string {
+  const attempted = tokens.slice(0, 6).join(" ").slice(0, 160) || "<empty>";
+  const context = findCommandHelpContext(tokens);
+  const helpCommand = context.length > 0 ? `ha ${context.join(" ")} --help` : "ha help";
+  return `Unknown ${label}: ${attempted}. Run '${helpCommand}' to inspect the valid command shape.`;
 }
 
 function attachLayoutOverrides(
