@@ -1,5 +1,6 @@
 import { cliError, CliErrorCode } from "../error-codes.ts";
 import { readInputOptions, readOption } from "../parse-options.ts";
+import { isPresetRunEntrypoint } from "../preset-entrypoint-capabilities.ts";
 import type { CliResult, ParsedCommand } from "../types.ts";
 
 type ParseResult = { readonly ok: true; readonly value: ParsedCommand } | { readonly ok: false; readonly error: CliResult["error"] };
@@ -51,7 +52,7 @@ export function parsePresetArgs(args: ReadonlyArray<string>, rootDir: string, js
   if (args[0] === "preset" && args[1] === "run" && args[2] && args[3]) {
     const taskId = readOption(args, "--task");
     if (!taskId) return { ok: false, error: cliError(CliErrorCode.MissingTask, "preset run requires --task <id>.") };
-    if (args[3] !== "plan" && args[3] !== "scaffold" && args[3] !== "check") {
+    if (!isPresetRunEntrypoint(args[3])) {
       return { ok: false, error: cliError(CliErrorCode.InvalidEntrypoint, `Unknown preset entrypoint: ${args[3]}`) };
     }
     return { ok: true, value: { rootDir, json, action: { kind: "preset-run", presetId: args[2], entrypoint: args[3], taskId, allowScripts: args.includes("--allow-scripts"), inputs: readInputOptions(args) } } };

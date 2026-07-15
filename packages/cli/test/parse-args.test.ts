@@ -9,6 +9,7 @@ import { parseArgs } from "../src/cli/parse-args.ts";
 import { parserRegistry } from "../src/cli/parser-registry.ts";
 import { parseCoreTaskArgs } from "../src/cli/parsers/core-task.ts";
 import { parseVersionArgs } from "../src/cli/parsers/meta.ts";
+import { presetRunEntrypointUsage } from "../src/cli/preset-entrypoint-capabilities.ts";
 import { runInitCommand } from "../src/commands/core/init.ts";
 import { runTaskLifecycleCommand } from "../src/commands/core/task-lifecycle.ts";
 import { runVersionCommand } from "../src/commands/core/version.ts";
@@ -297,6 +298,14 @@ test("command descriptor projections are derived from the command spec", () => {
     assert.equal(descriptor?.parse, spec.parse, spec.kind);
     assert.equal(descriptor?.run, spec.run, spec.kind);
   }
+});
+
+test("preset run help names exactly the registered entrypoint capabilities", () => {
+  const presetRun = commandSpecs.find((entry) => entry.kind === "preset-run");
+  assert.equal(
+    presetRun?.usage,
+    `preset run <id> ${presetRunEntrypointUsage} --task <id> [--allow-scripts] [--input key=value] [--json]`
+  );
 });
 
 test("command specs can directly share parser and runner function references", () => {

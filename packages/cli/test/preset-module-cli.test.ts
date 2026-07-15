@@ -34,8 +34,8 @@ test("CLI preset CRUD validates, installs, audits, and removes project presets",
     assert.equal(checked.ok, true);
     assert.deepEqual(checked.issues, []);
 
-    const audit = runJson(rootDir, ["preset", "audit"]);
-    assert.equal(audit.ok, true);
+    const audit = runJson(rootDir, ["preset", "audit"], false);
+    assert.equal(audit.ok, false);
     const bundledPresetIndex = JSON.parse(readFileSync(bundledPresetIndexPath, "utf8")) as { readonly presets: ReadonlyArray<string> };
     assert.equal(audit.report.totalResolved, bundledPresetIndex.presets.length + 1);
 
@@ -299,9 +299,8 @@ test("CLI preset list inspect and audit surface invalid active overrides", () =>
       templateSelections: [conflictingTaskPlanSelection()]
     });
 
-    const listed = runJson(rootDir, ["preset", "list"], false);
-    assert.equal(listed.ok, false);
-    assert.equal(listed.error.code, "preset_manifest_invalid");
+    const listed = runJson(rootDir, ["preset", "list"]);
+    assert.equal(listed.ok, true);
     const listedModule = listed.presets.find((preset: Record<string, unknown>) => preset.id === "module");
     assert.equal(listedModule.layer, "project");
     assert.equal(listedModule.valid, false);
@@ -331,9 +330,8 @@ test("CLI malformed project preset override fails closed with stable preset erro
       unknownField: true
     }), "utf8");
 
-    const listed = runJson(rootDir, ["preset", "list"], false);
-    assert.equal(listed.ok, false);
-    assert.equal(listed.error.code, "preset_manifest_invalid");
+    const listed = runJson(rootDir, ["preset", "list"]);
+    assert.equal(listed.ok, true);
     const module = listed.presets.find((preset: Record<string, unknown>) => preset.id === "module");
     assert.equal(module.valid, false);
 

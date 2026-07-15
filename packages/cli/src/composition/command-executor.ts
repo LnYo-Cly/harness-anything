@@ -18,6 +18,7 @@ import { toCliError } from "../cli/error-mapper.ts";
 import { actionTaskId } from "../cli/parse-args.ts";
 import { requiresConflictMarkerPreflight, runRegisteredCommand } from "../cli/runner-registry.ts";
 import type { CliResult, ParsedCommand } from "../cli/types.ts";
+import { finalizeDryRunResult } from "../cli/dry-run-preview.ts";
 import { leaseEnforcementEnabled } from "../commands/settings.ts";
 import { CliActorAttributionError, migrationWriteAttribution, type CliActorAttribution } from "./actor-attribution.ts";
 import { CliPrincipalResolutionError, resolveCliTaskHolderPrincipal, resolveLocalCliActorAttribution } from "./local-principal.ts";
@@ -206,7 +207,7 @@ export async function runRegisteredCommandWithCliComposition(
         taskId: actionTaskId(command.action),
         error: toCliError(error)
       }),
-      onSuccess: (value) => value
+      onSuccess: (value) => finalizeDryRunResult(command.action, value)
     })
   ));
 }

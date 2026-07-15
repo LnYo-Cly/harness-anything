@@ -181,7 +181,14 @@ function writePresetSource(
     kernelVersionRange: { min: "1.0.0", maxExclusive: "2.0.0" },
     capabilityImports: [],
     ...(kind === "process-action" ? {
-      entrypoints: { plan: { type: "script", command: "scripts/plan.mjs", reads: [], writes: [] } }
+      entrypoints: {
+        plan: {
+          type: "script",
+          command: "scripts/plan.mjs",
+          reads: [],
+          writes: ["{{outputRoot}}/**"]
+        }
+      }
     } : {}),
     profiles: [{
       id: "baseline",
@@ -194,6 +201,18 @@ function writePresetSource(
   };
   mkdirSync(sourceDir, { recursive: true });
   writeFileSync(path.join(sourceDir, "preset.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  if (kind === "process-action") {
+    const scriptsDir = path.join(sourceDir, "scripts");
+    mkdirSync(scriptsDir, { recursive: true });
+    writeFileSync(path.join(scriptsDir, "plan.mjs"), [
+      "#!/usr/bin/env node",
+      'import { writeFileSync } from "node:fs";',
+      'const resultPath = process.env.HARNESS_SCRIPT_RESULT;',
+      'if (!resultPath) throw new Error("HARNESS_SCRIPT_RESULT is required");',
+      'writeFileSync(resultPath, JSON.stringify({ schema: "script-result/v1", ok: true, report: {}, produced: [] }));',
+      ""
+    ].join("\n"), "utf8");
+  }
 }
 
 function setTaskStatus(indexPath: string, status: string): void {

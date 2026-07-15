@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { HarnessLayoutInput, WriteOp } from "../../../../kernel/src/index.ts";
 import { cliError, CliErrorCode } from "../../cli/error-codes.ts";
@@ -7,7 +7,6 @@ import { resolveActiveVertical } from "./active-vertical.ts";
 import {
   discoverPresets,
   isInvalidPreset,
-  loadBundledPresetManifests,
   presetManifestPath,
   presetNotFound,
   publicPresetSummary,
@@ -18,6 +17,8 @@ import {
 import { invalidResolvedPresetResult } from "./shared.ts";
 import { buildPresetUninstallImpact } from "./preset-uninstall-impact.ts";
 import { readPresetManifestFromSourceResult } from "./preset-manifest-reader.ts";
+import { loadBundledPresetManifestEntries } from "./bundled.ts";
+import { presetRuntimeRepairHint, smokePresetEntrypoints } from "./preset-smoke.ts";
 import {
   runPresetAudit,
   runPresetCheck,
@@ -91,9 +92,29 @@ function runPresetInstall(rootInput: HarnessLayoutInput, action: Extract<PresetA
       error: cliError(CliErrorCode.PresetManifestInvalid, "Preset manifest failed validation.")
     };
   }
+  const sourceManifestPath = manifestPathFromSource(action.sourcePath);
+  const sourcePreset = {
+    manifest,
+    layer: action.layer,
+    sourcePath: sourceManifestPath
+  } as const;
+  const runtime = smokePresetEntrypoints(rootInput, sourcePreset);
+  if (!runtime.ok) {
+    return {
+      ok: false,
+      command: "preset-install",
+      preset: { id: manifest.id },
+      issues: runtime.issues,
+      error: cliError(CliErrorCode.PresetManifestInvalid, presetRuntimeRepairHint(sourcePreset, runtime.issues))
+    };
+  }
   const target = presetManifestPath(rootInput, action.layer, manifest.id);
-  mkdirSync(path.dirname(target), { recursive: true });
-  writeFileSync(target, JSON.stringify(manifest, null, 2), "utf8");
+  const writeInstalledFile = (filePath: string, body: Buffer | string): void => {
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, body);
+  };
+  copyPresetPackage(path.dirname(sourceManifestPath), path.dirname(target), writeInstalledFile, { replace: true });
+  writeInstalledFile(target, JSON.stringify(manifest, null, 2));
   return {
     ok: true,
     command: "preset-install",
@@ -102,11 +123,16 @@ function runPresetInstall(rootInput: HarnessLayoutInput, action: Extract<PresetA
 }
 
 function runPresetSeed(rootInput: HarnessLayoutInput, activeVerticalId: string): CliResult {
-  for (const manifest of loadBundledPresetManifests().filter((candidate) => candidate.vertical === activeVerticalId)) {
-    const target = presetManifestPath(rootInput, "user", manifest.id);
+  const bundled = loadBundledPresetManifestEntries().filter((candidate) => candidate.manifest.vertical === activeVerticalId);
+  const writeSeedFile = (filePath: string, body: Buffer | string): void => {
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, body);
+  };
+  for (const entry of bundled) {
+    const target = presetManifestPath(rootInput, "user", entry.manifest.id);
+    copyPresetPackage(path.dirname(entry.sourcePath), path.dirname(target), writeSeedFile);
     if (!existsSync(target)) {
-      mkdirSync(path.dirname(target), { recursive: true });
-      writeFileSync(target, JSON.stringify(manifest, null, 2), "utf8");
+      writeSeedFile(target, JSON.stringify(entry.manifest, null, 2));
     }
   }
   return {
@@ -114,8 +140,40 @@ function runPresetSeed(rootInput: HarnessLayoutInput, activeVerticalId: string):
     command: "preset-seed",
     presets: discoverPresets(rootInput, activeVerticalId)
       .filter((preset) => preset.layer === "user")
-      .map(publicPresetSummary)
+      .map(publicPresetSummary),
+    report: {
+      schema: "preset-seed-report/v1",
+      packageCount: bundled.length,
+      mode: "complete-package"
+    }
   };
+}
+
+function manifestPathFromSource(sourcePath: string): string {
+  return statSync(sourcePath).isDirectory() ? path.join(sourcePath, "preset.json") : sourcePath;
+}
+
+function copyPresetPackage(
+  sourceRoot: string,
+  targetRoot: string,
+  writeTarget: (filePath: string, body: Buffer) => void,
+  options: { readonly replace?: boolean } = {}
+): void {
+  if (path.resolve(sourceRoot) === path.resolve(targetRoot)) return;
+  if (options.replace) removePresetPackage(targetRoot);
+  for (const entry of readdirSync(sourceRoot, { withFileTypes: true })) {
+    const source = path.join(sourceRoot, entry.name);
+    const target = path.join(targetRoot, entry.name);
+    if (entry.isDirectory()) {
+      copyPresetPackage(source, target, writeTarget);
+    } else if (entry.isFile() && (options.replace || !existsSync(target))) {
+      writeTarget(target, readFileSync(source));
+    }
+  }
+}
+
+function removePresetPackage(targetRoot: string): void {
+  rmSync(targetRoot, { recursive: true, force: true });
 }
 
 function runPresetUninstall(rootInput: HarnessLayoutInput, action: Extract<PresetAction, { readonly kind: "preset-uninstall" }>): CliResult {
@@ -158,7 +216,7 @@ function runPresetUninstall(rootInput: HarnessLayoutInput, action: Extract<Prese
       report
     };
   }
-  rmSync(path.dirname(target), { recursive: true, force: true });
+  removePresetPackage(path.dirname(target));
   return {
     ok: true,
     command: "preset-uninstall",

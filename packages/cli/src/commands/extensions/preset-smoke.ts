@@ -1,0 +1,175 @@
+import path from "node:path";
+import { taskPackagePath, type HarnessLayoutInput } from "../../../../kernel/src/index.ts";
+import {
+  isPresetRunEntrypoint,
+  presetRunEntrypointCapabilities
+} from "../../cli/preset-entrypoint-capabilities.ts";
+import { presetScriptEntry } from "./preset-script-runner.ts";
+import type { ResolvedPreset } from "./state.ts";
+import { runScriptHost, type ResolvedScriptEntry } from "./script-host.ts";
+import {
+  trustedPresetEnvironmentCapabilities,
+  trustedPresetPackageReadPermissions
+} from "./script-environment.ts";
+
+export interface PresetEntrypointSmokeIssue {
+  readonly code:
+    | "preset_entrypoint_runtime_unregistered"
+    | "preset_entrypoint_script_missing"
+    | "preset_entrypoint_smoke_failed";
+  readonly message: string;
+  readonly path: string;
+  readonly entrypoint: string;
+  readonly nextCommand: string;
+}
+
+export interface PresetEntrypointSmokeResult {
+  readonly ok: boolean;
+  readonly entrypoints: ReadonlyArray<{
+    readonly name: string;
+    readonly type: "script" | "template";
+    readonly ok: boolean;
+    readonly command?: string;
+  }>;
+  readonly issues: ReadonlyArray<PresetEntrypointSmokeIssue>;
+}
+
+export function smokePresetEntrypoints(
+  rootInput: HarnessLayoutInput,
+  preset: ResolvedPreset
+): PresetEntrypointSmokeResult {
+  const issues: PresetEntrypointSmokeIssue[] = [];
+  const entrypoints = Object.entries(preset.manifest.entrypoints ?? {}).map(([name, entrypoint]) => {
+    if (!isPresetRunEntrypoint(name)) {
+      issues.push(entrypointCapabilityUnregisteredIssue(preset, name, entrypoint.type));
+      return entrypoint.type === "script"
+        ? { name, type: entrypoint.type, command: entrypoint.command, ok: false }
+        : { name, type: entrypoint.type, ok: false };
+    }
+    if (entrypoint.type !== "script") {
+      issues.push(runtimeUnregisteredIssue(preset, name, entrypoint.type));
+      return { name, type: entrypoint.type, ok: false };
+    }
+
+    const script = resolvedPresetScript(preset, name, entrypoint);
+    const outputRoot = taskPackagePath(rootInput, `task_PRESET_CHECK_${safeToken(preset.manifest.id)}`);
+    let smoke: ReturnType<typeof runScriptHost>;
+    try {
+      smoke = runScriptHost({
+        rootInput,
+        commandName: "preset-check",
+        script,
+        outputRoot
+      });
+    } catch (error) {
+      issues.push({
+        code: "preset_entrypoint_smoke_failed",
+        entrypoint: name,
+        path: `entrypoints.${name}`,
+        message: `Entrypoint ${name} failed its isolated execution smoke: ${error instanceof Error ? error.message : String(error)}`,
+        nextCommand: smokeReproductionCommand(preset)
+      });
+      return { name, type: entrypoint.type, command: entrypoint.command, ok: false };
+    }
+    if (!smoke.ok) {
+      const error = smoke.result.error;
+      issues.push({
+        code: error?.code === "script_not_found"
+          ? "preset_entrypoint_script_missing"
+          : "preset_entrypoint_smoke_failed",
+        entrypoint: name,
+        path: `entrypoints.${name}${error?.code === "script_not_found" ? ".command" : ""}`,
+        message: error?.code === "script_result_failed"
+          ? `Entrypoint ${name} returned script-result ok:false during its isolated smoke.`
+          : `Entrypoint ${name} failed its isolated execution smoke: ${error?.hint ?? "unknown runtime failure"}`,
+        nextCommand: error?.code === "script_not_found"
+          ? repairCommand(preset)
+          : smokeReproductionCommand(preset)
+      });
+    }
+    return { name, type: entrypoint.type, command: entrypoint.command, ok: smoke.ok };
+  });
+  return { ok: issues.length === 0, entrypoints, issues };
+}
+
+function entrypointCapabilityUnregisteredIssue(
+  preset: ResolvedPreset,
+  entrypoint: string,
+  type: "script" | "template"
+): PresetEntrypointSmokeIssue {
+  return {
+    code: "preset_entrypoint_runtime_unregistered",
+    entrypoint,
+    path: `entrypoints.${entrypoint}`,
+    message: `Entrypoint ${entrypoint} declares type ${type}, but the preset run capability registry does not expose that name. Registered names: ${presetRunEntrypointCapabilities.join(", ")}.`,
+    nextCommand: "ha preset run --help"
+  };
+}
+
+export function presetRuntimeRepairHint(preset: ResolvedPreset, issues: ReadonlyArray<PresetEntrypointSmokeIssue>): string {
+  const first = issues[0];
+  if (!first) return "";
+  return `Preset ${preset.manifest.id} entrypoint ${first.entrypoint} is not runnable: ${first.message} Next: ${first.nextCommand}`;
+}
+
+function resolvedPresetScript(
+  preset: ResolvedPreset,
+  entrypointName: string,
+  entrypoint: Extract<NonNullable<ResolvedPreset["manifest"]["entrypoints"]>[string], { readonly type: "script" }>
+): ResolvedScriptEntry {
+  return {
+    entry: presetScriptEntry(preset, entrypoint, entrypointName),
+    verticalId: preset.manifest.vertical,
+    manifestRoot: path.dirname(preset.sourcePath),
+    owner: { id: preset.manifest.id, layer: preset.layer },
+    environmentCapabilities: trustedPresetEnvironmentCapabilities({
+      layer: preset.layer,
+      presetId: preset.manifest.id,
+      entrypointName,
+      command: entrypoint.command,
+      sourcePath: preset.sourcePath
+    }),
+    trustedPackageReadPermissions: trustedPresetPackageReadPermissions({
+      layer: preset.layer,
+      presetId: preset.manifest.id,
+      entrypointName,
+      command: entrypoint.command,
+      sourcePath: preset.sourcePath
+    }),
+    context: {
+      presetId: preset.manifest.id,
+      presetTitle: preset.manifest.title,
+      entrypoint: entrypointName,
+      validationSmoke: true
+    }
+  };
+}
+
+function runtimeUnregisteredIssue(
+  preset: ResolvedPreset,
+  entrypoint: string,
+  type: "template"
+): PresetEntrypointSmokeIssue {
+  return {
+    code: "preset_entrypoint_runtime_unregistered",
+    entrypoint,
+    path: `entrypoints.${entrypoint}.type`,
+    message: `Entrypoint ${entrypoint} declares type ${type}, but no ${type} entrypoint runtime is registered.`,
+    nextCommand: repairCommand(preset)
+  };
+}
+
+function repairCommand(preset: ResolvedPreset): string {
+  if (preset.layer === "builtin" || preset.layer === "user") {
+    return `run \`ha preset seed\`, then \`ha preset check ${preset.manifest.id}\``;
+  }
+  return `reinstall the complete preset package with \`ha preset install <preset-folder> --project\`, then run \`ha preset check ${preset.manifest.id}\``;
+}
+
+function smokeReproductionCommand(preset: ResolvedPreset): string {
+  return `ha preset check ${preset.manifest.id} --json`;
+}
+
+function safeToken(value: string): string {
+  return value.replace(/[^A-Za-z0-9_-]/gu, "_");
+}

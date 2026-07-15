@@ -250,7 +250,7 @@ test("CLI script host denies descendants of a non-recursive write file scope", (
     ], false);
 
     assert.equal(result.ok, false);
-    assert.equal(result.error.code, "script_scope_violation_write");
+    assert.equal(result.error.code, "preset_write_scope_invalid");
     assert.equal(existsSync(path.join(
       rootDir,
       "harness/tasks/task-exact-file-writer/artifacts/receipt.json/escaped.txt"

@@ -146,7 +146,7 @@ export const extensionsCommandSpecs = defineCommandSpecs([
   },
   {
     "kind": "preset-run",
-    "usage": "preset run <id> <plan|scaffold|check> --task <id> [--allow-scripts] [--input key=value] [--json]",
+    "usage": "preset run <id> <plan|scaffold|check|audit|gather|render-html> --task <id> [--allow-scripts] [--input key=value] [--json]",
     "options": [{"flag":"--task","description":"Set the task id."},{"flag":"--allow-scripts","description":"Allow preset script execution."},{"flag":"--input","description":"Provide an input path or one script input as key=value; repeat for script inputs."},{"flag":"--json","description":"Emit command-receipt/v2 JSON."}],
     "summary": "Run a preset entrypoint for a task package.",
     "examples": ["harness-anything preset run standard-task plan --task task_01ABC --input mode=smoke"],

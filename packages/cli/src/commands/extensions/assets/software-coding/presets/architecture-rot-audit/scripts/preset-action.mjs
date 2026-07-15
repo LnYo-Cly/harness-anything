@@ -18,6 +18,10 @@ if (context.entrypoint !== "check") throw new Error(`Unsupported architecture-ro
 
 const presetRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const registry = JSON.parse(readFileSync(path.join(presetRoot, "registry", "architecture-rot-registry.json"), "utf8"));
+if (context.validationSmoke === true) {
+  runValidationSmoke(registry);
+  process.exit(0);
+}
 const rootDir = context.paths.projectRoot ?? context.paths.rootDir;
 const artifactsDir = path.join(context.outputRoot, "artifacts");
 const generatedAt = new Date().toISOString();
@@ -153,6 +157,52 @@ function renderSummary(value) {
 
 function writeJson(filePath, value) {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function runValidationSmoke(value) {
+  const expectedCategories = [
+    "atomicity-outsourcing",
+    "declaration-first-leak",
+    "enforcement-gap",
+    "imaginary-seam",
+    "layer-misalignment",
+    "manual-mirror",
+    "shallow-slice"
+  ];
+  const records = Array.isArray(value.records) ? value.records : [];
+  const categories = [...new Set(records.map((record) => record.category))].sort();
+  const fixed = records.filter((record) => record.status === "fixed");
+  const issues = [];
+  if (records.length !== 17) issues.push(`expected 17 registry records, found ${records.length}`);
+  if (JSON.stringify(categories) !== JSON.stringify(expectedCategories)) {
+    issues.push(`expected categories ${expectedCategories.join(", ")}, found ${categories.join(", ")}`);
+  }
+  if (fixed.length !== 3) issues.push(`expected 3 fixed records, found ${fixed.length}`);
+  if (!fixed.every((record) => /^[0-9a-f]{40}$/u.test(String(record.fixedCommit)) && /^PR#[0-9]+$/u.test(String(record.fixPullRequest)))) {
+    issues.push("fixed records must carry a full commit SHA and PR# anchor");
+  }
+  if (!records.every((record) => record.detection?.detector === record.id)) {
+    issues.push("each registry record must bind its detector to the same id");
+  }
+
+  const artifactsDir = path.join(context.outputRoot, "artifacts");
+  mkdirSync(artifactsDir, { recursive: true });
+  writeJson(path.join(artifactsDir, "preset-result.json"), {
+    schema: "script-result/v1",
+    ok: issues.length === 0,
+    report: {
+      schema: "architecture-rot-validation-smoke-report/v1",
+      status: issues.length === 0 ? "passed" : "blocked",
+      records: records.length,
+      categories: categories.length,
+      fixed: fixed.length,
+      issues
+    },
+    error: issues.length === 0 ? undefined : {
+      code: "architecture_rot_contract_invalid",
+      hint: `Repair the preset registry contract: ${issues.join("; ")}`
+    }
+  });
 }
 
 function toRootRelative(root, filePath) {

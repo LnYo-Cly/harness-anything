@@ -85,11 +85,14 @@ test("kill -9 and restart preserves every fsynced durability audit record", asyn
         backupWatermark: "watermark-" + index,
         backupBoundSatisfied: true
       });
-      console.log(index);
+      process.stdout.write(String(index) + "\\n");
     }
   `;
+  const childEnv = { ...process.env, FORCE_COLOR: "0" };
+  delete childEnv.NO_COLOR;
   const child = spawn(process.execPath, ["--input-type=module", "--eval", childScript, moduleUrl, ledgerPath], {
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    env: childEnv
   });
   let acknowledged = -1;
   let buffered = "";
@@ -97,6 +100,9 @@ test("kill -9 and restart preserves every fsynced durability audit record", asyn
     await new Promise<void>((resolve, reject) => {
       child.once("error", reject);
       child.stderr?.on("data", (chunk) => reject(new Error(String(chunk))));
+      child.once("exit", (code, signal) => {
+        if (acknowledged < 24) reject(new Error(`durability child exited before acknowledgement 24 (code=${code}, signal=${signal})`));
+      });
       child.stdout?.on("data", (chunk) => {
         buffered += String(chunk);
         const lines = buffered.split("\n");
@@ -107,8 +113,9 @@ test("kill -9 and restart preserves every fsynced durability audit record", asyn
         if (acknowledged >= 24) resolve();
       });
     });
+    const exited = once(child, "exit");
     assert.equal(child.kill("SIGKILL"), true);
-    await once(child, "exit");
+    await exited;
 
     const afterCrash = await readSingleAuthorityDurabilityLedger(ledgerPath);
     assert.equal(acknowledged >= 24, true);
