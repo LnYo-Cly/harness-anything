@@ -92,6 +92,7 @@ test("bundled software coding assets have consistent template and process-preset
   const selectedMaterializedPaths = new Set<string>();
   const bundledPresetIds = [
     "standard-task",
+    "docs-task",
     "reference-task",
     "long-running-task",
     "module",

@@ -1,0 +1,18 @@
+{
+  "schema": "preset-manifest/v2",
+  "id": "docs-task",
+  "title": "Documentation / Design Task",
+  "vertical": "software/coding",
+  "version": "1.0.0",
+  "kind": "template-content",
+  "kernelVersionRange": { "min": "1.0.0", "maxExclusive": "2.0.0" },
+  "capabilityImports": [{ "id": "standard-task-check", "kind": "checker", "version": "1", "required": false }],
+  "profiles": [{
+    "id": "baseline",
+    "title": "Baseline",
+    "checkerProfile": "standard",
+    "completionGates": [],
+    "templateSelections": []
+  }],
+  "defaultProfile": "baseline"
+}

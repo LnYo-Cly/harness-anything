@@ -7,6 +7,7 @@
   },
   "presets": [
     { "id": "standard-task", "version": "1.0.0", "digest": "sha256:97ce758ed5f197b4b18effdd65a5e26642b7b767a33fdaa7b4d32c07a401c164" },
+    { "id": "docs-task", "version": "1.0.0", "digest": "sha256:84f6172941ee20ce9d4ba5454d92c9dcfe33a78895999ed344547d95584b7c6c" },
     { "id": "reference-task", "version": "1.0.0", "digest": "sha256:910b58f13ae5ef59c041776825d5a105466e214b0d419cca1e9117d819a3bf7e" },
     { "id": "long-running-task", "version": "1.0.0", "digest": "sha256:e5b341575b584658d87640b481ec42cf4ecd8d1a1bce1775126c1d38c4f908b8" },
     { "id": "module", "version": "1.0.0", "digest": "sha256:c884944f52d575c7fc8ee38233d023f4c7f9d9c001c138013fd3886961cbbc99" },
