@@ -75,6 +75,7 @@
         "check-cli-structure",
         "check-cli-help-contract",
         "check-cli-error-codes",
+        "check-error-next-steps",
         "check-error-classification",
         "check-import-boundaries",
         "check-write-coordinator-boundary",
@@ -113,6 +114,7 @@
         "check-cli-structure",
         "check-cli-help-contract",
         "check-cli-error-codes",
+        "check-error-next-steps",
         "check-error-classification",
         "check-import-boundaries",
         "check-write-coordinator-boundary",
@@ -159,6 +161,7 @@
         "check-cli-structure",
         "check-cli-help-contract",
         "check-cli-error-codes",
+        "check-error-next-steps",
         "check-error-classification",
         "check-import-boundaries",
         "check-write-coordinator-boundary",
@@ -192,7 +195,7 @@
         "check-legacy-intake-readiness",
         "check-supply-chain"
       ],
-      "harnessLeafGateCount": 41
+      "harnessLeafGateCount": 42
     },
     "rewriteCi": {
       "pullRequestGateJobs": [
@@ -1706,6 +1709,84 @@
         "status": "covered",
         "evidence": [
           "tools/check-cli-error-codes.test.mjs"
+        ]
+      }
+    },
+    {
+      "id": "check-error-next-steps",
+      "command": "npm run harness:check-error-next-steps",
+      "category": "local-consistency",
+      "tier": "pr-required",
+      "tierReason": null,
+      "authoritySource": [
+        "decision/dec_01KXGDXZG03JZRGTW8V91H11ER",
+        "task/task_01KXGFR6C7M9GB0E3QEMBW8HFX",
+        "tools/check-error-next-steps.mjs"
+      ],
+      "consumerScope": [
+        "caller-facing CLI, application, and daemon rejection codes and their actionable hints"
+      ],
+      "githubContext": {
+        "requiredContexts": [
+          "boundaries"
+        ],
+        "workflowJobs": [
+          "boundaries",
+          "full-check"
+        ],
+        "nodeVersions": [
+          24,
+          26
+        ]
+      },
+      "allowlistPolicy": {
+        "allowed": true,
+        "location": "tools/gate-allowlists/check-error-next-steps.json",
+        "adrOrDecisionRequired": true,
+        "notes": "The initial task-scoped debt baseline may only shrink; new rejection codes without actionable guidance hard-fail, and repaired entries become stale failures."
+      },
+      "changeControl": {
+        "ordinaryImplementationMayModify": false,
+        "requiresGovernanceEvidence": true,
+        "protectedSurfaces": [
+          "tools/check-error-next-steps.mjs",
+          "tools/gate-allowlists/check-error-next-steps.json",
+          "package.json:scripts.harness:check-error-next-steps",
+          "tools/gate-manifest.json"
+        ]
+      },
+      "bypassFixtureRequired": false,
+      "executionSurfaces": {
+        "packageJson": {
+          "check": true,
+          "checkPr": true,
+          "script": "harness:check-error-next-steps"
+        },
+        "rewriteCi": {
+          "pullRequestJobs": [
+            "boundaries"
+          ],
+          "nonPullRequestJobs": [
+            "full-check"
+          ]
+        },
+        "branchProtection": {
+          "required": true,
+          "contexts": [
+            "boundaries"
+          ]
+        },
+        "classes": [
+          "local",
+          "pr",
+          "main-full"
+        ]
+      },
+      "deterministic": true,
+      "positiveControl": {
+        "status": "covered",
+        "evidence": [
+          "tools/check-error-next-steps.test.mjs"
         ]
       }
     },

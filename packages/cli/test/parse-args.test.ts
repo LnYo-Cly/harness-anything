@@ -428,7 +428,7 @@ test("parseArgs pins stable parse error envelopes", () => {
     { argv: ["init", "--name"], code: "missing_name" },
     { argv: ["init", "--name", "--add-npm-scripts"], code: "missing_name" },
     { argv: ["new-task"], code: "missing_title" },
-    { argv: ["unknown"], code: "unknown_command", hintIncludes: "harness-anything task create --title <title>" }
+    { argv: ["unknown"], code: "unknown_command", hintIncludes: "ha help" }
   ] as const;
 
   for (const candidate of cases) {
@@ -545,6 +545,30 @@ test("parseArgs rejects unknown help topics", () => {
   assert.equal(parsed.ok, false);
   if (parsed.ok) return;
   assert.equal(parsed.error.code, "unknown_help_topic");
+});
+
+test("parseArgs keeps unknown-command guidance focused and bounded", () => {
+  const rootUnknown = parseArgs(["not-a-command"]);
+  assert.equal(rootUnknown.ok, false);
+  if (!rootUnknown.ok) {
+    assert.equal(rootUnknown.error.hint, "Unknown command: not-a-command. Run 'ha help' to inspect the valid command shape.");
+    assert.equal(rootUnknown.error.hint.length < 160, true);
+    assert.equal(rootUnknown.error.hint.includes("harness-anything task create"), false);
+  }
+
+  const nestedUnknown = parseArgs(["task", "not-a-subcommand"]);
+  assert.equal(nestedUnknown.ok, false);
+  if (!nestedUnknown.ok) {
+    assert.match(nestedUnknown.error.hint, /Run 'ha task --help'/u);
+  }
+
+  const contextualHelp = parseArgs(["preset", "run", "create-milestone", "scaffold", "--help"]);
+  assert.equal(contextualHelp.ok, false);
+  if (!contextualHelp.ok) {
+    assert.equal(contextualHelp.error.code, "unknown_help_topic");
+    assert.match(contextualHelp.error.hint, /Run 'ha preset run --help'/u);
+    assert.equal(contextualHelp.error.hint.length < 180, true);
+  }
 });
 
 function assertFields(action: ParsedAction, fields: Readonly<Record<string, unknown>>): void {

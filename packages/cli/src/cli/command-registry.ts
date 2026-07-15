@@ -63,6 +63,20 @@ export function findCommandHelpMatch(tokens: ReadonlyArray<string>):
   return { kind: "unknown" };
 }
 
+export function findCommandHelpContext(tokens: ReadonlyArray<string>): ReadonlyArray<string> {
+  const paths = commandRegistry.flatMap((entry) => [
+    entry.commandPath,
+    ...entry.aliases.map(aliasPathFromDisplay)
+  ]);
+  let best: ReadonlyArray<string> = [];
+  for (const candidate of paths) {
+    let length = 0;
+    while (length < tokens.length && length < candidate.length && tokens[length] === candidate[length]) length += 1;
+    if (length > best.length) best = candidate.slice(0, length);
+  }
+  return best;
+}
+
 function commandPathFromUsage(usage: string): ReadonlyArray<string> {
   const tokens = usage.split(/\s+/u);
   const pathTokens: string[] = [];

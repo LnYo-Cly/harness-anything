@@ -62,10 +62,14 @@ export function runDaemonRepoCommand(input: DaemonRepoCommandInput): number {
       }, input.json);
       return 0;
     }
-    emitDaemonRepoError(`unknown daemon repo command: ${action}`, input.json);
+    emitDaemonRepoError(
+      CliErrorCode.UnknownCommand,
+      `Unknown daemon repo command: ${action}. Run 'ha daemon repo --help' to inspect valid repo subcommands.`,
+      input.json
+    );
     return 2;
   } catch (error) {
-    emitDaemonRepoError(error instanceof Error ? error.message : String(error), input.json);
+    emitDaemonRepoError(CliErrorCode.JournalUnavailable, error instanceof Error ? error.message : String(error), input.json);
     return 1;
   }
 }
@@ -116,10 +120,10 @@ function emitDaemonRepoResult(command: string, result: Record<string, unknown>, 
   console.log(parts.join(" "));
 }
 
-function emitDaemonRepoError(message: string, json: boolean): void {
+function emitDaemonRepoError(code: CliErrorCode, message: string, json: boolean): void {
   if (json) {
-    console.log(JSON.stringify({ ok: false, schema: "daemon-command/v1", command: "daemon-repo", error: cliError(CliErrorCode.JournalUnavailable, message) }));
+    console.log(JSON.stringify({ ok: false, schema: "daemon-command/v1", command: "daemon-repo", error: cliError(code, message) }));
     return;
   }
-  console.error(`error code=${CliErrorCode.JournalUnavailable} hint=${message}`);
+  console.error(`error code=${code} hint=${message}`);
 }

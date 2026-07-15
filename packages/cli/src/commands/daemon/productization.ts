@@ -79,10 +79,14 @@ export async function runDaemonProductCommand(input: DaemonCommandInput): Promis
     if (action === "bootstrap-server") return await bootstrapServer(input);
     if (action === "install-templates") return installTemplates(input);
     if (action === "repo") return runDaemonRepoCommand({ rootDir: input.rootDir, args: input.args, json: input.json });
-    emitDaemonError(`unknown daemon command: ${action}`, input.json);
+    emitDaemonError(
+      CliErrorCode.UnknownCommand,
+      `Unknown daemon command: ${action}. Run 'ha daemon --help' to inspect valid daemon subcommands.`,
+      input.json
+    );
     return 2;
   } catch (error) {
-    emitDaemonError(error instanceof Error ? error.message : String(error), input.json);
+    emitDaemonError(CliErrorCode.JournalUnavailable, error instanceof Error ? error.message : String(error), input.json);
     return 1;
   }
 }
@@ -445,12 +449,12 @@ function emitDaemonResult(command: string, result: Record<string, unknown>, json
   console.log(parts.join(" "));
 }
 
-function emitDaemonError(message: string, json: boolean): void {
+function emitDaemonError(code: CliErrorCode, message: string, json: boolean): void {
   if (json) {
-    console.log(JSON.stringify({ ok: false, schema: "daemon-command/v1", command: "daemon", error: cliError(CliErrorCode.JournalUnavailable, message) }));
+    console.log(JSON.stringify({ ok: false, schema: "daemon-command/v1", command: "daemon", error: cliError(code, message) }));
     return;
   }
-  console.error(`error code=${CliErrorCode.JournalUnavailable} hint=${message}`);
+  console.error(`error code=${code} hint=${message}`);
 }
 
 function daemonRepoIdOverride(args: ReadonlyArray<string>): string | undefined {
