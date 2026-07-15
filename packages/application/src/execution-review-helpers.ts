@@ -10,13 +10,6 @@ export function assertExecutionTaskInReview(
   if (status !== "in_review") throw new Error(`task status ${status ?? "unknown"} is not in_review`);
 }
 
-export function executionActorsShareExecutor(
-  left: { readonly kind: "agent"; readonly id: string } | null,
-  right: { readonly kind: "agent"; readonly id: string } | null
-): boolean {
-  return left !== null && right !== null && left.kind === right.kind && left.id === right.id;
-}
-
 export function executionHasArchiveWarnings(execution: ExecutionRecord): boolean {
   return execution.session_bindings.some((binding) => {
     if (!binding || typeof binding !== "object") return false;

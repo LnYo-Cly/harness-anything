@@ -39,7 +39,7 @@ export function canonicalAuthoredBatchWrites(op: WriteOp): ReadonlyArray<Canonic
 function isTaskTypedAuthorityPath(relativePath: string): boolean {
   return /^tasks\/[^/]+\/INDEX\.md$/u.test(relativePath) ||
     /^tasks\/[^/]+\/task-contract\.json$/u.test(relativePath) ||
-    /^tasks\/[^/]+\/(?:executions|reviews)(?:\/|$)/u.test(relativePath);
+    /^tasks\/[^/]+\/(?:executions|consents|reviews)(?:\/|$)/u.test(relativePath);
 }
 
 export function canonicalAuthoredBatchPaths(rootInput: HarnessLayoutInput, op: WriteOp): ReadonlyArray<string> {

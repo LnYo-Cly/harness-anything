@@ -1,11 +1,16 @@
 import { Effect, Schema } from "effect";
 import {
+  computeExecutionConsentPin,
+  consentDeclaration,
   executionDeclaration,
   generateTaskId,
   reviewDeclaration,
+  sha256Text,
   stablePayloadHash,
   writeDeclaredEntityTransaction,
   type ArtifactStore,
+  type ConsentAction,
+  type ConsentRecord,
   type CurrentSessionRef,
   type ExecutionRecord,
   type HarnessLayoutInput,
@@ -14,7 +19,17 @@ import {
   type TaskHolderPrincipal,
   type WriteCoordinator
 } from "../../kernel/src/index.ts";
-import { assertExecutionTaskInReview, executionActorsShareExecutor, executionHasArchiveWarnings } from "./execution-review-helpers.ts";
+import { assertExecutionTaskInReview, executionHasArchiveWarnings } from "./execution-review-helpers.ts";
+import {
+  DEFAULT_HUMAN_CONSENT_ACTIONS,
+  DEFAULT_HUMAN_CONSENT_TTL_MS,
+  approvalCard,
+  consentSnapshot,
+  createConsentRecord,
+  decodeConsentDocument,
+  decodeExecutionForConsent,
+  generateConsentId
+} from "./execution-consent-helpers.ts";
 
 export interface ReviewExecutionService {
   readonly reviewExecution: (input: {
@@ -27,6 +42,9 @@ export interface ReviewExecutionService {
     readonly rationale: string;
     readonly verdict: ReviewVerdict;
     readonly archiveWarningsAcknowledged: boolean;
+    readonly consentId?: string;
+    readonly consentUtterance?: string;
+    readonly consentActions?: ReadonlyArray<ConsentAction>;
   }) => Promise<{ readonly review: ReviewRecord }>;
 }
 
@@ -35,40 +53,55 @@ export function makeReviewExecutionService(options: {
   readonly coordinator: WriteCoordinator;
   readonly artifactStore: Pick<ArtifactStore, "readTaskPackage">;
   readonly generateReviewId?: () => string;
+  readonly generateConsentId?: () => string;
   readonly now?: () => string;
+  readonly consentTtlMs?: number;
 }): ReviewExecutionService {
   const generateReviewId = options.generateReviewId ?? (() => `rev_${generateTaskId().slice("task_".length)}`);
+  const nextConsentId = options.generateConsentId ?? generateConsentId;
   const now = options.now ?? (() => new Date().toISOString());
+  const consentTtlMs = options.consentTtlMs ?? DEFAULT_HUMAN_CONSENT_TTL_MS;
   return {
     reviewExecution: async (input) => {
       const task = await Effect.runPromise(options.artifactStore.readTaskPackage(input.taskId));
       const executionDocument = task.documents.find((document) => document.path === `executions/${input.executionId}.md`);
       if (!executionDocument) throw new Error(`execution not found: ${input.executionId}`);
-      const execution = Schema.decodeUnknownSync(executionDeclaration.schema)(
-        executionDeclaration.documentCodec.decode(executionDocument.body)
-      ) as ExecutionRecord;
-      if (execution.execution_id !== input.executionId || execution.task_ref !== `task/${input.taskId}`) {
-        throw new Error(`execution identity does not match its host path: ${input.executionId}`);
-      }
+      const execution = decodeExecutionForConsent(executionDocument, input.taskId, input.executionId);
       if (execution.state !== "submitted") throw new Error(`execution is not submitted: ${input.executionId}`);
       assertExecutionTaskInReview(task.documents, input.taskId);
-      if (executionActorsShareExecutor(execution.primary_actor.executor, input.reviewer.executor)) {
-        throw new Error(`execution executor cannot review its own delivery: ${input.executionId}`);
-      }
       if (executionHasArchiveWarnings(execution) && !input.archiveWarningsAcknowledged) {
         throw new Error("execution archive warnings must be explicitly acknowledged by the reviewer");
       }
       const evidenceIds = new Set(execution.outputs.map((evidence) => evidence.evidence_id));
       const unknownEvidence = input.evidenceChecked.find((evidenceId) => !evidenceIds.has(evidenceId));
       if (unknownEvidence) throw new Error(`review evidence does not belong to execution ${input.executionId}: ${unknownEvidence}`);
+      assertConsentInputShape(input, execution);
 
       const reviewId = generateReviewId();
       if (task.documents.some((document) => document.path === `reviews/${reviewId}.md`)) {
         throw new Error(`review already exists: ${reviewId}`);
       }
       const reviewedAt = now();
+      const consent = input.verdict === "approved"
+        ? await resolveApprovalConsent({
+            taskId: input.taskId,
+            execution,
+            executionDocument,
+            documents: task.documents,
+            reviewer: input.reviewer,
+            reviewerSession: input.reviewerSession,
+            reviewId,
+            reviewedAt,
+            consentId: input.consentId,
+            consentUtterance: input.consentUtterance,
+            consentActions: input.consentActions,
+            consentTtlMs,
+            nextConsentId,
+            coordinator: options.coordinator
+          })
+        : rejectUnexpectedConsent(input);
       const review: ReviewRecord = {
-        schema: "review/v2",
+        schema: "review/v3",
         review_id: reviewId,
         task_ref: `task/${input.taskId}`,
         execution_ref: `execution/${input.taskId}/${input.executionId}`,
@@ -79,10 +112,20 @@ export function makeReviewExecutionService(options: {
         rationale: input.rationale,
         verdict: input.verdict,
         archive_warnings_acknowledged: input.archiveWarningsAcknowledged,
+        approval_basis: consent === null ? null : {
+          kind: "human-consent",
+          consent_ref: `consent/${input.taskId}/${consent.consumed.consent_id}`,
+          consent_snapshot: consentSnapshot(consent.consumed)
+        },
         reviewed_at: reviewedAt
       };
-      const companionWrites = input.verdict === "changes_requested"
-        ? [
+      const companionWrites = [
+        ...(consent === null ? [] : [{
+          taskId: input.taskId,
+          path: `consents/${consent.consumed.consent_id}.md`,
+          body: consentDeclaration.documentCodec.encode(consent.consumed)
+        }]),
+        ...(input.verdict === "changes_requested" ? [
             {
               taskId: input.taskId,
               path: `executions/${input.executionId}.md`,
@@ -93,19 +136,168 @@ export function makeReviewExecutionService(options: {
               path: "INDEX.md",
               body: activeTaskIndex(task.documents, input.taskId)
             }
-          ]
-        : [];
+          ] : [])
+      ];
       await Effect.runPromise(writeDeclaredEntityTransaction(
         options.coordinator,
         stablePayloadHash,
         reviewDeclaration,
         { taskId: input.taskId, reviewId },
         review,
-        companionWrites
+        companionWrites,
+        [
+          { taskId: input.taskId, path: `executions/${input.executionId}.md`, bodySha256: sha256Text(executionDocument.body) },
+          { taskId: input.taskId, path: `reviews/${reviewId}.md`, bodySha256: null },
+          ...(input.verdict === "changes_requested" ? [{
+            taskId: input.taskId,
+            path: "INDEX.md",
+            bodySha256: sha256Text(requiredDocumentBody(task.documents, "INDEX.md", input.taskId))
+          }] : []),
+          ...(consent === null ? [] : [{
+            taskId: input.taskId,
+            path: `consents/${consent.consumed.consent_id}.md`,
+            bodySha256: consent.openDocumentSha256
+          }])
+        ]
       ));
       return { review };
     }
   };
+}
+
+function assertConsentInputShape(input: {
+  readonly verdict: ReviewVerdict;
+  readonly consentId?: string;
+  readonly consentUtterance?: string;
+  readonly consentActions?: ReadonlyArray<ConsentAction>;
+}, execution: ExecutionRecord): void {
+  if (input.verdict !== "approved") {
+    rejectUnexpectedConsent(input);
+    return;
+  }
+  if (input.consentId && input.consentUtterance) {
+    throw new Error("approved review accepts either --consent or --consent-utterance, not both");
+  }
+  if (!input.consentId && !input.consentUtterance) {
+    throw new Error([
+      approvalCard(execution),
+      `After the human replies, rerun with --consent-utterance "<their exact words>" or first record consent and pass --consent <consent-id>.`,
+      "Do not invent a second reviewer identity. No Review was written."
+    ].join("\n"));
+  }
+}
+
+interface ResolvedApprovalConsent {
+  readonly consumed: ConsentRecord;
+  readonly openDocumentSha256: string | null;
+}
+
+async function resolveApprovalConsent(input: {
+  readonly taskId: string;
+  readonly execution: ExecutionRecord;
+  readonly executionDocument: { readonly path: string; readonly body: string };
+  readonly documents: ReadonlyArray<{ readonly path: string; readonly body: string }>;
+  readonly reviewer: TaskHolderPrincipal;
+  readonly reviewerSession: CurrentSessionRef;
+  readonly reviewId: string;
+  readonly reviewedAt: string;
+  readonly consentId?: string;
+  readonly consentUtterance?: string;
+  readonly consentActions?: ReadonlyArray<ConsentAction>;
+  readonly consentTtlMs: number;
+  readonly nextConsentId: () => string;
+  readonly coordinator: WriteCoordinator;
+}): Promise<ResolvedApprovalConsent> {
+  if (input.consentUtterance) {
+    const consentId = input.nextConsentId();
+    if (input.documents.some((document) => document.path === `consents/${consentId}.md`)) {
+      throw new Error(`consent already exists: ${consentId}`);
+    }
+    const consumed = createConsentRecord({
+      consentId,
+      taskId: input.taskId,
+      execution: input.execution,
+      actor: input.reviewer,
+      session: input.reviewerSession,
+      utterance: input.consentUtterance,
+      actions: input.consentActions ?? DEFAULT_HUMAN_CONSENT_ACTIONS,
+      grantedAt: input.reviewedAt,
+      ttlMs: input.consentTtlMs,
+      state: "consumed",
+      consumedBy: `review/${input.taskId}/${input.reviewId}`,
+      consumedAt: input.reviewedAt
+    });
+    return {
+      consumed: Schema.decodeUnknownSync(consentDeclaration.schema)(consumed) as ConsentRecord,
+      openDocumentSha256: null
+    };
+  }
+
+  if (input.consentActions !== undefined) {
+    throw new Error("--consent-action is only valid when creating consent with --consent-utterance");
+  }
+  const consentId = input.consentId;
+  if (!consentId) throw new Error("approved review requires consent");
+  const consentDocument = input.documents.find((document) => document.path === `consents/${consentId}.md`);
+  if (!consentDocument) throw new Error(`consent not found: ${consentId}`);
+  const consent = decodeConsentDocument(consentDocument, input.taskId, consentId);
+  if (consent.state !== "open") {
+    throw new Error(`consent ${consent.consent_id} is ${consent.state} and cannot be replayed; ask the human again`);
+  }
+  const reviewedMs = Date.parse(input.reviewedAt);
+  const expiresMs = Date.parse(consent.expires_at);
+  if (!Number.isFinite(reviewedMs) || !Number.isFinite(expiresMs)) throw new Error(`consent ${consent.consent_id} has invalid timestamps`);
+  if (reviewedMs >= expiresMs) {
+    const expired = Schema.decodeUnknownSync(consentDeclaration.schema)({ ...consent, state: "expired" }) as ConsentRecord;
+    await Effect.runPromise(writeDeclaredEntityTransaction(
+      input.coordinator,
+      stablePayloadHash,
+      consentDeclaration,
+      { taskId: input.taskId, consentId: consent.consent_id },
+      expired,
+      [],
+      [
+        { taskId: input.taskId, path: input.executionDocument.path, bodySha256: sha256Text(input.executionDocument.body) },
+        { taskId: input.taskId, path: consentDocument.path, bodySha256: sha256Text(consentDocument.body) }
+      ]
+    ));
+    throw new Error(`consent ${consent.consent_id} expired at ${consent.expires_at}; ask the human again`);
+  }
+  if (consent.execution_ref !== `execution/${input.taskId}/${input.execution.execution_id}`) {
+    throw new Error(`consent ${consent.consent_id} is bound to a different execution`);
+  }
+  if (consent.principal.personId !== input.reviewer.principal.personId) {
+    throw new Error(`consent ${consent.consent_id} belongs to a different principal`);
+  }
+  if (!consent.scope.actions.includes("approve_execution")) {
+    throw new Error(`consent ${consent.consent_id} does not grant approve_execution`);
+  }
+  const currentPin = computeExecutionConsentPin(input.execution);
+  if (consent.scope.content_pin.digest !== currentPin) {
+    throw new Error([
+      `consent ${consent.consent_id} is bound to ${consent.scope.content_pin.digest}, but the current Execution is ${currentPin}`,
+      "Delivery changed after consent. Ask the human again; do not reuse the old consent or change HARNESS_ACTOR."
+    ].join("\n"));
+  }
+  const consumed = Schema.decodeUnknownSync(consentDeclaration.schema)({
+    ...consent,
+    state: "consumed",
+    consumed_by: `review/${input.taskId}/${input.reviewId}`,
+    consumed_at: input.reviewedAt
+  }) as ConsentRecord;
+  return { consumed, openDocumentSha256: sha256Text(consentDocument.body) };
+}
+
+function rejectUnexpectedConsent(input: {
+  readonly verdict: ReviewVerdict;
+  readonly consentId?: string;
+  readonly consentUtterance?: string;
+  readonly consentActions?: ReadonlyArray<ConsentAction>;
+}): null {
+  if (input.consentId || input.consentUtterance || input.consentActions !== undefined) {
+    throw new Error(`${input.verdict} review does not accept or consume human consent`);
+  }
+  return null;
 }
 
 function activeTaskIndex(
@@ -116,4 +308,14 @@ function activeTaskIndex(
   if (!body) throw new Error(`task INDEX.md missing: ${taskId}`);
   if (!/^  engine:\s*local$/mu.test(body)) throw new Error(`task is not local: ${taskId}`);
   return body.replace(/^(  status:\s*).+$/mu, "$1active");
+}
+
+function requiredDocumentBody(
+  documents: ReadonlyArray<{ readonly path: string; readonly body: string }>,
+  path: string,
+  taskId: string
+): string {
+  const body = documents.find((document) => document.path === path)?.body;
+  if (!body) throw new Error(`task document missing for ${taskId}: ${path}`);
+  return body;
 }

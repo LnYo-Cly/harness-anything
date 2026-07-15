@@ -1,5 +1,6 @@
 import type { EntityDeclaration } from "../entity/declaration.ts";
 import { executionDeclaration } from "../entity/execution-declaration.ts";
+import { consentDeclaration } from "../entity/consent-declaration.ts";
 import { reviewDeclaration } from "../entity/review-declaration.ts";
 import { sessionEntityDeclaration } from "../entity/session.ts";
 import { stablePayloadHash } from "../integrity/stable-hash.ts";
@@ -27,6 +28,7 @@ import type { DecisionProjectionRow } from "./types.ts";
 export const projectionEntityDeclarations = [
   sessionEntityDeclaration,
   executionDeclaration,
+  consentDeclaration,
   reviewDeclaration
 ] as const;
 

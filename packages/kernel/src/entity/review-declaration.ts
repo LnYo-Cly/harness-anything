@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { reviewVerdicts } from "../domain/review.ts";
+import { ConsentSnapshotSchema } from "./consent-declaration.ts";
 import { decodeEntityDeclaration, jsonEntityDocumentCodec } from "./declaration.ts";
 import {
   readyIdentityProjectionFacets,
@@ -20,7 +21,7 @@ const ReviewerActorSchema = Schema.Struct({
 });
 
 export const ReviewSchema = Schema.Struct({
-  schema: Schema.Literal("review/v2"),
+  schema: Schema.Literal("review/v3"),
   review_id: Schema.String.pipe(Schema.pattern(/^rev_[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$/u)),
   task_ref: Schema.String.pipe(Schema.pattern(/^task\/task_[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$/u)),
   execution_ref: Schema.String.pipe(Schema.pattern(/^execution\/task_[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}\/exe_[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$/u)),
@@ -28,6 +29,29 @@ export const ReviewSchema = Schema.Struct({
   reviewer_session_ref: Schema.String.pipe(Schema.pattern(/^session\/.+$/u)),
   findings: Schema.String.pipe(Schema.minLength(1)),
   evidence_checked: Schema.Array(Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u))),
+  rationale: Schema.String.pipe(Schema.minLength(1)),
+  verdict: Schema.Literal(...reviewVerdicts),
+  archive_warnings_acknowledged: Schema.Boolean,
+  approval_basis: Schema.NullOr(Schema.Union(
+    Schema.Struct({
+      kind: Schema.Literal("human-consent"),
+      consent_ref: Schema.String.pipe(Schema.pattern(/^consent\/task_[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}\/cns_[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$/u)),
+      consent_snapshot: ConsentSnapshotSchema
+    }),
+    Schema.Struct({ kind: Schema.Literal("legacy-unverified") })
+  )),
+  reviewed_at: Schema.String
+});
+
+const ReviewV2Schema = Schema.Struct({
+  schema: Schema.Literal("review/v2"),
+  review_id: Schema.String,
+  task_ref: Schema.String,
+  execution_ref: Schema.String,
+  reviewer_actor: ReviewerActorSchema,
+  reviewer_session_ref: Schema.String,
+  findings: Schema.String.pipe(Schema.minLength(1)),
+  evidence_checked: Schema.Array(Schema.String),
   rationale: Schema.String.pipe(Schema.minLength(1)),
   verdict: Schema.Literal(...reviewVerdicts),
   archive_warnings_acknowledged: Schema.Boolean,
@@ -50,9 +74,16 @@ const ReviewV1Schema = Schema.Struct({
 const reviewDocumentCodec = {
   decode: (body: string): unknown => {
     const raw = jsonEntityDocumentCodec.decode(body) as { readonly schema?: unknown };
-    if (raw.schema !== "review/v1") return raw;
-    const legacy = Schema.decodeUnknownSync(ReviewV1Schema)(raw);
-    return { ...legacy, schema: "review/v2", evidence_checked: [], rationale: legacy.findings };
+    if (raw.schema === "review/v3") return raw;
+    const legacy = raw.schema === "review/v2"
+      ? Schema.decodeUnknownSync(ReviewV2Schema)(raw)
+      : Schema.decodeUnknownSync(ReviewV1Schema)(raw);
+    return {
+      ...legacy,
+      schema: "review/v3",
+      ...(raw.schema === "review/v1" ? { evidence_checked: [], rationale: legacy.findings } : {}),
+      approval_basis: legacy.verdict === "approved" ? { kind: "legacy-unverified" } : null
+    };
   },
   encode: jsonEntityDocumentCodec.encode
 };
@@ -110,6 +141,7 @@ export const reviewDeclaration = decodeEntityDeclaration({
       { name: "evidence_checked_json", field: "evidence_checked", type: "json" },
       { name: "rationale", field: "rationale", type: "text" },
       { name: "archive_warnings_acknowledged", field: "archive_warnings_acknowledged", type: "boolean" },
+      { name: "approval_basis_json", field: "approval_basis", type: "json" },
       { name: "reviewed_at", field: "reviewed_at", type: "text" }
     ]
   }

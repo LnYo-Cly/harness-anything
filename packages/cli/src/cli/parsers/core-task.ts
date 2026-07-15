@@ -8,8 +8,8 @@ import { parseTaskContractMigrate } from "./core-task-contract.ts";
 import { parseExecutionSubmissionOptions } from "./core-task-execution.ts";
 import { parseTaskList } from "./core-task-list.ts";
 import { parseTaskReviewExecution } from "./core-task-review-execution.ts";
+import { parseTaskConsentRecord } from "./core-task-consent.ts";
 type ParseResult = { readonly ok: true; readonly value: ParsedCommand } | { readonly ok: false; readonly error: CliResult["error"] };
-
 export function parseCoreTaskArgs(args: ReadonlyArray<string>, rootDir: string, json: boolean): ParseResult | null {
   if (args[0] === "init") {
     const projectName = readRequiredValueOption(args, "--name");
@@ -34,6 +34,7 @@ export function parseCoreTaskArgs(args: ReadonlyArray<string>, rootDir: string, 
   if (args[0] === "task" && args[1] === "reopen" && args[2]) return parseTaskReopen(args, rootDir, json);
   if (args[0] === "task" && args[1] === "code-doc" && args[2] === "reconcile" && args[3]) return parseTaskCodeDocReconcile(args, rootDir, json);
   if (args[0] === "task" && args[1] === "review" && args[2]) return parseTaskReview(["task-review", ...args.slice(2)], rootDir, json);
+  if (args[0] === "task" && args[1] === "consent-record" && args[2]) return parseTaskConsentRecord(args, rootDir, json);
   if (args[0] === "task" && args[1] === "review-execution" && args[2]) return parseTaskReviewExecution(args, rootDir, json);
   if (args[0] === "task-review" && args[1]) return parseTaskReview(args, rootDir, json);
   if (args[0] === "task" && args[1] === "complete" && args[2]) return parseTaskComplete(["task-complete", ...args.slice(2)], rootDir, json);

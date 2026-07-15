@@ -39,6 +39,13 @@ export interface DeclaredEntityDocumentWritePayload {
     readonly blobBody?: string;
   };
   readonly companionWrites?: ReadonlyArray<DocumentWrite>;
+  readonly preconditions?: ReadonlyArray<DeclaredEntityDocumentPrecondition>;
+}
+
+export interface DeclaredEntityDocumentPrecondition {
+  readonly taskId: DocumentWrite["taskId"];
+  readonly path: string;
+  readonly bodySha256: string | null;
 }
 
 export function writeDeclaredEntityTransaction(
@@ -47,7 +54,8 @@ export function writeDeclaredEntityTransaction(
   declaration: EntityDeclaration,
   identity: Readonly<Record<string, string>>,
   value: unknown,
-  companionWrites: ReadonlyArray<DocumentWrite>
+  companionWrites: ReadonlyArray<DocumentWrite>,
+  preconditions: ReadonlyArray<DeclaredEntityDocumentPrecondition> = []
 ): Effect.Effect<void, WriteError> {
   const decoded = Schema.decodeUnknownSync(declaration.schema)(value) as Readonly<Record<string, unknown>>;
   const identityKey = declaration.rootResolver.identity.at(-1)!;
@@ -64,7 +72,8 @@ export function writeDeclaredEntityTransaction(
         identity,
         body: declaration.documentCodec.encode(decoded)
       },
-      companionWrites
+      companionWrites,
+      preconditions
     } satisfies DeclaredEntityDocumentWritePayload
   });
 }

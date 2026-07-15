@@ -208,11 +208,11 @@ function actorClaims(): ActorAxesBindingClaimsV2 {
 
 function reviewRecord(): ReviewRecord {
   return {
-    schema: "review/v2", review_id: reviewId, task_ref: `task/${taskId}`, execution_ref: `execution/${taskId}/${executionId}`,
+    schema: "review/v3", review_id: reviewId, task_ref: `task/${taskId}`, execution_ref: `execution/${taskId}/${executionId}`,
     reviewer_actor: { principal: { personId: "person_reviewer" }, executor: { kind: "agent", id: "agent_reviewer" }, responsibleHuman: "person_reviewer" },
     reviewer_session_ref: "session/reviewer-w4", findings: "Typed review findings.", evidence_checked: [],
-    rationale: "The exact evidence supports this verdict.", verdict: "approved", archive_warnings_acknowledged: true,
-    reviewed_at: "2026-07-14T00:15:00.000Z"
+    rationale: "The exact evidence supports this verdict.", verdict: "changes_requested", archive_warnings_acknowledged: true,
+    reviewed_at: "2026-07-14T00:15:00.000Z", approval_basis: null
   };
 }
 

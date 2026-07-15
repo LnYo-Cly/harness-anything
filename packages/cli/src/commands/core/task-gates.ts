@@ -10,14 +10,14 @@ import { docSyncDirtyWarnings } from "./doc-sync.ts";
 import { bundledTaskDocumentPlaceholderPolicy } from "./task-document-placeholders.ts";
 import { taskTreeSoftGateWarnings } from "./task-lifecycle.ts";
 import { runExecutionReview } from "./task-execution-review.ts";
+import { runExecutionConsent } from "./task-execution-consent.ts";
 import { milestoneDecisionLineageFailure } from "./task-lineage-gate.ts";
 import { resolvePreset, selectPresetProfile } from "../extensions/state.ts";
-
-type TaskGateAction = Extract<Parameters<CommandRunner>[1]["action"], { readonly kind: "task-code-doc-reconcile" | "task-review" | "task-review-execution" | "task-complete" }>;
-
+type TaskGateAction = Extract<Parameters<CommandRunner>[1]["action"], { readonly kind: "task-code-doc-reconcile" | "task-review" | "task-consent-record" | "task-review-execution" | "task-complete" }>;
 export const runTaskGatesCommand: CommandRunner = (context, command) => {
   const action = command.action as TaskGateAction;
   if (action.kind === "task-code-doc-reconcile") return runTaskCodeDocReconcile(context, action);
+  if (action.kind === "task-consent-record") return runExecutionConsent(context, action);
   if (action.kind === "task-review-execution") return runExecutionReview(context, action);
   const orchestrator = makeTaskLifecycleOrchestrator({
     rootDir: context.rootDir,

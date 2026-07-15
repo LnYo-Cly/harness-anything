@@ -217,8 +217,8 @@ test("fixture declarations resolve, coordinate writes, and project hosted and co
   });
 });
 
-test("entity registry derives all eight canonical kinds from one source", () => {
-  assert.deepEqual(entityRegistryKinds, ["task", "decision", "fact", "relation", "module", "session", "execution", "review"]);
+test("entity registry derives all nine canonical kinds from one source", () => {
+  assert.deepEqual(entityRegistryKinds, ["task", "decision", "fact", "relation", "module", "session", "execution", "consent", "review"]);
   assert.deepEqual(Object.keys(entityRegistry).sort(), [...entityRegistryKinds].sort());
   assert.equal(entityRegistry.session.storageForm, "composite-manifest-blob");
   assert.equal(entityRegistry.decision.storageForm, "lifecycle");
@@ -226,6 +226,7 @@ test("entity registry derives all eight canonical kinds from one source", () => 
   assert.equal(entityRegistry.fact.storageForm, "schema");
   assert.equal(entityRegistry.relation.storageForm, "host_frontmatter");
   assert.equal(entityRegistry.execution.storageForm, "hosted-entity");
+  assert.equal(entityRegistry.consent.storageForm, "hosted-entity");
   assert.equal(entityRegistry.review.storageForm, "hosted-entity");
   assert.equal(entityRegistry.decision.dispositionMatrix.entries["hard-delete"].supported, false);
   assert.equal(entityRegistry.fact.dispositionMatrix.entries.invalidate.supported, true);
@@ -233,7 +234,7 @@ test("entity registry derives all eight canonical kinds from one source", () => 
   assert.equal(Object.keys(entityRegistry.fact.mutabilityContract).includes("statement"), true);
 });
 
-test("all eight identity codecs and storage locators are total without standalone hosted files", () => {
+test("all nine identity codecs and storage locators are total without standalone hosted files", () => {
   const fixtures = [
     ["task", { taskId: "task_T" }, "task/task_T", {}, "tasks/task_T"],
     ["decision", { decisionId: "dec_D" }, "decision/dec_D", {}, "decisions/decision-dec_D/decision.md"],
@@ -242,6 +243,7 @@ test("all eight identity codecs and storage locators are total without standalon
     ["module", { moduleKey: "software/coding" }, "module/software%2Fcoding", {}, "modules.json"],
     ["session", { sessionId: "session_S" }, "session/session_S", {}, "sessions/session_S.md"],
     ["execution", { taskId: "task_T", executionId: "exe_E" }, "execution/task_T/exe_E", {}, "tasks/task_T/executions/exe_E.md"],
+    ["consent", { taskId: "task_T", consentId: "cns_C" }, "consent/task_T/cns_C", {}, "tasks/task_T/consents/cns_C.md"],
     ["review", { taskId: "task_T", reviewId: "rev_R" }, "review/task_T/rev_R", {}, "tasks/task_T/reviews/rev_R.md"]
   ] as const;
 
@@ -265,6 +267,7 @@ test("writable registration fails closed when any required facet is missing or d
     module: "module/software%2Fcoding",
     session: "session/session_S",
     execution: "execution/task_T/exe_E",
+    consent: "consent/task_T/cns_C",
     review: "review/task_T/rev_R"
   };
   const complete = writableRegistration("fact");
@@ -289,7 +292,7 @@ test("writable registration fails closed when any required facet is missing or d
       entityRegistry[kind] as EntityRegistration<string, KernelEntityKind>
     ]));
   }
-  for (const kind of ["session", "execution", "review"] as const) {
+  for (const kind of ["session", "execution", "consent", "review"] as const) {
     assert.equal(entityRegistry[kind].semanticDiff.status, "typed-only");
   }
 });

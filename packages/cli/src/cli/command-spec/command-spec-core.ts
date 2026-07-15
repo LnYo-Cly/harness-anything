@@ -382,11 +382,28 @@ export const coreCommandSpecs = defineCommandSpecs([
     }
   },
   {
+    "kind": "task-consent-record",
+    "usage": "task consent-record <id> --execution-id <execution-id> --utterance <text> [--consent-action approve_execution] [--consent-action complete_task]",
+    "options": [{"flag":"--execution-id","description":"Bind consent to this exact submitted Execution."},{"flag":"--utterance","description":"Record the human's exact approval words."},{"flag":"--consent-action","description":"Grant approve_execution and optionally complete_task; repeat for both. Defaults to both actions."}],
+    "summary": "Record a principal-bound, content-pinned human consent as an independent consumable entity.",
+    "examples": ["harness-anything task consent-record task_01ABC --execution-id exe_01ABC --utterance \"Approved\""],
+    "parse": parseCoreTaskArgs,
+    "run": runTaskGatesCommand,
+    "receiptContract": {
+      "data": ["taskId", "executionId", "consentId", "report"],
+      "paths": []
+    },
+    "eventPolicy": {
+      "conflictMarkerPreflight": true,
+      "runtimeEvent": "auto"
+    }
+  },
+  {
     "kind": "task-review-execution",
-    "usage": "task review-execution <id> --execution-id <execution-id> --verdict approved|changes_requested|dismissed --findings <text> --rationale <text> [--evidence-checked <id>]... [--acknowledge-archive-warnings]",
-    "options": [{"flag":"--execution-id","description":"Review the exact submitted Execution."},{"flag":"--verdict","description":"Set approved, changes_requested, or dismissed."},{"flag":"--findings","description":"Record findings for this Review round."},{"flag":"--evidence-checked","description":"Record an inspected OutputEvidence id; repeat as needed."},{"flag":"--rationale","description":"Record the Reviewer's semantic rationale."},{"flag":"--acknowledge-archive-warnings","description":"Explicitly acknowledge partial or unavailable Session archives."}],
-    "summary": "Create an immutable Review round for one submitted Execution.",
-    "examples": ["harness-anything task review-execution task_01ABC --execution-id exe_01ABC --verdict approved --findings \"Acceptance checks passed\" --rationale \"Evidence satisfies the Task intent\""],
+    "usage": "task review-execution <id> --execution-id <execution-id> --verdict approved|changes_requested|dismissed --findings <text> --rationale <text> [--consent <consent-id>|--consent-utterance <text>] [--consent-action approve_execution] [--consent-action complete_task] [--evidence-checked <id>]... [--acknowledge-archive-warnings]",
+    "options": [{"flag":"--execution-id","description":"Review the exact submitted Execution."},{"flag":"--verdict","description":"Set approved, changes_requested, or dismissed."},{"flag":"--findings","description":"Record findings for this Review round."},{"flag":"--consent","description":"Consume an existing open consent for approved verdicts."},{"flag":"--consent-utterance","description":"Record and consume the human's exact words in the same approved Review transaction."},{"flag":"--consent-action","description":"When using --consent-utterance, grant approve_execution and optionally complete_task; defaults to both."},{"flag":"--evidence-checked","description":"Record an inspected OutputEvidence id; repeat as needed."},{"flag":"--rationale","description":"Record the Reviewer's semantic rationale."},{"flag":"--acknowledge-archive-warnings","description":"Explicitly acknowledge partial or unavailable Session archives."}],
+    "summary": "Create an immutable Review round; approved verdicts require content-pinned human consent, while executor identity never substitutes for consent.",
+    "examples": ["harness-anything task review-execution task_01ABC --execution-id exe_01ABC --verdict approved --findings \"Acceptance checks passed\" --rationale \"Evidence satisfies the Task intent\" --consent-utterance \"Approved\""],
     "parse": parseCoreTaskArgs,
     "run": runTaskGatesCommand,
     "receiptContract": {

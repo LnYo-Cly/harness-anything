@@ -6,6 +6,7 @@ export const canonicalEntityKinds = [
   "module",
   "session",
   "execution",
+  "consent",
   "review"
 ] as const;
 

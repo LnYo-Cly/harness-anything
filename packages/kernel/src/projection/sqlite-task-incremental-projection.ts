@@ -544,7 +544,7 @@ function isDeclaredEntityFile(authoredRoot: string, filePath: string): boolean {
   if (!isPathWithin(authoredRoot, filePath)) return false;
   const relative = path.relative(realPathIfExists(authoredRoot), realPathIfExists(filePath)).split(path.sep).join("/");
   return /^sessions\/[^/]+\.md$/u.test(relative) ||
-    /^tasks\/[^/]+\/(?:executions|reviews)\/[^/]+\.md$/u.test(relative);
+    /^tasks\/[^/]+\/(?:executions|consents|reviews)\/[^/]+\.md$/u.test(relative);
 }
 
 function isPathWithin(parent: string, child: string): boolean {

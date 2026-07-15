@@ -125,7 +125,8 @@ export function seedApprovedExecution(rootDir: string, taskId: string, id: strin
     "--execution-id", id,
     "--verdict", "approved",
     "--findings", "All acceptance checks passed.",
-    "--rationale", "The submitted Execution satisfies the Task intent."
+    "--rationale", "The submitted Execution satisfies the Task intent.",
+    "--consent-utterance", "Approved"
   ], true, testActorEnv);
   assert.equal(reviewed.executionId, id);
 }

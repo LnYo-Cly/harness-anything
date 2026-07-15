@@ -146,7 +146,7 @@ test("review create/dismiss/record compile immutable hosted review documents wit
   const cases: ReadonlyArray<{ readonly schema: ReviewActionPayloadV2["schema"]; readonly verdict: ReviewRecord["verdict"]; readonly action: string }> = [
     { schema: "review.create/v1", verdict: "changes_requested", action: "create" },
     { schema: "review.dismiss/v1", verdict: "dismissed", action: "dismiss" },
-    { schema: "review.record/v1", verdict: "approved", action: "record" }
+    { schema: "review.record/v1", verdict: "changes_requested", action: "record" }
   ];
   for (const fixture of cases) {
     const review = reviewRecord(fixture.verdict);
@@ -160,6 +160,17 @@ test("review create/dismiss/record compile immutable hosted review documents wit
     assert.deepEqual(planned.storagePlan.touchedPaths, [`tasks/${taskId}/reviews/${reviewId}.md`]);
     assert.equal(operationDocument(compiled.operation.payload).identity.reviewId, reviewId);
   }
+});
+
+test("authority review writes cannot bypass the consent-aware approved Review transaction", async () => {
+  const reviewRef = ref("review", `review/${taskId}/${reviewId}`);
+  const compiler = makeSessionExecutionReviewSemanticCompilerV2({ state: authorityState() });
+  await assert.rejects(
+    compiler.compile(envelope({
+      schema: "review.record/v1", taskId, review: reviewRecord("approved")
+    }, [absent(reviewRef)])),
+    /REVIEW_APPROVAL_REQUIRES_CONSENT_TRANSACTION/u
+  );
 });
 
 test("every W4 action is independently disabled at the named registry boundary", () => {
@@ -201,7 +212,7 @@ test("transparent save and generic doc-sync reject all W4 machine-owned surfaces
 });
 
 test("canonical payload and registry mutation digests are deterministic", async () => {
-  const payload: ReviewActionPayloadV2 = { schema: "review.record/v1", taskId, review: reviewRecord("approved") };
+  const payload: ReviewActionPayloadV2 = { schema: "review.record/v1", taskId, review: reviewRecord("changes_requested") };
   const reordered = { review: payload.review, taskId: payload.taskId, schema: payload.schema } as ReviewActionPayloadV2;
   assert.deepEqual(encodeSessionExecutionReviewCommandPayloadV2(payload), encodeSessionExecutionReviewCommandPayloadV2(reordered));
   const compiler = makeSessionExecutionReviewSemanticCompilerV2({ state: authorityState() });
@@ -300,14 +311,14 @@ function executionRecord(state: ExecutionRecord["state"]): ExecutionRecord {
 
 function reviewRecord(verdict: ReviewRecord["verdict"]): ReviewRecord {
   return {
-    schema: "review/v2", review_id: reviewId, task_ref: `task/${taskId}`,
+    schema: "review/v3", review_id: reviewId, task_ref: `task/${taskId}`,
     execution_ref: `execution/${taskId}/${executionId}`,
     reviewer_actor: {
       principal: { personId: "person_reviewer" }, executor: { kind: "agent", id: "agent_reviewer" }, responsibleHuman: "person_reviewer"
     },
     reviewer_session_ref: "session/reviewer-w4", findings: "Typed review findings.",
     evidence_checked: ["evidence:w4"], rationale: "The exact evidence supports this verdict.", verdict,
-    archive_warnings_acknowledged: true, reviewed_at: "2026-07-14T00:15:00.000Z"
+    archive_warnings_acknowledged: true, reviewed_at: "2026-07-14T00:15:00.000Z", approval_basis: null
   };
 }
 

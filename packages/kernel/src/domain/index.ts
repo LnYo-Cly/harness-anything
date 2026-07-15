@@ -4,6 +4,13 @@ export type { Task, TaskIdentity, TaskId, EngineId, ExternalRef, IsoTimestamp, S
 export { reviewVerdicts } from "./review.ts";
 export type { ReviewRecord, ReviewVerdict } from "./review.ts";
 
+export { consentActions } from "./consent.ts";
+export type {
+  ConsentAction,
+  ConsentRecord,
+  ConsentSnapshot
+} from "./consent.ts";
+
 export { isPriorityTier, isTaskWorkKind, priorityTiers, taskWorkKinds } from "./task-metadata.ts";
 export type { PriorityTier, TaskWorkKind } from "./task-metadata.ts";
 

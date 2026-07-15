@@ -16,7 +16,7 @@ const actor = {
 
 function review(verdict: unknown) {
   return {
-    schema: "review/v2",
+    schema: "review/v3",
     review_id: "rev_01J00000000000000000000000",
     task_ref: "task/task_01J00000000000000000000000",
     execution_ref: "execution/task_01J00000000000000000000000/exe_01J00000000000000000000000",
@@ -27,6 +27,7 @@ function review(verdict: unknown) {
     rationale: "The submitted round satisfies the acceptance criteria.",
     verdict,
     archive_warnings_acknowledged: false,
+    approval_basis: verdict === "approved" ? { kind: "legacy-unverified" } : null,
     reviewed_at: "2026-07-11T00:00:00.000Z"
   };
 }
@@ -55,10 +56,12 @@ test("review/v1 reads upgrade with reviewer rationale and malformed legacy fails
   const decode = (value: unknown) => Schema.decodeUnknownSync(reviewDeclaration.schema)(
     reviewDeclaration.documentCodec.decode(JSON.stringify(value))
   );
-  const legacy = { ...review("approved"), schema: "review/v1" };
+  const { evidence_checked: _evidenceChecked, rationale: _rationale, approval_basis: _approvalBasis, ...current } = review("approved");
+  const legacy = { ...current, schema: "review/v1" };
   const upgraded = decode(legacy);
-  assert.equal(upgraded.schema, "review/v2");
+  assert.equal(upgraded.schema, "review/v3");
   assert.deepEqual(upgraded.evidence_checked, []);
   assert.equal(upgraded.rationale, legacy.findings);
+  assert.deepEqual(upgraded.approval_basis, { kind: "legacy-unverified" });
   assert.throws(() => decode({ ...legacy, findings: "" }));
 });

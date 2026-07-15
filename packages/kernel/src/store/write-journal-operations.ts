@@ -22,6 +22,7 @@ import {
 } from "./content-addressed-blob-store.ts";
 import { sha256Text } from "../integrity/stable-hash.ts";
 import { assertReservedCodeDocWrite } from "./write-journal-code-doc-policy.ts";
+import { assertDeclaredEntityPreconditions, declaredEntityPreconditions } from "./declared-entity-preconditions.ts";
 import {
   prepareRetiredAttributionFieldCleanup,
   retiredAttributionFieldCleanupTargetPath
@@ -90,6 +91,7 @@ export function writeTransactionPlan(op: WriteOp): WriteTransactionPlan {
   }
   if (op.kind === "doc_write" && hasDeclaredEntityDocument(op.payload)) {
     const companionWrites = declaredEntityCompanionWrites(op.payload);
+    const preconditions = declaredEntityPreconditions(op.payload);
     return {
       touchedPaths: (rootInput) => [
         ...declaredEntityTouchedPaths(rootInput, op),
@@ -97,6 +99,7 @@ export function writeTransactionPlan(op: WriteOp): WriteTransactionPlan {
       ],
       documentWrites: () => companionWrites,
       apply: (rootInput) => {
+        assertDeclaredEntityPreconditions(rootInput, preconditions, op, bodySha256AtPath);
         const document = declaredEntityDocument(rootInput, op);
         if (document.blobBody !== undefined && document.blobRef) {
           writeContentAddressedBlob(rootInput, document.blobBody, document.blobRef.mediaType);
@@ -106,6 +109,7 @@ export function writeTransactionPlan(op: WriteOp): WriteTransactionPlan {
       },
       validate: (rootInput) => {
         declaredEntityDocument(rootInput, op);
+        assertDeclaredEntityPreconditions(rootInput, preconditions, op, bodySha256AtPath);
       }
     };
   }
@@ -335,6 +339,10 @@ function declaredEntityCompanionWrites(payload: DeclaredEntityDocumentWritePaylo
     rejectWrite("declared entity companionWrites must be document writes");
   }
   return writes;
+}
+
+function bodySha256AtPath(targetPath: string): string | null {
+  return existsSync(targetPath) ? sha256Text(readFileSync(targetPath, "utf8")) : null;
 }
 
 function declaredEntityDocument(
