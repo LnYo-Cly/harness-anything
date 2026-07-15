@@ -81,7 +81,7 @@ test("all W4 actions publish exact refs through one composite/hosted op with cro
       { payload: { schema: "execution.close/v1", taskId, execution: accepted }, ref: ref("execution", `execution/${taskId}/${executionId}`), action: "close", path: `tasks/${taskId}/executions/${executionId}.md` },
       ...(["create", "dismiss", "record"] as const).map((action, index) => {
         const id = reviewId(index);
-        const verdict = action === "dismiss" ? "dismissed" : action === "record" ? "approved" : "changes_requested";
+        const verdict = action === "dismiss" ? "dismissed" : "changes_requested";
         return {
           payload: { schema: `review.${action}/v1`, taskId, review: reviewRecord(id, verdict) } as SessionExecutionReviewCommandPayloadV2,
           ref: ref("review", `review/${taskId}/${id}`), action,
@@ -373,11 +373,11 @@ function reviewId(index: number): string {
 
 function reviewRecord(id: string, verdict: ReviewRecord["verdict"]): ReviewRecord {
   return {
-    schema: "review/v2", review_id: id, task_ref: `task/${taskId}`, execution_ref: `execution/${taskId}/${executionId}`,
+    schema: "review/v3", review_id: id, task_ref: `task/${taskId}`, execution_ref: `execution/${taskId}/${executionId}`,
     reviewer_actor: { principal: { personId: "person_reviewer" }, executor: { kind: "agent", id: "agent_reviewer" }, responsibleHuman: "person_reviewer" },
     reviewer_session_ref: "session/reviewer-w4", findings: "Typed review findings.", evidence_checked: ["evidence:w4"],
     rationale: "The exact evidence supports this verdict.", verdict, archive_warnings_acknowledged: true,
-    reviewed_at: "2026-07-14T00:15:00.000Z"
+    reviewed_at: "2026-07-14T00:15:00.000Z", approval_basis: null
   };
 }
 

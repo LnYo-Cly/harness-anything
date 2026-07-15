@@ -161,6 +161,10 @@ async function compileReview(
   const action = reviewAction(payload.schema);
   const review = payload.review;
   assertReviewIdentity(payload.taskId, review);
+  if (review.verdict === "approved") {
+    throw admission("REVIEW_APPROVAL_REQUIRES_CONSENT_TRANSACTION");
+  }
+  if (review.approval_basis !== null) throw admission("REVIEW_NON_APPROVAL_BASIS_FORBIDDEN");
   if (action === "dismiss" && review.verdict !== "dismissed") throw admission("REVIEW_DISMISS_VERDICT_REQUIRED");
   if (action === "record" && review.verdict === "dismissed") throw admission("REVIEW_RECORD_VERDICT_REQUIRED");
   const path = storagePath("review", { taskId: payload.taskId, reviewId: review.review_id });

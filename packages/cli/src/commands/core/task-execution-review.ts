@@ -23,7 +23,10 @@ export function runExecutionReview(context: Parameters<CommandRunner>[0], action
         evidenceChecked: action.evidenceChecked,
         rationale: action.rationale,
         verdict: action.verdict,
-        archiveWarningsAcknowledged: action.archiveWarningsAcknowledged
+        archiveWarningsAcknowledged: action.archiveWarningsAcknowledged,
+        consentId: action.consentId,
+        consentUtterance: action.consentUtterance,
+        consentActions: action.consentActions
       }),
       catch: (error) => error
     })),

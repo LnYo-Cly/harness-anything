@@ -31,7 +31,16 @@ test("CLI exposes the projection-backed session execution task review and audit 
     const review = runJson(rootDir, ["review", "show", reviewId]).report.review;
     assert.equal(review.verdict, "approved");
     assert.deepEqual(review.attribution, unresolvedAttribution());
-    assert.equal(runJson(rootDir, ["audit", "provenance", "--task", taskId]).report.audit.coverage, "complete");
+    const audit = runJson(rootDir, ["audit", "provenance", "--task", taskId]).report.audit;
+    assert.equal(audit.coverage, "incomplete");
+    assert.deepEqual(audit.findings, [{
+      coverage: "partial",
+      kind: "review_executor_differs_from_delivery_without_consent_ref",
+      taskId,
+      reviewId,
+      executionId,
+      detail: `Review ${reviewId} uses a different executor than delivery ${executionId} but has no human consent reference; history was not rewritten.`
+    }]);
   });
 });
 
@@ -82,7 +91,7 @@ function writeEntities(rootDir: string): void {
     state: "submitted",
     primary_actor: {
       principal: { personId: "person:test" },
-      executor: { kind: "agent", id: "agent:test" },
+      executor: null,
       responsibleHuman: "person:test"
     },
     claimed_at: "2026-07-11T01:00:00.000Z",
@@ -113,7 +122,7 @@ function writeEntities(rootDir: string): void {
     execution_ref: `execution/${taskId}/${executionId}`,
     reviewer_actor: {
       principal: { personId: "person:reviewer" },
-      executor: null,
+      executor: { kind: "agent", id: "agent:test" },
       responsibleHuman: "person:reviewer"
     },
     reviewer_session_ref: `session/${sessionId}`,

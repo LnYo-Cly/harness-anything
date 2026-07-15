@@ -326,7 +326,7 @@ export function readTaskProjection(options: TaskProjectionOptions): ProjectionRe
           "generated-cache",
           "projection_stale",
           "Declared entity projection changes were refreshed incrementally.",
-          "No full projection rebuild is required for isolated session, execution, or review changes."
+          "No full projection rebuild is required for isolated session, execution, consent, or review changes."
         ));
         return { rows: [...existing.rows].sort(compareRows), warnings };
       } catch {

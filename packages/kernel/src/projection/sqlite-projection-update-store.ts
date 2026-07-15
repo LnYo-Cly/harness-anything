@@ -182,5 +182,6 @@ const attributionEntityIdColumns = new Map([
   ["decision_projection", "decision_id"],
   ["session_projection", "session_id"],
   ["execution_projection", "execution_id"],
+  ["consent_projection", "consent_id"],
   ["review_projection", "review_id"]
 ]);

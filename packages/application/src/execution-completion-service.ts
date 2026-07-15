@@ -1,17 +1,21 @@
 import { Effect, Schema } from "effect";
 import {
+  computeExecutionConsentPin,
+  consentDeclaration,
   executionDeclaration,
   reviewDeclaration,
+  sha256Text,
   stablePayloadHash,
   writeDeclaredEntityTransaction,
   type ArtifactStore,
+  type ConsentRecord,
   type ExecutionRecord,
   type HarnessLayoutInput,
   type ReviewRecord,
   type TaskHolderPrincipal,
   type WriteCoordinator
 } from "../../kernel/src/index.ts";
-import { assertExecutionTaskInReview, executionActorsShareExecutor, executionHasArchiveWarnings } from "./execution-review-helpers.ts";
+import { assertExecutionTaskInReview, executionHasArchiveWarnings } from "./execution-review-helpers.ts";
 
 export interface ExecutionCompletionService {
   readonly inspectTaskExecutionCompletion?: (input: {
@@ -29,7 +33,6 @@ export interface ExecutionCompletionReadinessIssue {
   readonly code:
     | "execution_submission_required"
     | "execution_task_not_in_review"
-    | "execution_actor_cannot_complete"
     | "execution_review_required"
     | "archive_warnings_acknowledgement_required";
   readonly message: string;
@@ -67,11 +70,24 @@ export function makeExecutionCompletionService(options: {
         executionDeclaration,
         { taskId, executionId: execution.execution_id },
         { ...execution, state: "accepted", closed_at: completedAt },
-        [{ taskId, path: "INDEX.md", body: completedTaskIndex(task.documents, taskId) }]
+        [{ taskId, path: "INDEX.md", body: completedTaskIndex(task.documents, taskId) }],
+        completionPreconditions(task.documents, taskId)
       ));
       return { executionId: execution.execution_id };
     }
   };
+}
+
+function completionPreconditions(
+  documents: ReadonlyArray<{ readonly path: string; readonly body: string }>,
+  taskId: string
+): ReadonlyArray<{ readonly taskId: string; readonly path: string; readonly bodySha256: string }> {
+  return documents
+    .filter((document) => document.path === "INDEX.md"
+      || /^executions\/[^/]+\.md$/u.test(document.path)
+      || /^reviews\/[^/]+\.md$/u.test(document.path)
+      || /^consents\/[^/]+\.md$/u.test(document.path))
+    .map((document) => ({ taskId, path: document.path, bodySha256: sha256Text(document.body) }));
 }
 
 export function inspectExecutionCompletionReadiness(input: {
@@ -124,13 +140,6 @@ function resolveExecutionCompletionReadiness(input: {
       message: error instanceof Error ? error.message : String(error)
     });
   }
-  if (executionActorsShareExecutor(execution.primary_actor.executor, input.actor.executor)) {
-    issues.push({
-      code: "execution_actor_cannot_complete",
-      message: `Execution executor cannot complete its own delivery: ${execution.execution_id}. Use a different authenticated executor.`
-    });
-  }
-
   const reviews = input.documents
     .filter((document) => /^reviews\/[^/]+\.md$/u.test(document.path))
     .map((document) => {
@@ -147,12 +156,12 @@ function resolveExecutionCompletionReadiness(input: {
     review.task_ref === `task/${input.taskId}` &&
     review.execution_ref === executionRef &&
     review.verdict === "approved" &&
-    !executionActorsShareExecutor(execution.primary_actor.executor, review.reviewer_actor.executor)
+    reviewHasCompletionConsent(review, execution, input.documents, input.taskId)
   );
   if (approved.length === 0) {
     issues.push({
       code: "execution_review_required",
-      message: `Submitted Execution ${execution.execution_id} requires at least one approved Review from a different executor.`
+      message: `Submitted Execution ${execution.execution_id} requires an approved Review backed by consumed human consent that grants complete_task and matches the current content pin. Changing HARNESS_ACTOR or executor identity does not satisfy this gate.`
     });
   } else if (executionHasArchiveWarnings(execution) && !approved.some((review) => review.archive_warnings_acknowledged)) {
     issues.push({
@@ -162,6 +171,51 @@ function resolveExecutionCompletionReadiness(input: {
   }
 
   return { ok: issues.length === 0, executionId: execution.execution_id, execution, issues };
+}
+
+function reviewHasCompletionConsent(
+  review: ReviewRecord,
+  execution: ExecutionRecord,
+  documents: ReadonlyArray<{ readonly path: string; readonly body: string }>,
+  taskId: string
+): boolean {
+  const basis = review.approval_basis;
+  if (!basis || basis.kind !== "human-consent") return false;
+  const consentRef = basis.consent_ref.match(/^consent\/(task_[^/]+)\/(cns_[^/]+)$/u);
+  const consentId = consentRef?.[2];
+  if (!consentId || consentRef?.[1] !== taskId) return false;
+  const document = documents.find((candidate) => candidate.path === `consents/${consentId}.md`);
+  if (!document) return false;
+  let consent: ConsentRecord;
+  try {
+    consent = Schema.decodeUnknownSync(consentDeclaration.schema)(
+      consentDeclaration.documentCodec.decode(document.body)
+    ) as ConsentRecord;
+  } catch {
+    return false;
+  }
+  const reviewRef = `review/${taskId}/${review.review_id}`;
+  const currentPin = computeExecutionConsentPin(execution);
+  return consent.task_ref === `task/${taskId}`
+    && consent.execution_ref === `execution/${taskId}/${execution.execution_id}`
+    && consent.state === "consumed"
+    && consent.consumed_by === reviewRef
+    && consent.scope.actions.includes("complete_task")
+    && basis.consent_snapshot.scope.actions.includes("complete_task")
+    && consent.scope.content_pin.digest === currentPin
+    && basis.consent_snapshot.scope.content_pin.digest === currentPin
+    && consent.principal.personId === review.reviewer_actor.principal.personId
+    && basis.consent_snapshot.principal.personId === consent.principal.personId
+    && stablePayloadHash(basis.consent_snapshot) === stablePayloadHash({
+      principal: consent.principal,
+      scope: consent.scope,
+      disclosure: consent.disclosure,
+      channel: consent.channel,
+      response: consent.response,
+      recorded_by: consent.recorded_by,
+      granted_at: consent.granted_at,
+      expires_at: consent.expires_at
+    });
 }
 
 function completedTaskIndex(documents: ReadonlyArray<{ readonly path: string; readonly body: string }>, taskId: string): string {

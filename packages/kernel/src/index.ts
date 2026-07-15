@@ -7,6 +7,7 @@ export type {
   OutputEvidence
 } from "./domain/execution.ts";
 export { executionDeclaration } from "./entity/execution-declaration.ts";
+export { consentDeclaration } from "./entity/consent-declaration.ts";
 export { reviewDeclaration } from "./entity/review-declaration.ts";
 export * from "./entity/disposition.ts";
 export * from "./entity/field-contracts.ts";
@@ -49,6 +50,7 @@ export {
 export type { SessionManifest } from "./schemas/session-manifest.ts";
 export { resolveEntityDocumentPath, writeDeclaredEntityTransaction } from "./entity/declaration.ts";
 export { sha256Text, stablePayloadHash, stableStringify } from "./integrity/stable-hash.ts";
+export { computeExecutionConsentPin } from "./integrity/execution-consent-pin.ts";
 export {
   actorAxesBindingCoreDigestV2,
   actorAxesBindingCoreV2Domain

@@ -480,17 +480,17 @@ test("Review rounds append, require archive-warning acknowledgement, and dismiss
       executionId,
       reviewer: aliceCodex,
       reviewerSession: session,
-      findings: "Self review is not allowed.",
+      findings: "Human consent is required.",
       evidenceChecked: [],
       rationale: "Self review is prohibited.",
       verdict: "approved",
       archiveWarningsAcknowledged: true
-    }), /executor cannot review its own delivery/u);
+    }), /Keep HARNESS_ACTOR unchanged/u);
 
     await assert.rejects(service.reviewExecution({
       taskId,
       executionId,
-      reviewer: aliceClaude,
+      reviewer: aliceCodex,
       reviewerSession: session,
       findings: "Archive is partial.",
       evidenceChecked: [],
@@ -513,13 +513,14 @@ test("Review rounds append, require archive-warning acknowledgement, and dismiss
     const approved = await service.reviewExecution({
       taskId,
       executionId,
-      reviewer: aliceClaude,
+      reviewer: aliceCodex,
       reviewerSession: session,
       findings: "The delivery is acceptable.",
       evidenceChecked: [],
       rationale: "Acceptance criteria are satisfied.",
       verdict: "approved",
-      archiveWarningsAcknowledged: true
+      archiveWarningsAcknowledged: true,
+      consentUtterance: "Approved"
     });
 
     assert.equal(dismissed.review.review_id, firstReviewId);
@@ -533,7 +534,7 @@ test("Review rounds append, require archive-warning acknowledgement, and dismiss
   }
 });
 
-test("Execution completion requires an approved Review, rejects the executor, and accepts atomically", async () => {
+test("Execution completion requires a consent-backed approved Review and accepts the same executor atomically", async () => {
   const rootDir = mkdtempSync(path.join(tmpdir(), "ha-execution-complete-"));
   try {
     const taskRoot = path.join(rootDir, "harness/tasks", taskId);
@@ -574,7 +575,8 @@ test("Execution completion requires an approved Review, rejects the executor, an
       evidenceChecked: [],
       rationale: "The execution is complete.",
       verdict: "approved",
-      archiveWarningsAcknowledged: false
+      archiveWarningsAcknowledged: false,
+      consentUtterance: "Approved"
     });
 
     const firstReviewPath = path.join(taskRoot, "reviews", `${firstReviewId}.md`);
@@ -605,7 +607,8 @@ test("Execution completion requires an approved Review, rejects the executor, an
       evidenceChecked: [],
       rationale: "The latest execution is complete.",
       verdict: "approved",
-      archiveWarningsAcknowledged: false
+      archiveWarningsAcknowledged: false,
+      consentUtterance: "Approved"
     });
 
     writeFileSync(path.join(taskRoot, "executions", `${executionId}.md`), `${JSON.stringify({
@@ -614,8 +617,7 @@ test("Execution completion requires an approved Review, rejects the executor, an
       closed_at: "2026-07-11T00:02:45.000Z"
     }, null, 2)}\n`, "utf8");
 
-    await assert.rejects(completion.completeTaskExecution({ taskId, actor: aliceCodex }), /executor cannot complete/u);
-    const result = await completion.completeTaskExecution({ taskId, actor: aliceClaude });
+    const result = await completion.completeTaskExecution({ taskId, actor: aliceCodex });
 
     assert.deepEqual(result, { executionId: secondExecutionId });
     assert.equal(JSON.parse(readFileSync(path.join(taskRoot, "executions", `${executionId}.md`), "utf8")).state, "changes_requested");

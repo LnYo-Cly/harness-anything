@@ -83,7 +83,6 @@ export function completionRequirementsFailure(
 export function isExecutionCompletionRequirement(code: string): boolean {
   return code === "execution_submission_required"
     || code === "execution_task_not_in_review"
-    || code === "execution_actor_cannot_complete"
     || code === "execution_review_required"
     || code === "archive_warnings_acknowledgement_required";
 }
@@ -133,7 +132,7 @@ function renderCompletionRequirement(issue: TaskCompletionRequirementIssue): str
 
 function completionRequirementErrorCode(issue: TaskCompletionRequirementIssue | undefined): string {
   const code = issue?.gateCode ?? issue?.code;
-  if (code === "execution_actor_cannot_complete" || code === "execution_review_required" || code === "archive_warnings_acknowledgement_required") {
+  if (code === "execution_review_required" || code === "archive_warnings_acknowledgement_required") {
     return "write_rejected";
   }
   if (code === "execution_submission_required" || code === "execution_task_not_in_review") {

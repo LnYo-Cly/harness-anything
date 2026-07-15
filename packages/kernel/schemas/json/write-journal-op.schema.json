@@ -25,9 +25,9 @@
       "anyOf": [
         {
           "type": "string",
-          "title": "`${\"task\" | \"decision\" | \"fact\" | \"relation\" | \"module\" | \"session\" | \"execution\" | \"review\"}/${string}`",
+          "title": "`${\"task\" | \"decision\" | \"fact\" | \"relation\" | \"module\" | \"session\" | \"execution\" | \"consent\" | \"review\"}/${string}`",
           "description": "a template literal",
-          "pattern": "^(task|decision|fact|relation|module|session|execution|review)\\/[\\s\\S]*?$"
+          "pattern": "^(task|decision|fact|relation|module|session|execution|consent|review)\\/[\\s\\S]*?$"
         },
         {
           "type": "string",

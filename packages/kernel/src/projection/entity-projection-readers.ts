@@ -49,7 +49,28 @@ export interface ReviewProjectionRow {
   readonly evidenceChecked: ReadonlyArray<string>;
   readonly rationale: string;
   readonly archiveWarningsAcknowledged: boolean;
+  readonly approvalBasis: ProjectionJsonValue;
   readonly reviewedAt: string;
+  readonly attribution: EntityAttributionProjection;
+}
+
+export interface ConsentProjectionRow {
+  readonly consentId: string;
+  readonly taskRef: string;
+  readonly taskId: string;
+  readonly executionRef: string;
+  readonly executionId: string;
+  readonly principal: ProjectionJsonValue;
+  readonly scope: ProjectionJsonValue;
+  readonly disclosure: ProjectionJsonValue;
+  readonly channel: ProjectionJsonValue;
+  readonly response: ProjectionJsonValue;
+  readonly recordedBy: ProjectionJsonValue;
+  readonly grantedAt: string;
+  readonly expiresAt: string;
+  readonly state: string;
+  readonly consumedBy: string | null;
+  readonly consumedAt: string | null;
   readonly attribution: EntityAttributionProjection;
 }
 
@@ -68,6 +89,7 @@ export type ProvenanceFindingKind =
   | "task_execution_missing"
   | "execution_session_binding_missing"
   | "submitted_execution_review_missing"
+  | "review_executor_differs_from_delivery_without_consent_ref"
   | "review_execution_missing"
   | "binding_session_missing"
   | "binding_archive_incomplete";
@@ -89,6 +111,7 @@ interface ProjectionReaderOptions {
 
 const sessionProjectionSelect = attributedEntitySelect("session_projection", "session", "session_id", "session_attribution");
 const executionProjectionSelect = attributedEntitySelect("execution_projection", "execution", "execution_id", "execution_attribution");
+const consentProjectionSelect = attributedEntitySelect("consent_projection", "consent", "consent_id", "consent_attribution");
 const reviewProjectionSelect = attributedEntitySelect("review_projection", "review", "review_id", "review_attribution");
 
 export function querySessionProjection(options: ProjectionReaderOptions & { readonly sessionId: string }): SessionProjectionRow | undefined {
@@ -136,6 +159,16 @@ export function queryReviewProjection(options: ProjectionReaderOptions & { reado
   try {
     const row = db.prepare(`${reviewProjectionSelect} WHERE review_projection.review_id = ?`).get(options.reviewId) as Record<string, unknown> | undefined;
     return row ? toReview(row) : undefined;
+  } finally {
+    db.close();
+  }
+}
+
+export function queryConsentProjection(options: ProjectionReaderOptions & { readonly consentId: string }): ConsentProjectionRow | undefined {
+  const db = openFreshProjection(options);
+  try {
+    const row = db.prepare(`${consentProjectionSelect} WHERE consent_projection.consent_id = ?`).get(options.consentId) as Record<string, unknown> | undefined;
+    return row ? toConsent(row) : undefined;
   } finally {
     db.close();
   }
@@ -197,6 +230,18 @@ export function auditTaskProvenance(options: ProjectionReaderOptions & { readonl
         executionId: review.executionId,
         detail: `Review ${review.reviewId} references missing execution ${review.executionId}.`
       });
+      const execution = executions.find((candidate) => candidate.executionId === review.executionId);
+      if (execution && approvalBasisKind(review.approvalBasis) === "legacy-unverified"
+          && executorId(execution.primaryActor) !== executorId(review.reviewerActor)) {
+        findings.push({
+          coverage: "partial",
+          kind: "review_executor_differs_from_delivery_without_consent_ref",
+          taskId: options.taskId,
+          reviewId: review.reviewId,
+          executionId: review.executionId,
+          detail: `Review ${review.reviewId} uses a different executor than delivery ${review.executionId} but has no human consent reference; history was not rewritten.`
+        });
+      }
     }
     for (const execution of executions) {
       const bound = execution.sessionBindings.filter((binding) => typeof binding.session_ref === "string");
@@ -329,9 +374,43 @@ function toReview(row: Record<string, unknown>): ReviewProjectionRow {
     evidenceChecked: jsonArray(row.evidence_checked_json).filter((value): value is string => typeof value === "string"),
     rationale: String(row.rationale),
     archiveWarningsAcknowledged: row.archive_warnings_acknowledged === 1,
+    approvalBasis: parseJson(row.approval_basis_json),
     reviewedAt: String(row.reviewed_at),
     attribution: attributionFromRecord(row)
   };
+}
+
+function toConsent(row: Record<string, unknown>): ConsentProjectionRow {
+  const taskRef = String(row.task_ref);
+  const executionRef = String(row.execution_ref);
+  return {
+    consentId: String(row.consent_id),
+    taskRef,
+    taskId: entityId(taskRef, "task/") ?? taskRef,
+    executionRef,
+    executionId: executionRef.split("/").at(-1) ?? executionRef,
+    principal: parseJson(row.principal_json),
+    scope: parseJson(row.scope_json),
+    disclosure: parseJson(row.disclosure_json),
+    channel: parseJson(row.channel_json),
+    response: parseJson(row.response_json),
+    recordedBy: parseJson(row.recorded_by_json),
+    grantedAt: String(row.granted_at),
+    expiresAt: String(row.expires_at),
+    state: String(row.state),
+    consumedBy: nullableString(row.consumed_by),
+    consumedAt: nullableString(row.consumed_at),
+    attribution: attributionFromRecord(row)
+  };
+}
+
+function approvalBasisKind(value: ProjectionJsonValue): string | undefined {
+  return isProjectionRecord(value) && typeof value.kind === "string" ? value.kind : undefined;
+}
+
+function executorId(value: ProjectionJsonValue): string | null {
+  if (!isProjectionRecord(value) || !isProjectionRecord(value.executor)) return null;
+  return typeof value.executor.id === "string" ? value.executor.id : null;
 }
 
 function parseJson(value: unknown): ProjectionJsonValue {

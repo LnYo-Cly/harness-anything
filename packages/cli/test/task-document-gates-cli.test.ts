@@ -162,13 +162,11 @@ test("CLI task-complete reports every currently unmet completion requirement", (
       "closeout_placeholder",
       "code_doc_anchors_missing",
       "missing_ci_gate",
-      "execution_actor_cannot_complete",
       "execution_review_required"
     ]);
-    assert.match(blocked.error?.hint ?? "", /5 unmet requirements/u);
+    assert.match(blocked.error?.hint ?? "", /4 unmet requirements/u);
     assert.match(blocked.error?.hint ?? "", /ha task code-doc reconcile/u);
     assert.match(blocked.error?.hint ?? "", /--ci passed/u);
-    assert.match(blocked.error?.hint ?? "", /different authenticated executor/u);
     assert.match(blocked.error?.hint ?? "", /ha task review-execution/u);
   });
 });
@@ -441,7 +439,8 @@ test("CLI complete accepts an approved Execution Review without facts under dec_
       "--execution-id", executionId,
       "--verdict", "approved",
       "--findings", "All acceptance checks passed.",
-      "--rationale", "The submission satisfies the Task intent."
+      "--rationale", "The submission satisfies the Task intent.",
+      "--consent-utterance", "Approved"
     ], true, testActorEnv);
     assert.equal(reviewed.ok, true);
     assert.equal(reviewed.executionId, executionId);
@@ -449,7 +448,7 @@ test("CLI complete accepts an approved Execution Review without facts under dec_
 
     writeExecution(rootDir, executionTaskId, executionId, "test");
     const selfComplete = runJson(rootDir, ["task", "complete", executionTaskId, "--reviewer", "reviewer-a", "--ci", "passed"], false, testActorEnv);
-    assert.match(selfComplete.error?.hint ?? "", /executor cannot complete/u);
+    assert.match(selfComplete.error?.hint ?? "", /content pin/u);
     writeExecution(rootDir, executionTaskId, executionId, "worker-agent");
 
     // dec_mrg3z1we/CH4: approved Review and completion gates do not imply a Fact quantity gate.
@@ -496,7 +495,8 @@ test("CLI default claim carries one person's task through submit, review, and co
     runJson(rootDir, [
       "task", "review-execution", created.taskId, "--execution-id", String(claimed.executionId),
       "--verdict", "approved", "--findings", "Acceptance checks passed",
-      "--rationale", "The submitted work satisfies the task intent"
+      "--rationale", "The submitted work satisfies the task intent",
+      "--consent-utterance", "Approved"
     ], true, { HARNESS_ACTOR: "agent:reviewer" });
     const completed = runJson(rootDir, [
       "task", "complete", created.taskId, "--reviewer", "reviewer", "--ci", "passed"
@@ -539,7 +539,7 @@ test("CLI milestone completion requires active decision derives lineage while a 
   });
 });
 
-test("CLI rejects executor self-review and changes_requested opens a fresh claim round", () => {
+test("CLI rejects approval without consent regardless of executor and changes_requested opens a fresh claim round", () => {
   withTempRoot((rootDir) => {
     writeIndex(rootDir, executionTaskId, "Execution Rework", "in_review");
     writeExecution(rootDir, executionTaskId, executionId, "test");
@@ -548,9 +548,10 @@ test("CLI rejects executor self-review and changes_requested opens a fresh claim
       "--execution-id", executionId,
       "--verdict", "approved",
       "--findings", "Self approved.",
-      "--rationale", "Self review must still be rejected."
+      "--rationale", "Executor identity must not substitute for consent."
     ], false, testActorEnv);
-    assert.match(selfReview.error?.hint ?? "", /executor cannot review/u);
+    assert.match(selfReview.error?.hint ?? "", /Human consent required/u);
+    assert.match(selfReview.error?.hint ?? "", /Keep HARNESS_ACTOR unchanged/u);
 
     writeExecution(rootDir, executionTaskId, executionId, "worker-agent");
     const requested = runJson(rootDir, [

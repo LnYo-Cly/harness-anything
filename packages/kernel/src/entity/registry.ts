@@ -11,6 +11,7 @@ import {
 } from "./field-contracts.ts";
 import { canonicalEntityKinds, type CanonicalEntityKind } from "./canonical-kinds.ts";
 import { executionDeclaration } from "./execution-declaration.ts";
+import { consentDeclaration } from "./consent-declaration.ts";
 import { reviewDeclaration } from "./review-declaration.ts";
 import { readyManagedSemanticDiff } from "./managed-semantic-diff.ts";
 import {
@@ -65,6 +66,7 @@ export type EntityRegistryShape = {
   readonly module: EntityRegistration<string, "module">;
   readonly session: typeof sessionEntityRegistration;
   readonly execution: typeof executionDeclaration;
+  readonly consent: typeof consentDeclaration;
   readonly review: typeof reviewDeclaration;
 };
 
@@ -232,6 +234,7 @@ export const entityRegistry = {
   },
   session: sessionEntityRegistration,
   execution: executionDeclaration,
+  consent: consentDeclaration,
   review: reviewDeclaration
 } satisfies EntityRegistryShape;
 

@@ -293,6 +293,7 @@ const arbiterCliActionKinds = new Set<string>([
   "decision-reject",
   "decision-retire",
   "decision-supersede",
+  "task-consent-record",
   "task-review-execution",
 ]);
 
