@@ -261,7 +261,7 @@ function bindingRow(input: Omit<DurableBindingRowV1, "schema" | "tokenDigest"> &
     schema: bindingStateSchema,
     tokenId: requiredText(input.tokenId, "tokenId"),
     tokenDigest: digest32(input.tokenDigest, "tokenDigest"),
-    maxOperations: positiveInteger(input.maxOperations, "maxOperations"),
+    maxOperations: requiredPositiveInteger(input.maxOperations, "maxOperations"),
     consumedOperations: nonNegativeInteger(input.consumedOperations, "consumedOperations"),
     record: input.record
   };
@@ -299,7 +299,7 @@ function namespaceRow(value: OperationIdV2["namespace"]): DurableNamespaceRowV1 
 function parseRepo(value: unknown, index: number, manifestDirectory: string): AuthorityProductionRepoConfigV1 {
   const row = strictObject(value, `repos[${index}]`);
   const schemaTuple = parseSchemaTuple(row.schemaTuple);
-  const authorityGeneration = positiveInteger(row.authorityGeneration, "authorityGeneration");
+  const authorityGeneration = requiredPositiveInteger(row.authorityGeneration, "authorityGeneration");
   const operationNamespace = parseNamespace(row.operationNamespace);
   if (operationNamespace.authorityGeneration !== BigInt(authorityGeneration)) {
     throw new Error("AUTHORITY_PRODUCTION_NAMESPACE_GENERATION_MISMATCH");
@@ -336,7 +336,7 @@ function parseBootstrapBinding(value: unknown, index: number): AuthorityBootstra
   return {
     tokenId: requiredText(row.tokenId, "bootstrap.tokenId"),
     tokenDigest: base64Digest(row.tokenDigest, "bootstrap.tokenDigest"),
-    maxOperations: positiveInteger(row.maxOperations, "bootstrap.maxOperations"),
+    maxOperations: requiredPositiveInteger(row.maxOperations, "bootstrap.maxOperations"),
     record: {
       bindingId: requiredText(record.bindingId, "bindingId"),
       principalPersonId: requiredText(record.principalPersonId, "principalPersonId"),
@@ -447,7 +447,7 @@ function absolutePath(value: unknown, name: string, base: string): string {
   return path.resolve(base, candidate);
 }
 
-function positiveInteger(value: unknown, name: string): number {
+function requiredPositiveInteger(value: unknown, name: string): number {
   if (!Number.isSafeInteger(value) || Number(value) < 1) throw new Error(`AUTHORITY_PRODUCTION_FIELD_INVALID:${name}`);
   return Number(value);
 }
