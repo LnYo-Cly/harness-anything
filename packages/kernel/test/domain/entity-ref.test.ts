@@ -79,6 +79,19 @@ test("EntityRef scanner ignores task-like prose, package markers, and paths", ()
   assert.deepEqual(refs.map((ref) => ref.raw), ["task/local-task", "decision/decision-local/C1", "fact/task_local/F-a3f2"]);
 });
 
+test("EntityRef scanner ignores schema and profile literals without weakening real references", () => {
+  const refs = findEntityRefs([
+    "schema: task/default-v2",
+    "profile: task/software-coding",
+    "checkerProfile: task/default-v2",
+    "{\"schema\": \"task/default-v2\", \"related\": \"task/local-task\"}",
+    "real ref task/another-task"
+  ].join("\n"));
+
+  assert.deepEqual(refs.map((ref) => ref.raw), ["task/local-task", "task/another-task"]);
+  assert.equal(parseEntityRef("task/default-v2")?.kind, "task");
+});
+
 test("relation ids are deterministic and ignore mutable relation attributes", () => {
   const base = relationRecord();
   const variant = {
