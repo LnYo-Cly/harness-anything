@@ -241,6 +241,10 @@ export class ReplicaBroker {
         fingerprints[pathName] = observed;
       }
       const watcherFenceVector = await this.options.watcherFence.fence(selected);
+      const fencedPaths = Object.keys(watcherFenceVector).sort();
+      if (JSON.stringify(fencedPaths) !== JSON.stringify(selected)) {
+        throw new Error("BROKER_WATCHER_FENCE_SET_MISMATCH");
+      }
       const state = this.current();
       const cutId = `cut-${state.epoch}-${state.resolvedCursor}-${state.nextJournalLSN}`;
       const witness: MaterializationWitness = {
@@ -333,9 +337,14 @@ export class ReplicaBroker {
     while (this.current().pendingMaterializations.length > 0) {
       const pending = this.current().pendingMaterializations[0]!;
       const pathState = this.current().paths[pending.path]!;
-      const expected = pathState.visibleBase?.fingerprint ?? tombstoneFingerprint();
-      if (!hasPathStatus(pathState, "CLEAN")) {
-        const observed = await fingerprintPath(this.visiblePath(pending.path));
+      const observed = await fingerprintPath(this.visiblePath(pending.path));
+      const matchingSubmittedCandidate = pending.target.lastChangeOpId !== null
+        && pathState.pendingOpIds.includes(pending.target.lastChangeOpId)
+        && sameFingerprint(observed, pending.target.fingerprint);
+      const expected = matchingSubmittedCandidate
+        ? observed
+        : pathState.visibleBase?.fingerprint ?? tombstoneFingerprint();
+      if (!hasPathStatus(pathState, "CLEAN") && !matchingSubmittedCandidate) {
         await this.createPathConflict(pending.path, pathState, pending.target, observed, "REMOTE_CHANGED_DIRTY_PATH");
         continue;
       }
@@ -354,7 +363,10 @@ export class ReplicaBroker {
               ...existing,
               visibleBase: pending.target,
               visibleWorkingFingerprint: result.fingerprint,
-              status: "CLEAN"
+              status: "CLEAN",
+              pendingOpIds: matchingSubmittedCandidate && pending.target.lastChangeOpId !== null
+                ? existing.pendingOpIds.filter((opId) => opId !== pending.target.lastChangeOpId)
+                : existing.pendingOpIds
             }
           },
           pendingMaterializations: current.pendingMaterializations.slice(1),

@@ -6,6 +6,7 @@ import {
   daemonUserRoot,
   encodeJsonLineFrame,
   localUserDaemonEndpoint,
+  sshAuthorityWireBootstrapFrame,
   sshForcedCommandBootstrapFrame,
   type SshForcedCommandBootstrapInput
 } from "../../../../daemon/src/index.ts";
@@ -17,6 +18,8 @@ export interface DaemonConnectStreams {
   readonly output: Writable;
   readonly error: Writable;
 }
+
+export type DaemonConnectStreamProtocol = "json-rpc" | "authority-wire";
 
 export async function runDaemonConnect(
   args: ReadonlyArray<string>,
@@ -54,8 +57,15 @@ export async function runDaemonConnect(
   const userRoot = readOption(args, "--user-root") ?? daemonUserRoot(env);
   const endpoint = readOption(args, "--socket")
     ?? localUserDaemonEndpoint(userRoot, daemonIdFromEnv(env), options.platform ?? process.platform);
+  const streamProtocol: DaemonConnectStreamProtocol = args.includes("--authority-wire")
+    ? "authority-wire"
+    : "json-rpc";
+  if (streamProtocol === "authority-wire" && !authentication) {
+    streams.error.write("daemon connect --authority-wire requires an authenticated SSH forced-command context.\n");
+    return 2;
+  }
   try {
-    await connectDaemonStdio(endpoint, streams.input, streams.output, authentication);
+    await connectDaemonStdio(endpoint, streams.input, streams.output, authentication, streamProtocol);
     return 0;
   } catch (error) {
     streams.error.write(
@@ -69,10 +79,19 @@ export async function connectDaemonStdio(
   endpoint: string,
   input: Readable,
   output: Writable,
-  authentication?: SshForcedCommandBootstrapInput
+  authentication?: SshForcedCommandBootstrapInput,
+  streamProtocol: DaemonConnectStreamProtocol = "json-rpc"
 ): Promise<void> {
   const socket = await openDaemonEndpoint(endpoint);
-  if (authentication) socket.write(encodeJsonLineFrame(sshForcedCommandBootstrapFrame(authentication)));
+  if (streamProtocol === "authority-wire") {
+    if (!authentication) {
+      socket.destroy();
+      throw new Error("authority-wire relay requires authenticated SSH forced-command inputs");
+    }
+    socket.write(encodeJsonLineFrame(sshAuthorityWireBootstrapFrame(authentication)));
+  } else if (authentication) {
+    socket.write(encodeJsonLineFrame(sshForcedCommandBootstrapFrame(authentication)));
+  }
   await relayDaemonStreams(socket, input, output);
 }
 
@@ -138,9 +157,10 @@ function relayDaemonStreams(socket: net.Socket, input: Readable, output: Writabl
 
 function renderDaemonConnectHelp(): string {
   return [
-    "Usage: ha daemon connect --stdio [--socket <endpoint>] [--user-root <path>]",
+    "Usage: ha daemon connect --stdio [--authority-wire] [--socket <endpoint>] [--user-root <path>]",
     "",
-    "Relay stdin/stdout to an already-running local daemon without creating a runtime."
+    "Relay stdin/stdout to an already-running local daemon without creating a runtime.",
+    "--authority-wire requires an authenticated SSH forced-command context and selects the versioned raw authority stream."
   ].join("\n");
 }
 

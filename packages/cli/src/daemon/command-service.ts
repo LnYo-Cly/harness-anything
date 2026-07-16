@@ -50,7 +50,9 @@ export function createCliCommandService(runtime: CliDaemonRuntime, options: CliC
         const attribution = daemonActor
           ? daemonActorAttributionForParsedCommand(daemonActor, parsedCommand, context?.executor)
           : undefined;
+        const commandClass = commandClassForCliActionKind(parsedCommand.action.kind);
         const authoritySubmissionV2 = attribution
+          && (commandClass === "repo-write" || commandClass === "arbiter")
           ? options.resolveAuthoritySubmissionV2?.(context?.authorityConnection)
           : undefined;
         const authorityCoordinator = attribution && authoritySubmissionV2

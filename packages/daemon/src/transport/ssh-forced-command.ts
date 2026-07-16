@@ -10,13 +10,33 @@ export interface SshForcedCommandBootstrapFrame extends SshForcedCommandBootstra
   readonly type: "harness-daemon.ssh-forced-command/v1";
 }
 
-export type AcceptSshForcedCommand = (frame: SshForcedCommandBootstrapFrame) => boolean;
+export interface SshAuthorityWireBootstrapFrame extends SshForcedCommandBootstrapInput {
+  readonly type: "harness-daemon.ssh-forced-command/v2";
+  readonly streamProtocol: "harness-authority-wire/v1";
+}
+
+export type SshAuthenticatedBootstrapFrame =
+  | SshForcedCommandBootstrapFrame
+  | SshAuthorityWireBootstrapFrame;
+
+export type AcceptSshForcedCommand = (frame: SshAuthenticatedBootstrapFrame) => boolean;
 
 export function sshForcedCommandBootstrapFrame(
   input: SshForcedCommandBootstrapInput
 ): SshForcedCommandBootstrapFrame {
   return {
     type: "harness-daemon.ssh-forced-command/v1",
+    personId: input.personId,
+    canonicalRoot: input.canonicalRoot
+  };
+}
+
+export function sshAuthorityWireBootstrapFrame(
+  input: SshForcedCommandBootstrapInput
+): SshAuthorityWireBootstrapFrame {
+  return {
+    type: "harness-daemon.ssh-forced-command/v2",
+    streamProtocol: "harness-authority-wire/v1",
     personId: input.personId,
     canonicalRoot: input.canonicalRoot
   };
@@ -47,11 +67,62 @@ export function authenticateSshForcedCommandFrame(
   };
 }
 
+export function authenticateSshAuthorityWireFrame(
+  frame: unknown,
+  authContext: DaemonAuthenticationContext,
+  accept: AcceptSshForcedCommand = () => true
+): TransportAuthenticationResult {
+  if (!isSshAuthorityWireBootstrapFrame(frame)) {
+    const malformed = isAuthorityWireFrameType(frame);
+    return {
+      ok: false,
+      code: malformed ? "authority_wire_bootstrap_malformed" : "authority_wire_bootstrap_required",
+      message: malformed
+        ? "The required authority-wire bootstrap is invalid; reconnect with `ha daemon connect --stdio --authority-wire`."
+        : "The required authority-wire bootstrap is missing; use `ha daemon connect --stdio --authority-wire`."
+    };
+  }
+  if (!accept(frame)) {
+    return {
+      ok: false,
+      code: "authority_wire_repo_unavailable",
+      message: "The requested canonical root is unavailable; run `ha daemon repo register --root <path>` and start with `--authority-manifest <path>`."
+    };
+  }
+  return {
+    ok: true,
+    authContext: {
+      ...authContext,
+      sshForcedCommand: {
+        personId: frame.personId,
+        canonicalRoot: frame.canonicalRoot,
+        source: "sshd-authorized-keys-forced-command"
+      }
+    }
+  };
+}
+
+export function isSshAuthorityWireBootstrapFrame(value: unknown): value is SshAuthorityWireBootstrapFrame {
+  return isAuthorityWireFrameType(value)
+    && (value as { readonly streamProtocol?: unknown }).streamProtocol === "harness-authority-wire/v1"
+    && typeof (value as { readonly personId?: unknown }).personId === "string"
+    && (value as { readonly personId: string }).personId.length > 0
+    && typeof (value as { readonly canonicalRoot?: unknown }).canonicalRoot === "string"
+    && (value as { readonly canonicalRoot: string }).canonicalRoot.length > 0;
+}
+
 function isForcedCommandFrameType(value: unknown): boolean {
   return value !== null
     && typeof value === "object"
     && !Array.isArray(value)
     && (value as { readonly type?: unknown }).type === "harness-daemon.ssh-forced-command/v1";
+}
+
+export function isAuthorityWireFrameType(value: unknown): boolean {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && (value as { readonly type?: unknown }).type === "harness-daemon.ssh-forced-command/v2";
 }
 
 function isSshForcedCommandBootstrapFrame(value: unknown): value is SshForcedCommandBootstrapFrame {

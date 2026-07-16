@@ -8,11 +8,12 @@ import {
   createUnixSocketTransportServer,
   ensurePrivateUnixSocketDirectory,
   type AcceptedConnectionBinding,
+  type AuthorityWireIngressHandler,
   type DaemonAuthenticationContext,
   type DaemonTransportConnection,
   type JsonRpcProtocolServer,
   type NamedPipeTransportServer,
-  type SshForcedCommandBootstrapFrame,
+  type SshAuthenticatedBootstrapFrame,
   type UnixSocketTransportServer
 } from "../../../../daemon/src/index.ts";
 
@@ -41,7 +42,8 @@ export interface DaemonLocalTransportOptions {
     authContext: DaemonAuthenticationContext,
     acceptedConnection?: AcceptedConnectionBinding
   ) => JsonRpcProtocolServer;
-  readonly acceptSshForcedCommand: (frame: SshForcedCommandBootstrapFrame) => boolean;
+  readonly acceptSshForcedCommand: (frame: SshAuthenticatedBootstrapFrame) => boolean;
+  readonly authorityWireIngress?: AuthorityWireIngressHandler;
   readonly onConnection?: (connection: DaemonTransportConnection) => void;
   readonly onConnectionClosed?: (connection: DaemonTransportConnection) => void;
 }
@@ -50,6 +52,9 @@ export function createDaemonLocalTransport(
   options: DaemonLocalTransportOptions
 ): UnixSocketTransportServer | NamedPipeTransportServer {
   if ((options.platform ?? process.platform) === "win32") {
+    if (options.authorityWireIngress) {
+      throw new Error("authority-wire ingress requires a Unix socket with server-observed peer credentials");
+    }
     return createNamedPipeTransportServer({
       daemonId: options.daemonId,
       pipePath: options.endpoint,
@@ -63,6 +68,7 @@ export function createDaemonLocalTransport(
     daemonId: options.daemonId,
     socketPath: options.endpoint,
     acceptSshForcedCommand: options.acceptSshForcedCommand,
+    authorityWireIngress: options.authorityWireIngress,
     createProtocolServer: options.createProtocolServer,
     onConnection: options.onConnection,
     onConnectionClosed: options.onConnectionClosed

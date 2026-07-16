@@ -7,12 +7,9 @@ export {
   isCompleteAuthorityCommittedReceiptV2
 } from "./committed-event-publication-v2.ts";
 export {
-  canonicalAuthorityAttributionEventStorageBytesV2,
   createDurableAuthorityCommittedEventPublisherV2
 } from "./durable-committed-event-publisher-v2.ts";
 export type {
-  AuthorityAttributionEventLogPrimitiveV2,
-  AuthorityAttributionEventLogRecordV2,
   AuthorityCommittedPhysicalObservationPortV2,
   AuthorityCommittedPhysicalObservationV2
 } from "./durable-committed-event-publisher-v2.ts";

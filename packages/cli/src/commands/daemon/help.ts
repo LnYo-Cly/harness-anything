@@ -56,6 +56,7 @@ export function renderDaemonHelp(): string {
     "Commands:",
     "  start --service              Start a detached local daemon service (default).",
     "  start --foreground           Run the daemon service in the foreground.",
+    "    --authority-manifest PATH Enable fail-closed V2 authority composition from an explicit manifest.",
     "  status --json                Show lock holder, queue depth, connections, and version.",
     "  stop [--timeout-ms <ms>]     Signal the daemon and wait for queue drain and lock release.",
     "  restart [--timeout-ms <ms>]  Restart the service and wait for a replacement PID.",

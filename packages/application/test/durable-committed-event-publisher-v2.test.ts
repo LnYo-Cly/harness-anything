@@ -1,19 +1,23 @@
 // harness-test-tier: contract
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
-  canonicalAuthorityAttributionEventStorageBytesV2,
   createDurableAuthorityCommittedEventPublisherV2,
-  type AuthorityAttributionEventLogPrimitiveV2,
-  type AuthorityAttributionEventLogRecordV2,
   type AuthorityCommittedReceipt
 } from "../src/index.ts";
 import {
   actorAxesBindingCoreDigestV2,
+  makeLocalAuthorityAttributionEventV2Log,
   semanticMutationSetDigestV2,
   type ActorAxesBindingCoreV2,
+  type PhysicalChangeV2,
   type SemanticMutationSetV2
 } from "../../kernel/src/index.ts";
+
+type AuthorityAttributionEventV2Log = ReturnType<typeof makeLocalAuthorityAttributionEventV2Log>;
 
 const actorAxesBinding: ActorAxesBindingCoreV2 = {
   bindingId: "binding-v2",
@@ -30,90 +34,156 @@ const actorAxesBinding: ActorAxesBindingCoreV2 = {
 };
 const mutationSet: SemanticMutationSetV2 = { registryVersion: 1, mutations: [] };
 
-test("publisher adapter appends then exact-reads X event-log port before returning", async () => {
-  const eventLog = memoryExactEventLog();
-  const publisher = createDurableAuthorityCommittedEventPublisherV2({
-    eventLog,
-    observation: {
-      observe: async () => ({
-        physicalChanges: [{ path: "task.md", beforeDigest: null, afterDigest: "55".repeat(32) }],
-        recordedAt: "2026-07-16T00:00:01.000Z"
-      })
-    }
-  });
-  const input = {
-    receipt: committedReceipt(),
-    actorAxesBinding,
-    occurredAt: "2026-07-16T00:00:00.000Z"
-  };
-  const first = await publisher.publish(input);
-  const replay = await publisher.publish(input);
-  assert.equal(replay.canonicalEventDigest, first.canonicalEventDigest);
-  assert.equal(eventLog.records.size, 1, "byte-identical replay keeps one durable key");
-  assert.equal(Buffer.from(eventLog.records.get("workspace-v2\0op-v2")!.canonicalBytes).equals(
-    Buffer.from(canonicalAuthorityAttributionEventStorageBytesV2(first))
-  ), true);
-});
-
-test("publisher adapter rejects a non-exact durable read", async () => {
-  const eventLog = memoryExactEventLog();
-  const publisher = createDurableAuthorityCommittedEventPublisherV2({
-    eventLog: {
-      appendExact: eventLog.appendExact,
-      readExact: async (workspaceId, opId) => {
-        const stored = await eventLog.readExact(workspaceId, opId);
-        return stored && { ...stored, canonicalBytes: Buffer.from([0]) };
+test("publisher adapter ensures and exact-reads the production V2 log with byte-identical replay", async () => {
+  await withTempEventLog(async (eventLog) => {
+    const observedInputs: Array<Parameters<ReturnType<typeof physicalObservation>["observe"]>[0]> = [];
+    const observation = physicalObservation();
+    const publisher = createDurableAuthorityCommittedEventPublisherV2({
+      eventLog,
+      observation: {
+        observe: async (input) => {
+          observedInputs.push(input);
+          return observation.observe(input);
+        }
       }
-    },
-    observation: {
-      observe: async () => ({ physicalChanges: [], recordedAt: "2026-07-16T00:00:01.000Z" })
-    }
+    });
+    const input = publicationInput();
+
+    const first = await publisher.publish(input);
+    const firstBytes = eventLog.readBytes(first.workspaceId, first.opId);
+    const replay = await publisher.publish(input);
+    const replayBytes = eventLog.readBytes(replay.workspaceId, replay.opId);
+
+    assert.deepEqual(replay, first);
+    assert.deepEqual(replayBytes, firstBytes);
+    assert.equal(eventLog.readAll().length, 1, "byte-identical replay keeps one durable key");
+    assert.equal(eventLog.ensure(replay).replayed, true);
+    assert.deepEqual(observedInputs, [
+      {
+        workspaceId: "workspace-v2",
+        opId: "op-v2",
+        commitSha: "commit-8",
+        previousCommit: "commit-7"
+      },
+      {
+        workspaceId: "workspace-v2",
+        opId: "op-v2",
+        commitSha: "commit-8",
+        previousCommit: "commit-7"
+      }
+    ]);
   });
-  await assert.rejects(publisher.publish({
-    receipt: committedReceipt(),
-    actorAxesBinding,
-    occurredAt: "2026-07-16T00:00:00.000Z"
-  }), /DURABLE_REPLAY_MISMATCH/u);
 });
 
-test("publisher port classifies a differing replay for the same workspace/op key as protocol damage", async () => {
-  const eventLog = memoryExactEventLog();
-  let afterDigest = "55".repeat(32);
-  const publisher = createDurableAuthorityCommittedEventPublisherV2({
-    eventLog,
-    observation: {
-      observe: async () => ({
-        physicalChanges: [{ path: "task.md", beforeDigest: null, afterDigest }],
-        recordedAt: "2026-07-16T00:00:01.000Z"
-      })
-    }
+test("publisher adapter preserves protocol damage when the same durable key receives different bytes", async () => {
+  await withTempEventLog(async (eventLog) => {
+    let afterDigest = "55".repeat(32);
+    const publisher = createDurableAuthorityCommittedEventPublisherV2({
+      eventLog,
+      observation: physicalObservation(() => [
+        { path: "task.md", beforeDigest: null, afterDigest }
+      ])
+    });
+    const input = publicationInput();
+
+    await publisher.publish(input);
+    afterDigest = "66".repeat(32);
+
+    await assert.rejects(
+      publisher.publish(input),
+      (error: unknown) => error instanceof Error
+        && error.name === "AuthorityAttributionEventV2ProtocolDamageError"
+        && "code" in error
+        && error.code === "AUTHORITY_ATTRIBUTION_EVENT_V2_PROTOCOL_DAMAGE"
+    );
+    assert.equal(eventLog.readAll().length, 1);
   });
-  const input = {
-    receipt: committedReceipt(),
-    actorAxesBinding,
-    occurredAt: "2026-07-16T00:00:00.000Z"
-  };
-  await publisher.publish(input);
-  afterDigest = "66".repeat(32);
-  await assert.rejects(publisher.publish(input), /PROTOCOL_DAMAGED/u);
 });
 
-function memoryExactEventLog(): AuthorityAttributionEventLogPrimitiveV2 & {
-  readonly records: Map<string, AuthorityAttributionEventLogRecordV2>;
-} {
-  const records = new Map<string, AuthorityAttributionEventLogRecordV2>();
-  const key = (workspaceId: string, opId: string) => `${workspaceId}\0${opId}`;
+test("publisher adapter rejects observation commit and previous-commit mismatches before durable write", async (t) => {
+  for (const mismatch of [
+    { name: "commit", commitSha: "different-commit", previousCommit: "commit-7" },
+    { name: "previous commit", commitSha: "commit-8", previousCommit: "different-previous-commit" }
+  ] as const) {
+    await t.test(mismatch.name, async () => {
+      await withTempEventLog(async (eventLog) => {
+        const publisher = createDurableAuthorityCommittedEventPublisherV2({
+          eventLog,
+          observation: physicalObservation(undefined, mismatch)
+        });
+
+        await assert.rejects(
+          publisher.publish(publicationInput()),
+          /AUTHORITY_EVENT_V2_PUBLICATION_OBSERVATION_MISMATCH/u
+        );
+        assert.equal(eventLog.readAll().length, 0);
+      });
+    });
+  }
+});
+
+test("publisher adapter fails closed when the durable event or exact bytes cannot be read", async (t) => {
+  for (const missing of ["event", "bytes"] as const) {
+    await t.test(missing, async () => {
+      await withTempEventLog(async (productionLog) => {
+        const eventLog: AuthorityAttributionEventV2Log = {
+          ...productionLog,
+          ...(missing === "event"
+            ? { read: () => undefined }
+            : { readBytes: () => undefined })
+        };
+        const publisher = createDurableAuthorityCommittedEventPublisherV2({
+          eventLog,
+          observation: physicalObservation()
+        });
+
+        await assert.rejects(
+          publisher.publish(publicationInput()),
+          /AUTHORITY_EVENT_V2_DURABLE_READ_MISSING/u
+        );
+      });
+    });
+  }
+});
+
+function publicationInput() {
   return {
-    records,
-    appendExact: async (record) => {
-      const current = records.get(key(record.workspaceId, record.opId));
-      if (current && !Buffer.from(current.canonicalBytes).equals(Buffer.from(record.canonicalBytes))) {
-        throw new Error("AUTHORITY_EVENT_V2_PROTOCOL_DAMAGED");
-      }
-      if (!current) records.set(key(record.workspaceId, record.opId), structuredClone(record));
-    },
-    readExact: async (workspaceId, opId) => records.get(key(workspaceId, opId))
+    receipt: committedReceipt(),
+    actorAxesBinding,
+    occurredAt: "2026-07-16T00:00:00.000Z"
   };
+}
+
+function physicalObservation(
+  changes: () => ReadonlyArray<PhysicalChangeV2> = () => [
+    { path: "task.md", beforeDigest: null, afterDigest: "55".repeat(32) }
+  ],
+  boundary?: { readonly commitSha: string; readonly previousCommit: string | null }
+) {
+  return {
+    observe: async (input: {
+      readonly workspaceId: string;
+      readonly opId: string;
+      readonly commitSha: string;
+      readonly previousCommit: string | null;
+    }) => ({
+      commitSha: boundary?.commitSha ?? input.commitSha,
+      previousCommit: boundary?.previousCommit ?? input.previousCommit,
+      physicalChanges: changes(),
+      recordedAt: "2026-07-16T00:00:01.000Z"
+    })
+  };
+}
+
+async function withTempEventLog(
+  run: (eventLog: AuthorityAttributionEventV2Log) => Promise<void>
+): Promise<void> {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "ha-authority-event-v2-publisher-"));
+  try {
+    await run(makeLocalAuthorityAttributionEventV2Log(rootDir));
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
 }
 
 function committedReceipt(): AuthorityCommittedReceipt {

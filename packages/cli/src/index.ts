@@ -25,6 +25,7 @@ import { selectCliAdapterProvider } from "./composition/adapter-registry.ts";
 import { daemonIdFromEnv, daemonUserRoot, localUserDaemonEndpoint, runCommandThroughDaemon } from "./daemon/client.ts";
 import { createDaemonServiceHost } from "./daemon/service-host.ts";
 import { makeDaemonReservationReconciler } from "./composition/reservation-reconciler.ts";
+import { createProductionAuthorityLifecycle } from "./daemon/production-authority-lifecycle.ts";
 
 const runRegisteredCommand = runRegisteredCommandWithCliComposition;
 const daemonRuntimeProvider = selectCliAdapterProvider("daemon.runtime");
@@ -123,16 +124,25 @@ async function runDaemonServe(
       }
       const idleMs = parsePositiveIntegerOr(readOption(args, "--idle-ms"), 0, { allowZero: true });
       const connections: DaemonConnectionStats = { active: 0, total: 0 };
+      const authorityManifest = readOption(args, "--authority-manifest")
+        ?? process.env.HARNESS_AUTHORITY_MANIFEST?.trim();
+      const authorityLifecycle = hooks.authorityLifecycle ?? (authorityManifest
+        ? createProductionAuthorityLifecycle({
+          manifestPath: authorityManifest,
+          ...(layoutOverrides ? { layoutOverrides } : {})
+        })
+        : undefined);
       serviceHost = await createDaemonServiceHost(runtime, serveRepos, defaultRepoId, layoutOverrides, idleMs, endpoint, connections, userRoot, {
         entrypoint,
         loadedIdentity: loadedBuild.identity,
         startedAt
-      }, hooks.authorityLifecycle);
+      }, authorityLifecycle);
       serviceHost.startRegistryReconcile(userRoot);
       const transport = createDaemonLocalTransport({
         daemonId: serviceHost.daemonId,
         endpoint,
         acceptSshForcedCommand: (frame) => serviceHost?.acceptsSshForcedCommand(frame.canonicalRoot) ?? false,
+        ...(authorityLifecycle ? { authorityWireIngress: serviceHost.authorityWireIngress } : {}),
         createProtocolServer: serviceHost.createProtocolServer,
         onConnection: () => {
           connections.active += 1;

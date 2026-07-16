@@ -6,14 +6,13 @@ import {
   makeTaskHolderService
 } from "../../../application/src/index.ts";
 import { randomUUID } from "node:crypto";
-import path from "node:path";
-import { realpathSync } from "node:fs";
 import {
   createPtyTerminalSessionService,
   createJsonRpcProtocolServer,
   calculateDaemonArtifactIdentity,
   type AcceptedConnectionBinding,
   type AuthorityConnectionDispatch,
+  type AuthorityWireIngressHandler,
   type DaemonActiveControlStatus,
   type DaemonControlService,
   type DaemonStatusResultV2,
@@ -39,6 +38,8 @@ import {
 import { daemonActorAttribution } from "../composition/actor-attribution.ts";
 import { failClosedReservationReconcilerCoordinator } from "../composition/reservation-reconciler.ts";
 import { createCliCommandService } from "./command-service.ts";
+import { createAuthorityWireIngressHandler } from "./authority-wire-service.ts";
+import { canonicalRootIdentity } from "./canonical-root.ts";
 import { makeDocSyncService } from "./doc-sync-service.ts";
 import {
   makeDaemonQueuedOperationalWriteCoordinator,
@@ -81,6 +82,7 @@ export async function createDaemonServiceHost(
     acceptedConnection?: AcceptedConnectionBinding
   ) => ReturnType<typeof createJsonRpcProtocolServer>;
   readonly acceptsSshForcedCommand: (canonicalRoot: string) => boolean;
+  readonly authorityWireIngress: AuthorityWireIngressHandler;
   readonly status: () => DaemonStatusResultV2;
   readonly onConnectionStart: () => void;
   readonly onConnectionSettled: () => void;
@@ -219,6 +221,10 @@ export async function createDaemonServiceHost(
     acceptsSshForcedCommand: (canonicalRoot) => [...repoBindings.values()].some((binding) =>
       binding.identity.mode === "remote" && sameCanonicalRoot(binding.repo.canonicalRoot, canonicalRoot)
     ),
+    authorityWireIngress: createAuthorityWireIngressHandler({
+      authorityLifecycle,
+      repoBindings: () => repoBindings.values()
+    }),
     status: () => serviceStatus(defaultRepoBinding().repo.repoId),
     onConnectionStart: () => {
       if (idleTimer) clearTimeout(idleTimer);
@@ -392,7 +398,7 @@ function createRepoServiceBinding(
   const cliCommandService = createCliCommandService(runtime, {
     ...commandOptions,
     ...(authorityComponent ? {
-      resolveAuthoritySubmissionV2: (dispatch) => bindAuthoritySubmissionForDispatch(
+      resolveAuthoritySubmissionV2: (dispatch) => requireAuthoritySubmissionForDispatch(
         authorityComponent,
         repo.repoId,
         dispatch
@@ -478,6 +484,16 @@ export function bindAuthoritySubmissionForDispatch(
   };
 }
 
+function requireAuthoritySubmissionForDispatch(
+  component: AuthorityRepoComponent,
+  repoId: string,
+  dispatch: AuthorityConnectionDispatch | undefined
+): ReturnType<AuthorityRepoComponent["bindConnection"]> {
+  const bound = bindAuthoritySubmissionForDispatch(component, repoId, dispatch);
+  if (!bound) throw new Error("AUTHORITY_CONNECTION_REQUIRED");
+  return bound;
+}
+
 function loadRepoIdentity(
   rootDir: string,
   layoutOverrides: { readonly authoredRoot?: string } | undefined,
@@ -534,14 +550,6 @@ function sortedDaemonRepos(repos: ReadonlyArray<DaemonRepoNamespace>): ReadonlyA
 
 function sameCanonicalRoot(left: string, right: string): boolean {
   return canonicalRootIdentity(left) === canonicalRootIdentity(right);
-}
-
-function canonicalRootIdentity(value: string): string {
-  try {
-    return realpathSync(value);
-  } catch {
-    return path.resolve(value);
-  }
 }
 
 export function localAuthorityPeerPolicy(input: Parameters<NonNullable<

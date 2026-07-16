@@ -12,8 +12,14 @@ const probePath = path.join(repoRoot, "tools/probe-production-consumer.mjs");
 const runnerPath = path.join(repoRoot, "tools/run-staged-activation.mjs");
 const registry = JSON.parse(readFileSync(path.join(repoRoot, "tools/staged-activation.json"), "utf8"));
 
-test("every registered island is currently inactive and its fixture flips the probe to activated", () => {
-  assert.equal(registry.islands.length, 3);
+test("the current registry obeys the staged protocol before and after activation removal", () => {
+  if (registry.islands.length === 0) {
+    const current = runRunner(repoRoot, ["--json"]);
+    assert.equal(current.status, 0, current.stderr);
+    const receipt = JSON.parse(current.stdout.trim().split("\n").at(-1));
+    assert.deepEqual(receipt.counts, { inactive: 0, activated: 0, expired: 0, errors: 0 });
+    return;
+  }
   for (const island of registry.islands) {
     const current = runProbe(island, repoRoot);
     assert.equal(current.status, 1, `${island.id}: ${current.stdout}\n${current.stderr}`);
