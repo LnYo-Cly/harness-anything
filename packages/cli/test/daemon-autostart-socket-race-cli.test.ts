@@ -66,7 +66,11 @@ test("daemon status cannot report started when its lock exists but the socket is
   });
 });
 
-test("concurrent cold-start clients converge on one reachable daemon socket owner", async () => {
+test("concurrent cold-start clients converge on one reachable daemon socket owner", {
+  skip: process.platform === "win32"
+    ? "native Windows writable daemon qualification is deferred"
+    : false
+}, async () => {
   await withTempRootAsync(async (workspaceRoot) => {
     const userRoot = path.join(workspaceRoot, "user-daemon");
     const repoRoots = Array.from(
