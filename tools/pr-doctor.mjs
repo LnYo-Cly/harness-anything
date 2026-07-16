@@ -5,19 +5,45 @@ import { pathToFileURL } from "node:url";
 import { extractGitHubRequiredStatusCheckContexts } from "./check-github-required-contexts.mjs";
 import { parseMergifyQueueCheckSuccessContexts } from "./check-mergify-queue-contexts.mjs";
 
-function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    ...options
-  });
-  if (result.error) {
-    throw new Error(`${command} failed to launch: ${result.error.message}`);
+export function run(command, args, options = {}) {
+  const {
+    spawn = spawnSync,
+    sleep = sleepSync,
+    retryAttempts = command === "gh" ? positiveIntegerEnv("PR_DOCTOR_GH_RETRY_ATTEMPTS", 3) : 1,
+    retryDelayMs = positiveIntegerEnv("PR_DOCTOR_GH_RETRY_DELAY_MS", 500),
+    ...spawnOptions
+  } = options;
+  let lastResult;
+  for (let attempt = 1; attempt <= retryAttempts; attempt += 1) {
+    const result = spawn(command, args, {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      ...spawnOptions
+    });
+    lastResult = result;
+    if (!result.error && result.status === 0) return result.stdout.trim();
+    if (command !== "gh" || attempt === retryAttempts || !isTransientGhFailure(result)) break;
+    sleep(retryDelayMs * attempt);
   }
-  if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(" ")} failed: ${result.stderr.trim()}`);
+  if (lastResult?.error) {
+    throw new Error(`${command} failed to launch: ${lastResult.error.message}`);
   }
-  return result.stdout.trim();
+  throw new Error(`${command} ${args.join(" ")} failed: ${lastResult?.stderr?.trim() || "unknown command failure"}`);
+}
+
+function isTransientGhFailure(result) {
+  const detail = [result.error?.code, result.error?.message, result.stderr].filter(Boolean).join(" ");
+  return /\b(?:EOF|EAGAIN|ECONNRESET|ETIMEDOUT|EAI_AGAIN)\b|connection (?:reset|refused)|socket hang up|timed out|timeout|TLS handshake|temporary failure|server disconnected|rate limit|bad gateway|service unavailable|gateway timeout|(?:^|\D)(?:429|5\d\d)(?:\D|$)/iu.test(detail);
+}
+
+function sleepSync(milliseconds) {
+  if (milliseconds <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function positiveIntegerEnv(name, fallback) {
+  const value = Number.parseInt(process.env[name] ?? "", 10);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 function runJson(command, args, fallback) {
@@ -189,6 +215,50 @@ export function recentDequeueEvents(repo, prs, readCheckRuns = mergifyCheckRuns)
   };
 }
 
+function readPullRequest(repo, prNumber) {
+  return runJson("gh", [
+    "pr",
+    "view",
+    String(prNumber),
+    "--repo",
+    repo,
+    "--json",
+    "number,state,title,headRefName,headRefOid,url,statusCheckRollup"
+  ], {});
+}
+
+export function watchPullRequest(repo, prNumber, options = {}) {
+  if (!Number.isInteger(prNumber) || prNumber <= 0) throw new Error("--watch requires a positive PR number");
+  const readPr = options.readPr ?? readPullRequest;
+  const readCheckRuns = options.readCheckRuns ?? mergifyCheckRuns;
+  const sleep = options.sleep ?? sleepSync;
+  const pollIntervalMs = options.pollIntervalMs ?? positiveIntegerEnv("PR_DOCTOR_WATCH_INTERVAL_MS", 15_000);
+  const maxPolls = options.maxPolls ?? Number.POSITIVE_INFINITY;
+  const transportFailures = [];
+
+  for (let poll = 1; poll <= maxPolls; poll += 1) {
+    const pr = readPr(repo, prNumber);
+    if (!pr || Number(pr.number) !== prNumber) throw new Error(`gh returned no matching PR #${prNumber}`);
+    const state = String(pr.state ?? "UNKNOWN").toUpperCase();
+    if (state === "MERGED" || state === "CLOSED") {
+      options.onPoll?.({ poll, pr, dequeue: { events: [], transportFailures: [] } });
+      return { outcome: state.toLowerCase(), polls: poll, pr, transportFailures };
+    }
+
+    const dequeue = recentDequeueEvents(repo, [pr], readCheckRuns);
+    for (const failure of dequeue.transportFailures) {
+      if (!transportFailures.includes(failure)) transportFailures.push(failure);
+    }
+    options.onPoll?.({ poll, pr, dequeue });
+    if (dequeue.events.length > 0) {
+      return { outcome: "dequeued", polls: poll, pr, dequeueEvents: dequeue.events, transportFailures };
+    }
+    if (poll === maxPolls) break;
+    sleep(pollIntervalMs);
+  }
+  throw new Error(`PR #${prNumber} did not reach merged, closed, or dequeued state within ${maxPolls} polls`);
+}
+
 function parseWorktrees() {
   const output = run("git", ["worktree", "list", "--porcelain"]);
   const blocks = output.split(/\n\n+/u).filter(Boolean);
@@ -233,8 +303,30 @@ function printSection(title, lines) {
   for (const line of lines) console.log(`- ${line}`);
 }
 
-export function main() {
+function parseOptions(argv) {
+  if (argv.length === 0) return { watchPr: null };
+  if (argv.length === 2 && argv[0] === "--watch" && /^\d+$/u.test(argv[1])) {
+    return { watchPr: Number.parseInt(argv[1], 10) };
+  }
+  throw new Error("Usage: pr-doctor [--watch <pr-number>]");
+}
+
+export function main(argv = []) {
+  const options = parseOptions(argv);
   const repo = repoNameWithOwner();
+  if (options.watchPr !== null) {
+    console.log(`PR Doctor watch for ${repo}#${options.watchPr}`);
+    const result = watchPullRequest(repo, options.watchPr, {
+      onPoll: ({ poll, pr, dequeue }) => {
+        const state = String(pr.state ?? "UNKNOWN").toUpperCase();
+        console.log(`poll=${poll} state=${state} checks=${summarizeChecks(pr)}`);
+        for (const failure of dequeue.transportFailures) console.log(`transport-failure: ${failure}`);
+      }
+    });
+    const detail = result.outcome === "dequeued" ? ` events=${result.dequeueEvents.join("; ")}` : "";
+    console.log(`terminal=${result.outcome} pr=#${options.watchPr}${detail}`);
+    return result;
+  }
   const requiredChecks = githubRulesRequired(repo);
   const prs = runJson("gh", [
     "pr",
@@ -287,7 +379,7 @@ export function main() {
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    main();
+    main(process.argv.slice(2));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
