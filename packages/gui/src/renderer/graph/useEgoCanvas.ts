@@ -3,7 +3,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TaskRow, RelationEdge, DecisionRow, FactRef } from "../model/types";
 import type { AxisFilter } from "./graphLayoutTypes";
 import { endpointToNodeId } from "./endpoint";
-import { buildEgoGraph, bfsShown, neighborsOf, egoFocusIdOf, type EgoGraph } from "./canvasEgoLayout";
+import {
+  buildEgoGraph,
+  bfsShown,
+  neighborsOf,
+  oneHopHighlightIds,
+  egoFocusIdOf,
+  type EgoGraph,
+} from "./canvasEgoLayout";
 import { pickDefaultFocus } from "./graphLayoutShared";
 import {
   createFocusHistory,
@@ -24,9 +31,10 @@ import {
  *   shown    — 累积可见集 node id → 距焦点跳数。openFocus 铺 ±2;展开卡片时长出
  *              它的一跳邻居;收起**不撤**任何节点(累计保留)。
  *   expanded — 渲染为详情卡片的 node id,其余是紧凑 chip。
+ *   selectId — 单击选中的节点(与 focus 正交)。派生 oneHopHighlight 供灰化非单跳邻居。
  *
  * 不变量:只有 openFocus / 历史前进后退会重排画布(resetCanvasTo);单击展开、
- * 收起都只增不减,永不重排已铺开的画布。
+ * 收起都只增不减,永不重排已铺开的画布。单击 select ≠ 双击 setFocus。
  */
 
 // openFocus 默认铺开的跳数(上游 2 跳 + 下游 2 跳)。
@@ -38,6 +46,16 @@ export interface EgoCanvas {
   expanded: Set<string>;
   canBack: boolean;
   canForward: boolean;
+  /**
+   * 单击选中的节点 id(与 focusId 正交)。null = 无选中高亮。
+   * 再点同节点 / 点空白 / 换焦点 → 清空。
+   */
+  selectId: string | null;
+  /**
+   * 单跳高亮集合:{selectId}∪一跳邻居;null = 全亮(无选中)。
+   * 节点 dimmed 判定 / 边淡化判定都读它。
+   */
+  oneHopHighlight: Set<string> | null;
   /** 设为画布中心:切焦点 + 推历史 + 重排 ±2 跳。 */
   openFocus: (id: string) => void;
   /** chip 就地展开成卡片,并把它的一跳邻居加入 shown(长出下一环,累积)。 */
@@ -46,6 +64,10 @@ export interface EgoCanvas {
   collapseNode: (id: string) => void;
   /** 退出聚焦:清空焦点与累积态(不脚印化,不动历史)。 */
   clearFocus: () => void;
+  /** 单击选中/再点同节点取消(toggle)。不改 focus、不重排。 */
+  selectNode: (id: string) => void;
+  /** 清空单击选中高亮(点空白 / Esc / 换焦点时调用)。 */
+  clearSelect: () => void;
   goBack: () => void;
   goForward: () => void;
 }
@@ -81,6 +103,8 @@ export function useEgoCanvas({
   const [history, setHistory] = useState<FocusHistoryState>(createFocusHistory);
   const [shown, setShown] = useState<Map<string, number>>(() => new Map());
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  // 单击选中高亮(与 focus 正交):再点同节点 / 点空白 / 换焦点时清空。
+  const [selectId, setSelectId] = useState<string | null>(null);
 
   // 统一图(byId + adj,含合成 task 父子边),供 openFocus / 展开的 BFS 遍历复用。
   const egoGraph: EgoGraph = useMemo(
@@ -88,11 +112,19 @@ export function useEgoCanvas({
     [tasks, decisions, facts, relations],
   );
 
+  // 单跳高亮集合:selectId 自身 + neighborsOf(入+出,轴过滤)。null = 全亮。
+  const oneHopHighlight = useMemo(
+    () => oneHopHighlightIds(egoGraph, selectId, axes),
+    [egoGraph, selectId, axes],
+  );
+
   // 重排画布到某焦点:铺开前后各 2 跳、只展开焦点自身(累积态重置)。
+  // 换焦点时清空单击选中 —— 画布已重排,旧 select 语义失效。
   const resetCanvasTo = useCallback(
     (id: string) => {
       setShown(bfsShown(egoGraph, id, DEFAULT_HOPS, axes));
       setExpanded(new Set([id]));
+      setSelectId(null);
     },
     [egoGraph, axes],
   );
@@ -106,7 +138,7 @@ export function useEgoCanvas({
       const canonical = egoFocusIdOf(id);
       setFocusId(canonical);
       setHistory((prev) => pushFocus(prev, canonical)); // 重复推同 id 会被 pushFocus 折叠
-      resetCanvasTo(canonical);
+      resetCanvasTo(canonical); // 内部清空 selectId
       // G3 §④2:上行同步 AppLocation.focusedEntityRef。换焦点不只改本地,还要让
       // EntityWorkspace 的 facet 切换(关系↔演化)能拿到最新焦点。
       if (onFocusChange) onFocusChange(canonical);
@@ -144,14 +176,25 @@ export function useEgoCanvas({
     setFocusId(null);
     setShown(new Map());
     setExpanded(new Set());
+    setSelectId(null);
     // 不动历史:用户「退出聚焦」不脚印化。清空后 bootstrap 会重开默认焦点。
     // D6:同步清空 AppLocation.focusedEntityRef,否则切到演化史仍显示旧 decision。
     if (onFocusChange) onFocusChange(null);
   }, [onFocusChange]);
 
+  // 单击选中 / 再点同节点取消。不碰 focus、不重排画布。
+  const selectNode = useCallback((id: string) => {
+    setSelectId((prev) => (prev === id ? null : id));
+  }, []);
+
+  const clearSelect = useCallback(() => {
+    setSelectId(null);
+  }, []);
+
   // 历史前进 / 后退:切焦点 + 重排画布(不重复推栈)。
   // D6:必须与 openFocus 一样上行 onFocusChange —— FocusHistoryBar 的 back/forward
   // 只改本地 history 时,AppLocation.focusedEntityRef 会停在旧 decision,演化史开错谱系。
+  // resetCanvasTo 会清空 selectId。
   const stepHistory = useCallback(
     (step: (prev: FocusHistoryState) => FocusHistoryState) => {
       setHistory((prev) => {
@@ -189,10 +232,14 @@ export function useEgoCanvas({
     expanded,
     canBack: historyCanGoBack(history),
     canForward: historyCanGoForward(history),
+    selectId,
+    oneHopHighlight,
     openFocus,
     expandNode,
     collapseNode,
     clearFocus,
+    selectNode,
+    clearSelect,
     goBack,
     goForward,
   };

@@ -54,6 +54,9 @@ export function EgoNode({ data, selected }: any) {
   const entity: Entity = data.entity;
   const axis = AXIS_VAR[entity];
   const focus = Boolean(data.focus);
+  // 聚光灯单击单跳高亮:非 {select}∪邻居 的节点降透明度(保持配色可读,不纯灰替换)。
+  const isDimmed = Boolean(data.dimmed);
+  const dimOpacity = isDimmed ? 0.22 : 1;
 
   if (!data.expanded) {
     // ── chip ──
@@ -62,8 +65,13 @@ export function EgoNode({ data, selected }: any) {
         className="flex h-full w-full items-center gap-2 overflow-hidden rounded-lg border bg-surface-raised pl-0 pr-2.5 cursor-pointer transition-shadow duration-150 hover:shadow-md"
         style={{
           borderColor: focus ? axis : selected ? axis : "var(--color-border-strong)",
-          borderWidth: focus ? 2 : 1,
-          boxShadow: focus ? `0 0 0 2px ${axis}` : undefined,
+          borderWidth: focus ? 2 : selected ? 1.5 : 1,
+          boxShadow: focus
+            ? `0 0 0 2px ${axis}`
+            : selected
+              ? `0 0 0 2px color-mix(in srgb, ${axis} 45%, transparent)`
+              : undefined,
+          opacity: dimOpacity,
         }}
       >
         <Handles />
@@ -100,9 +108,14 @@ export function EgoNode({ data, selected }: any) {
     <div
       className="flex h-full w-full flex-col overflow-hidden rounded-xl border bg-surface shadow-lg"
       style={{
-        borderColor: focus ? axis : "var(--color-border-strong)",
-        borderWidth: focus ? 2 : 1,
-        boxShadow: focus ? `0 0 0 2px ${axis}, 0 8px 28px rgba(0,0,0,0.28)` : undefined,
+        borderColor: focus ? axis : selected ? axis : "var(--color-border-strong)",
+        borderWidth: focus ? 2 : selected ? 1.5 : 1,
+        boxShadow: focus
+          ? `0 0 0 2px ${axis}, 0 8px 28px rgba(0,0,0,0.28)`
+          : selected
+            ? `0 0 0 2px color-mix(in srgb, ${axis} 45%, transparent)`
+            : undefined,
+        opacity: dimOpacity,
       }}
     >
       {/* D4:NodeResizer —— 用户「手动拖放大缩小组件」的入口。只在展开卡片上显示。

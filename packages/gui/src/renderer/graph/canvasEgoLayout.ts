@@ -137,6 +137,20 @@ export function neighborsOf(graph: EgoGraph, id: string, axes: AxisFilter): stri
   return [...out];
 }
 
+/**
+ * 聚光灯单击选中的单跳高亮集合:{selectId} ∪ 其一跳邻居(入+出,经轴过滤)。
+ * selectId 为空时返回 null,表示「无选中高亮态」——布局层应保持全亮、不灰化。
+ * 复用 neighborsOf,不重算邻接。
+ */
+export function oneHopHighlightIds(
+  graph: EgoGraph,
+  selectId: string | null,
+  axes: AxisFilter,
+): Set<string> | null {
+  if (!selectId) return null;
+  return new Set([selectId, ...neighborsOf(graph, selectId, axes)]);
+}
+
 export interface CanvasEgoInput {
   focusId: string;
   tasks: TaskRow[];
