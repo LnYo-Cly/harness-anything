@@ -14,7 +14,7 @@ test("pty host spawns at the project root and streams input output resize and ex
   try {
     const service = createPtyTerminalSessionService({
       workspaceRoot,
-      env: { SHELL: "/bin/sh", PATH: process.env.PATH },
+      env: { PATH: process.env.PATH },
       createId: () => "term-real",
       spawnPty: (shell, _args, options) => {
         spawnContext = { shell, options };
@@ -22,11 +22,11 @@ test("pty host spawns at the project root and streams input output resize and ex
       }
     });
 
-    const created = service.createSession({ name: "Project shell" });
+    const created = service.createSession({ name: "Project shell", shell: process.execPath });
     assert.equal(created.ok, true);
     if (!created.ok) return;
     assert.equal(created.session.cwd, realpathSync(workspaceRoot));
-    assert.equal(spawnContext?.shell, "/bin/sh");
+    assert.equal(spawnContext?.shell, process.execPath);
     assert.equal(spawnContext?.options.cwd, realpathSync(workspaceRoot));
 
     fake.emitData("ready\r\n");

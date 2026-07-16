@@ -30,7 +30,7 @@ test("workspace lease configuration rejects unclaimed writes and permits the cla
 
     const rejected = runJson(rootDir, ["task", "progress", "append", taskId, "--text", "unclaimed write"], false);
     assert.equal(rejected.ok, false);
-    assert.equal(rejected.error?.code, "write_rejected");
+    assert.equal(rejected.error?.code, "task_lease_required");
     assert.match(rejected.error?.hint ?? "", /requires an active lease/u);
     assert.match(rejected.error?.hint ?? "", new RegExp(`ha task claim ${taskId}`, "u"));
 
@@ -94,7 +94,7 @@ test("explicit true environment override enables lease enforcement without confi
       HARNESS_TASK_LEASE_ENFORCEMENT: "1"
     });
     assert.equal(rejected.ok, false);
-    assert.equal(rejected.error?.code, "write_rejected");
+    assert.equal(rejected.error?.code, "task_lease_required");
   });
 });
 

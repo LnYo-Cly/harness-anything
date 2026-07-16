@@ -1,5 +1,6 @@
 import {
   commandReceiptEnvelope,
+  failureReceiptNextActions,
   type CommandFailureReceipt,
   type CommandReceipt,
   type CommandReceiptEnvelope
@@ -38,6 +39,7 @@ export function failureReceipt(
   hint: string,
   details: JsonObject = {}
 ): CommandFailureReceipt {
+  const next = failureReceiptNextActions(code, details);
   return {
     ok: false,
     schema: commandReceiptEnvelope,
@@ -45,6 +47,7 @@ export function failureReceipt(
     action: actionFromMethod(command),
     summary: hint,
     error: { code, hint },
+    ...(next ? { next } : {}),
     ...(Object.keys(details).length > 0 ? { details } : {}),
     meta: {
       generatedAt: new Date().toISOString(),

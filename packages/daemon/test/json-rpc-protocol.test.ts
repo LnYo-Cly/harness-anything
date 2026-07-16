@@ -181,7 +181,15 @@ test("repo methods fail closed when the repo runtime is unavailable", async () =
 
   assert.equal(receipt.ok, false);
   assert.equal(receipt.error?.code, "repo_lock_held");
+  assert.equal(receipt.error?.hint, "Repo locked is not attached to this daemon.");
   assert.equal((receipt.details.repo as { state?: string }).state, "unavailable");
+  assert.deepEqual(receipt.next, [{
+    command: "ha --repo locked daemon status --json",
+    description: "Inspect this repo's daemon attachment state; unavailable repos are retried automatically."
+  }, {
+    command: "ha daemon repo register --repo-id locked --root /tmp/locked",
+    description: "Register or re-enable this repo if it is missing or disabled, then retry the original command."
+  }]);
   assert.equal(serviceCalls, 0);
 });
 
@@ -217,7 +225,12 @@ test("repo methods fail closed when the repo runtime context is missing", async 
 
   assert.equal(receipt.ok, false);
   assert.equal(receipt.error?.code, "repo_unavailable");
+  assert.equal(receipt.error?.hint, "Repo canonical is not attached to this daemon.");
   assert.equal((receipt.details.repo as { lastError?: string }).lastError, "runtime context not found");
+  assert.deepEqual(receipt.next?.map((action: { command: string }) => action.command), [
+    "ha --repo canonical daemon status --json",
+    "ha daemon repo register --repo-id canonical --root /tmp/canonical"
+  ]);
   assert.equal(serviceCalls, 0);
 });
 
@@ -268,6 +281,58 @@ test("repo.daemon.status remains available for unavailable repos", async () => {
   assert.equal(receipt.ok, true);
   assert.equal(receipt.details.data.requestedRepoId, "locked");
   assert.equal((receipt.details.data.repos as ReadonlyArray<{ state: string }>)[1]?.state, "unavailable");
+});
+
+test("daemon control returns accepted data before exposing the stop action", async () => {
+  let stopRequested = false;
+  const roster = sampleRoster();
+  const server = makeServer({
+    ...rosterIdentityOptions(roster),
+    authContext: {
+      transportKind: "ssh-exec",
+      sshExecUser: { username: "alice", host: "team-host", source: "ssh-authenticated-exec" }
+    },
+    services: {
+      LocalControllerService: emptyLocalController(),
+      TerminalSessionService: createInMemoryTerminalSessionService({ createId: () => "term-1" }),
+      DaemonControlService: {
+        requestControl: (kind) => ({
+          ok: true,
+          accepted: {
+            schema: "daemon-control-accepted/v1",
+            accepted: true,
+            operationId: "control-restart",
+            kind,
+            scope: "service",
+            requestedAt: "2026-07-16T08:30:00.000Z",
+            before: {
+              pid: 41001,
+              loadedIdentity: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              repoCount: 2,
+              queueDepth: 1
+            }
+          },
+          afterResponse: () => {
+            stopRequested = true;
+          }
+        })
+      }
+    }
+  });
+  await server.handle(readFixture("hello-compatible.json"));
+
+  const response = await server.handle({
+    jsonrpc: "2.0",
+    id: "restart",
+    method: "admin.daemon.restart",
+    params: { payload: { reason: "operator request", drainTimeoutMs: 5000 } }
+  });
+  const receipt = resultReceipt(response);
+  assert.equal(receipt.ok, true);
+  assert.equal(receipt.details.data.schema, "daemon-control-accepted/v1");
+  assert.equal(stopRequested, false);
+  server.afterResponse?.();
+  assert.equal(stopRequested, true);
 });
 
 test("repo.command.run rejects payload rootDir that does not match the repo namespace", async () => {

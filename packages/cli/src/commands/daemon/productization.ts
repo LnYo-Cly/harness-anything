@@ -9,9 +9,7 @@ import {
   registerDaemonRepo,
   resolveHarnessLayout,
 } from "../../../../kernel/src/index.ts";
-import {
-  currentDaemonProtocolVersion
-} from "../../../../daemon/src/index.ts";
+import { currentDaemonProtocolVersion } from "../../../../daemon/src/index.ts";
 import { initializeHarness } from "../init.ts";
 import { resolveCliVersion } from "../core/version.ts";
 import { cliError, CliErrorCode } from "../../cli/error-codes.ts";
@@ -20,6 +18,14 @@ import { resolveLocalDaemonTarget, requestLocalDaemonJsonRpc, type LocalDaemonTa
 import { renderDaemonHelp } from "./help.ts";
 import { loadDaemonIdentityWithEmail } from "./identity.ts";
 import { runDaemonRepoCommand } from "./repo-registry.ts";
+import {
+  runDaemonControl,
+  type DaemonControlKind,
+  type DaemonControlLifecycle,
+  type DaemonControlRequest
+} from "./control.ts";
+
+export type { DaemonControlLifecycle } from "./control.ts";
 
 export {
   daemonStatusPayload,
@@ -38,6 +44,8 @@ export interface DaemonCommandInput {
     args: ReadonlyArray<string>,
     hooks?: DaemonServeHooks
   ) => Promise<void>;
+  readonly requestDaemonControl?: (request: DaemonControlRequest) => Promise<Record<string, unknown>>;
+  readonly daemonControlLifecycle?: DaemonControlLifecycle;
 }
 
 export interface DaemonServeHooks {
@@ -76,6 +84,8 @@ export async function runDaemonProductCommand(input: DaemonCommandInput): Promis
     if (action === "start") return await startDaemon(input);
     if (action === "status") return await statusDaemon(input);
     if (action === "stop") return await stopDaemon(input);
+    if (action === "restart") return await controlDaemon(input, "restart");
+    if (action === "refresh") return await controlDaemon(input, "refresh");
     if (action === "bootstrap-server") return await bootstrapServer(input);
     if (action === "install-templates") return installTemplates(input);
     if (action === "repo") return runDaemonRepoCommand({ rootDir: input.rootDir, args: input.args, json: input.json });
@@ -89,6 +99,12 @@ export async function runDaemonProductCommand(input: DaemonCommandInput): Promis
     emitDaemonError(CliErrorCode.JournalUnavailable, error instanceof Error ? error.message : String(error), input.json);
     return 1;
   }
+}
+
+async function controlDaemon(input: DaemonCommandInput, kind: DaemonControlKind): Promise<number> {
+  const result = await runDaemonControl({ ...input, daemonEntryPath: productizationCliEntrypointPath }, kind);
+  emitDaemonResult(`daemon-${kind}`, result, input.json);
+  return 0;
 }
 
 async function startDaemon(input: DaemonCommandInput): Promise<number> {
@@ -130,7 +146,7 @@ async function startDaemon(input: DaemonCommandInput): Promise<number> {
       env: { ...process.env, HARNESS_DAEMON_MODE: "direct", HARNESS_DAEMON_USER_ROOT: target.userRoot, HARNESS_DAEMON_ID: target.daemonId }
     });
     child.unref();
-    const status = await waitForReachableStatus(target, 6_000);
+    const status = daemonStatusForCli(await waitForReachableStatus(target, 6_000));
     emitDaemonResult("daemon-start", { ...status, mode: "service", socketPath }, input.json);
     return 0;
   }
@@ -146,16 +162,17 @@ async function statusDaemon(input: DaemonCommandInput): Promise<number> {
   const layout = resolveHarnessLayout(createHarnessRuntimeContext(target.canonicalRoot, input.layoutOverrides));
   const lockStatus = readDaemonLock(path.join(layout.locksRoot, "global.lock"));
   const rpcStatus = await readReachableDaemonStatus(target);
+  const cliRpcStatus = rpcStatus ? daemonStatusForCli(rpcStatus) : undefined;
   emitDaemonResult("daemon-status", {
     ...lockStatus,
-    ...(rpcStatus ?? {
+    ...(cliRpcStatus ?? {
       version: resolveCliVersion(),
       protocolVersion: currentDaemonProtocolVersion,
       queueDepth: 0,
       queue: { interactive: 0, normal: 0, background: 0, maintenance: 0, running: false },
       connections: { active: 0, total: 0 }
     }),
-    started: rpcStatus?.started === true,
+    started: cliRpcStatus?.started === true,
     reachable: Boolean(rpcStatus)
   }, input.json);
   return 0;
@@ -172,8 +189,9 @@ async function stopDaemon(input: DaemonCommandInput): Promise<number> {
   const lockPath = path.join(layout.locksRoot, "global.lock");
   const lockStatus = readDaemonLock(lockPath);
   const rpcStatus = await readReachableDaemonStatus(target);
-  const before = { ...lockStatus, ...rpcStatus };
-  const daemonPid = typeof rpcStatus?.pid === "number" ? rpcStatus.pid : undefined;
+  const cliRpcStatus = rpcStatus ? daemonStatusForCli(rpcStatus) : undefined;
+  const before = { ...lockStatus, ...cliRpcStatus };
+  const daemonPid = typeof cliRpcStatus?.pid === "number" ? cliRpcStatus.pid : undefined;
   if (daemonPid !== undefined) {
     process.kill(daemonPid, "SIGTERM");
   }
@@ -436,13 +454,42 @@ async function waitForEndpointStopped(target: LocalDaemonTarget, timeoutMs: numb
   return !await readReachableDaemonStatus(target);
 }
 
+function daemonStatusForCli(status: Record<string, unknown>): Record<string, unknown> {
+  if (status.schema !== "daemon-status/v2") return status;
+  const service = isDaemonRecord(status.service) ? status.service : {};
+  const requestedRepo = isDaemonRecord(status.requestedRepo) ? status.requestedRepo : {};
+  const lock = isDaemonRecord(requestedRepo.lock) ? requestedRepo.lock : {};
+  const queue = isDaemonRecord(service.queue) ? service.queue : {};
+  const build = isDaemonRecord(service.build) ? service.build : {};
+  const repos = Array.isArray(status.repos)
+    ? status.repos.map((entry) => {
+        if (!isDaemonRecord(entry)) return entry;
+        const repoLock = isDaemonRecord(entry.lock) ? entry.lock : {};
+        return { ...entry, lockPath: repoLock.path ?? null, lockOwnerToken: repoLock.ownerToken ?? null };
+      })
+    : [];
+  return {
+    ...status,
+    ...service,
+    version: build.version ?? resolveCliVersion(),
+    protocolVersion: currentDaemonProtocolVersion,
+    rootDir: requestedRepo.canonicalRoot,
+    repoId: requestedRepo.repoId,
+    lock,
+    lockPath: lock.path ?? null,
+    lockOwnerToken: lock.ownerToken ?? null,
+    queueDepth: queue.depth ?? 0,
+    repos
+  };
+}
+
 function emitDaemonResult(command: string, result: Record<string, unknown>, json: boolean): void {
   if (json) {
     console.log(JSON.stringify({ ok: true, schema: "daemon-command/v1", command, ...result }));
     return;
   }
   const parts = [`ok`, `command=${command}`];
-  for (const key of ["started", "reachable", "mode", "queueDepth", "version", "protocolVersion", "pid", "rootDir", "repoId", "endpoint", "drained", "stopped", "reportPath", "outputDir"] as const) {
+  for (const key of ["started", "reachable", "mode", "queueDepth", "version", "protocolVersion", "pid", "rootDir", "repoId", "endpoint", "drained", "stopped", "accepted", "operationId", "kind", "reportPath", "outputDir"] as const) {
     if (result[key] !== undefined) parts.push(`${key}=${JSON.stringify(result[key])}`);
   }
   if (typeof result.lockPath === "string") parts.push(`lock=${result.lockPath}`);

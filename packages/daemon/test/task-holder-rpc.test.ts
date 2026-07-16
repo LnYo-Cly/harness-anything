@@ -118,6 +118,11 @@ test("task lease enforcement guards daemon task progress API writes when enabled
     }));
     assert.equal(denied.ok, false);
     assert.equal(denied.error?.code, "task_lease_required");
+    assert.match(denied.error?.hint ?? "", new RegExp(`^task ${taskId} requires an active lease;`, "u"));
+    assert.deepEqual(denied.next, [{
+      command: `ha task claim ${taskId}`,
+      description: "Claim the task lease, then retry the original command."
+    }]);
     assert.equal(denied.details.holder.principal.personId, "person_alice");
     assert.equal(denied.details.leaseExpiresAt, "2026-07-10T00:01:00.000Z");
     assert.equal(progressWrites, 0);

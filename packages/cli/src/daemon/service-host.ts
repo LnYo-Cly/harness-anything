@@ -1,14 +1,20 @@
 import {
+  daemonControlInProgressError,
   makeLocalControllerService,
   makeRuntimeEventAppendPromise,
   makeRuntimeEventLedgerService,
   makeTaskHolderService
 } from "../../../application/src/index.ts";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { realpathSync } from "node:fs";
 import {
   createPtyTerminalSessionService,
   createJsonRpcProtocolServer,
+  calculateDaemonArtifactIdentity,
+  type DaemonActiveControlStatus,
+  type DaemonControlService,
+  type DaemonStatusResultV2,
   type DaemonAuthenticationContext,
   type DaemonRepoAvailabilityFailure,
   type DaemonRepoNamespace
@@ -36,6 +42,11 @@ import {
   makeDaemonQueuedOperationalWriteCoordinator,
   makeDaemonQueuedWriteCoordinator
 } from "./queued-write-coordinator.ts";
+import {
+  createDaemonReconcileState,
+  reconcileDaemonRepoRegistry,
+  type DaemonReconcileState
+} from "./registry-reconciler.ts";
 
 type HarnessDaemonRuntime = ReturnType<CliCompositionAdapterProvider["createDaemonRuntime"]>;
 type MultiRepoHarnessDaemonRuntime = ReturnType<CliCompositionAdapterProvider["createMultiRepoDaemonRuntime"]>;
@@ -50,12 +61,17 @@ export function createDaemonServiceHost(
   idleMs: number,
   endpoint: string,
   connections: DaemonConnectionStats,
-  userRoot: string
+  userRoot: string,
+  build: {
+    readonly entrypoint: string;
+    readonly loadedIdentity: string;
+    readonly startedAt: string;
+  }
 ): {
   readonly daemonId: string;
   readonly createProtocolServer: (authContext: DaemonAuthenticationContext) => ReturnType<typeof createJsonRpcProtocolServer>;
   readonly acceptsSshForcedCommand: (canonicalRoot: string) => boolean;
-  readonly status: () => Record<string, unknown>;
+  readonly status: () => DaemonStatusResultV2;
   readonly onConnectionStart: () => void;
   readonly onConnectionSettled: () => void;
   readonly scheduleIdleExit: () => void;
@@ -75,6 +91,7 @@ export function createDaemonServiceHost(
   let reconcileTimer: ReturnType<typeof setInterval> | undefined;
   let reconciling = false;
   let stopping = false;
+  let activeControl: DaemonActiveControlStatus | null = null;
   const stop = async () => {
     if (stopping) return;
     stopping = true;
@@ -99,6 +116,44 @@ export function createDaemonServiceHost(
     },
     onCommandSettled: scheduleIdleExit
   };
+  const reconcileState = createDaemonReconcileState();
+  const controlService: DaemonControlService = {
+    requestControl: (kind, request) => {
+      void request;
+      if (activeControl) {
+        return {
+          ok: false,
+          error: daemonControlInProgressError(activeControl)
+        };
+      }
+      const before = serviceStatus(defaultRepoId);
+      const operationId = `control_${randomUUID()}`;
+      const requestedAt = new Date().toISOString();
+      activeControl = { operationId, kind, phase: "accepted", requestedAt };
+      return {
+        ok: true,
+        accepted: {
+          schema: "daemon-control-accepted/v1",
+          accepted: true,
+          operationId,
+          kind,
+          scope: "service",
+          requestedAt,
+          before: {
+            pid: before.service.pid,
+            loadedIdentity: before.service.build.loadedIdentity,
+            repoCount: before.service.repoCount,
+            queueDepth: before.service.queue.depth
+          }
+        },
+        afterResponse: () => {
+          if (activeControl?.operationId !== operationId) return;
+          activeControl = { ...activeControl, phase: "draining" };
+          requestStop?.();
+        }
+      };
+    }
+  };
   const repoBindings = new Map(repos.map((repo) => {
     const repoRuntime = runtime.getRepoRuntime(repo.repoId);
     if (!repoRuntime) throw new Error(`daemon runtime missing repo context: ${repo.repoId}`);
@@ -108,17 +163,20 @@ export function createDaemonServiceHost(
       runtime,
       layoutOverrides,
       commandOptions,
-      { daemonId, endpoint, connections, userRoot }
+      { daemonId, endpoint, connections, userRoot, reconcileStatus: reconcileState, build, controlService, activeControl: () => activeControl }
     )] as const;
   }));
+  const selectedFallbackBinding = repoBindings.get(defaultRepoId) ?? repoBindings.values().next().value;
+  if (!selectedFallbackBinding) throw new Error("daemon service host has no repo bindings");
+  const serviceFallbackBinding: RepoServiceBinding = selectedFallbackBinding;
   return {
     daemonId,
     createProtocolServer: (authContext) => createJsonRpcProtocolServer({
       daemonId,
-      repos: sortedDaemonRepos([...reposById.values()]),
+      repos: protocolRepos(),
       services: defaultRepoBinding().services,
-      resolveRepoServices: (repo) => repoBindings.get(repo.repoId)?.services,
-      resolveRepoIdentity: (repo) => repoBindings.get(repo.repoId)?.identity,
+      resolveRepoServices: (repo) => protocolRepoBinding(repo)?.services,
+      resolveRepoIdentity: (repo) => protocolRepoBinding(repo)?.identity,
       resolveRepoAvailability: (repo) => repoAvailabilityFailure(runtime, repo),
       leaseEnforcementEnabled: (repo) => leaseEnforcementEnabled({ rootDir: repo.canonicalRoot, layoutOverrides }),
       authContext,
@@ -133,14 +191,7 @@ export function createDaemonServiceHost(
     acceptsSshForcedCommand: (canonicalRoot) => [...repoBindings.values()].some((binding) =>
       binding.identity.mode === "remote" && sameCanonicalRoot(binding.repo.canonicalRoot, canonicalRoot)
     ),
-    status: () => daemonStatusPayload({
-      daemonId,
-      rootDir: defaultRepoBinding().repo.canonicalRoot,
-      repoId: defaultRepoBinding().repo.repoId,
-      endpoint,
-      runtimeStatus: runtime.status(),
-      connections
-    }),
+    status: () => serviceStatus(defaultRepoBinding().repo.repoId),
     onConnectionStart: () => {
       if (idleTimer) clearTimeout(idleTimer);
       idleTimer = undefined;
@@ -163,7 +214,7 @@ export function createDaemonServiceHost(
         }
       };
       reconcileTimer = setInterval(() => {
-        void reconcile().catch(() => undefined);
+        void reconcile();
       }, 1_000);
       reconcileTimer.unref();
     },
@@ -171,49 +222,80 @@ export function createDaemonServiceHost(
   };
 
   function defaultRepoBinding(): RepoServiceBinding {
-    const binding = repoBindings.get(defaultRepoId) ?? repoBindings.values().next().value;
-    if (!binding) throw new Error("daemon service host has no repo bindings");
-    return binding;
+    return repoBindings.get(defaultRepoId) ?? repoBindings.values().next().value ?? serviceFallbackBinding;
+  }
+
+  function protocolRepos(): ReadonlyArray<DaemonRepoNamespace> {
+    return sortedDaemonRepos(reposById.size > 0 ? [...reposById.values()] : [serviceFallbackBinding.repo]);
+  }
+
+  function protocolRepoBinding(repo: DaemonRepoNamespace): RepoServiceBinding | undefined {
+    const binding = repoBindings.get(repo.repoId);
+    if (binding) return binding;
+    return reposById.size === 0
+      && repo.repoId === serviceFallbackBinding.repo.repoId
+      && sameCanonicalRoot(repo.canonicalRoot, serviceFallbackBinding.repo.canonicalRoot)
+      ? serviceFallbackBinding
+      : undefined;
   }
 
   async function reconcileDaemonRepos(userRoot: string): Promise<void> {
-    const desiredRepos = readDaemonRegistry({ userRoot }).repos.filter((repo) => repo.state === "enabled");
-    if (desiredRepos.length === 0) return;
-    const desiredIds = new Set(desiredRepos.map((repo) => repo.repoId));
-    for (const repo of desiredRepos) {
-      if (!reposById.has(repo.repoId)) {
-        const namespace = { repoId: repo.repoId, canonicalRoot: repo.canonicalRoot } satisfies DaemonRepoNamespace;
-        reposById.set(repo.repoId, namespace);
-      }
-      if (!runtime.getRepoRuntime(repo.repoId)) {
-        await runtime.attachRepo({
+    await reconcileDaemonRepoRegistry({
+      loadDesiredRepos: () => readDaemonRegistry({ userRoot }).repos.filter((repo) => repo.state === "enabled"),
+      knownRepoIds: () => [...reposById.keys()],
+      repoStatus: (repoId) => runtime.status().repos.find((candidate) => candidate.repoId === repoId),
+      attachRepo: async (repo) => {
+        if (!reposById.has(repo.repoId)) {
+          reposById.set(repo.repoId, { repoId: repo.repoId, canonicalRoot: repo.canonicalRoot });
+        }
+        return runtime.attachRepo({
           repoId: repo.repoId,
           rootDir: repo.canonicalRoot,
           displayName: repo.displayName,
           ...(layoutOverrides ? { layoutOverrides } : {})
         });
-      }
-      if (!repoBindings.has(repo.repoId)) {
+      },
+      bindRepo: (repo) => {
+        if (repoBindings.has(repo.repoId)) return;
+        const namespace = reposById.get(repo.repoId) ?? { repoId: repo.repoId, canonicalRoot: repo.canonicalRoot };
+        reposById.set(repo.repoId, namespace);
         const repoRuntime = runtime.getRepoRuntime(repo.repoId);
-        if (repoRuntime) {
-          repoBindings.set(repo.repoId, createRepoServiceBinding(
-            reposById.get(repo.repoId)!,
-            repoRuntime,
-            runtime,
-            layoutOverrides,
-            commandOptions,
-            { daemonId, endpoint, connections, userRoot }
-          ));
-        }
+        if (!repoRuntime) throw new Error(`daemon runtime missing repo context: ${repo.repoId}`);
+        repoBindings.set(repo.repoId, createRepoServiceBinding(
+          namespace,
+          repoRuntime,
+          runtime,
+          layoutOverrides,
+          commandOptions,
+          { daemonId, endpoint, connections, userRoot, reconcileStatus: reconcileState, build, controlService, activeControl: () => activeControl }
+        ));
+      },
+      detachRepo: async (repoId) => {
+        if (runtime.getRepoRuntime(repoId)) await runtime.detachRepo(repoId);
+      },
+      removeRepo: (repoId) => {
+        repoBindings.delete(repoId);
+        reposById.delete(repoId);
       }
-    }
-    for (const repoId of [...reposById.keys()]) {
-      if (desiredIds.has(repoId)) continue;
-      repoBindings.delete(repoId);
-      reposById.delete(repoId);
-      if (runtime.getRepoRuntime(repoId)) await runtime.detachRepo(repoId);
-    }
-    await runtime.retryUnavailableRepos();
+    }, reconcileState);
+  }
+
+  function serviceStatus(repoId: string): DaemonStatusResultV2 {
+    const target = reposById.get(repoId) ?? defaultRepoBinding().repo;
+    return daemonStatusPayload({
+      daemonId,
+      rootDir: target.canonicalRoot,
+      repoId: target.repoId,
+      endpoint,
+      userRoot,
+      startedAt: build.startedAt,
+      loadedIdentity: build.loadedIdentity,
+      readInstalledIdentity: () => calculateDaemonArtifactIdentity(build.entrypoint).identity,
+      activeControl,
+      runtimeStatus: runtime.status(),
+      connections,
+      reconcileStatus: reconcileState
+    });
   }
 }
 
@@ -223,7 +305,20 @@ function createRepoServiceBinding(
   managerRuntime: MultiRepoHarnessDaemonRuntime,
   layoutOverrides: { readonly authoredRoot?: string } | undefined,
   commandOptions: { readonly onCommandStart: () => void; readonly onCommandSettled: () => void },
-  statusOptions?: { readonly daemonId?: string; readonly endpoint?: string; readonly connections?: DaemonConnectionStats; readonly userRoot?: string }
+  statusOptions?: {
+    readonly daemonId?: string;
+    readonly endpoint?: string;
+    readonly connections?: DaemonConnectionStats;
+    readonly userRoot?: string;
+    readonly reconcileStatus?: DaemonReconcileState;
+    readonly build?: {
+      readonly entrypoint: string;
+      readonly loadedIdentity: string;
+      readonly startedAt: string;
+    };
+    readonly controlService?: DaemonControlService;
+    readonly activeControl?: () => DaemonActiveControlStatus | null;
+  }
 ): {
   readonly repo: DaemonRepoNamespace;
   readonly identity: RepoIdentity;
@@ -278,11 +373,20 @@ function createRepoServiceBinding(
             rootDir: targetRepo.canonicalRoot,
             repoId: targetRepo.repoId,
             endpoint: statusOptions?.endpoint ?? "repo-router",
+            userRoot: statusOptions?.userRoot ?? rootDir,
+            startedAt: statusOptions?.build?.startedAt ?? new Date(0).toISOString(),
+            loadedIdentity: statusOptions?.build?.loadedIdentity ?? "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            readInstalledIdentity: () => statusOptions?.build
+              ? calculateDaemonArtifactIdentity(statusOptions.build.entrypoint).identity
+              : "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            activeControl: statusOptions?.activeControl?.() ?? null,
             runtimeStatus: managerRuntime.status(),
-            connections: statusOptions?.connections ?? { active: 0, total: 0 }
+            connections: statusOptions?.connections ?? { active: 0, total: 0 },
+            ...(statusOptions?.reconcileStatus ? { reconcileStatus: statusOptions.reconcileStatus } : {})
           });
         }
       },
+      ...(statusOptions?.controlService ? { DaemonControlService: statusOptions.controlService } : {}),
       CliCommandService: cliCommandService,
       DocSyncService: {
         submit: (request, context) => {
