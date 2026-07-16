@@ -1,6 +1,6 @@
 // harness-test-tier: contract
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -33,14 +33,32 @@ test("daemon artifact identity is deterministic over the adjudicated regular-fil
   }
 });
 
-test("installed CLI artifact identity remains stable and exposes a sub-50ms calculation", () => {
-  const entrypoint = path.resolve("packages/cli/dist/cli/src/index.js");
-  assert.equal(existsSync(entrypoint), true, "build packages/cli before the artifact benchmark");
-  const samples = Array.from({ length: 7 }, () => calculateDaemonArtifactIdentity(entrypoint));
-  assert.equal(new Set(samples.map((sample) => sample.identity)).size, 1);
-  assert.equal(samples[0]!.fileCount > 0, true);
-  const fastest = Math.min(...samples.map((sample) => sample.elapsedMs));
-  assert.equal(fastest < 50, true, `fastest artifact identity calculation took ${fastest.toFixed(2)}ms`);
+test("representative installed artifact identity is stable and every calculation stays below 50ms", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "ha-daemon-installed-artifact-"));
+  try {
+    const dist = path.join(root, "dist");
+    const entrypoint = path.join(dist, "cli/src/index.js");
+    mkdirSync(path.dirname(entrypoint), { recursive: true });
+    writeFileSync(entrypoint, "export const cli = true;\n");
+    for (let index = 1; index < 256; index += 1) {
+      const modulePath = path.join(
+        dist,
+        `chunk-${String(index % 16).padStart(2, "0")}`,
+        `module-${String(index).padStart(3, "0")}.js`
+      );
+      mkdirSync(path.dirname(modulePath), { recursive: true });
+      writeFileSync(modulePath, `export const artifact${index} = ${JSON.stringify("x".repeat(1_024))};\n`);
+    }
+
+    const samples = Array.from({ length: 7 }, () => calculateDaemonArtifactIdentity(entrypoint));
+    assert.equal(new Set(samples.map((sample) => sample.identity)).size, 1);
+    assert.equal(samples[0]!.artifactRoot, realpathSync(dist));
+    assert.equal(samples[0]!.fileCount, 256);
+    const slowest = Math.max(...samples.map((sample) => sample.elapsedMs));
+    assert.equal(slowest < 50, true, `slowest artifact identity calculation took ${slowest.toFixed(2)}ms`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("daemon status v2 aggregates every repo and derives a renderer-safe projection", () => {

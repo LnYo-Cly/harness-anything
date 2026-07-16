@@ -122,7 +122,9 @@ test("CLI capabilities exposes daemon onboarding operations", () => {
       "register",
       "start",
       "status",
-      "stop"
+      "stop",
+      "restart",
+      "refresh"
     ]);
     assert.equal(daemon.report.ops[0]?.command, "ha daemon repo register --root .");
   });
