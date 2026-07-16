@@ -4,6 +4,10 @@ import {
   type JsonValue
 } from "../../../../daemon/src/index.ts";
 import { resolveCliVersion } from "../core/version.ts";
+import type {
+  DaemonReconcileError,
+  DaemonReconcileState
+} from "../../daemon/registry-reconciler.ts";
 
 export interface DaemonConnectionStats {
   active: number;
@@ -51,6 +55,7 @@ export function daemonStatusPayload(input: {
     readonly repos?: ReadonlyArray<DaemonStatusRuntimeRepo>;
   };
   readonly connections: DaemonConnectionStats;
+  readonly reconcileStatus?: Pick<DaemonReconcileState, "lastReconcileAt" | "lastReconcileError" | "repoErrors">;
 }): JsonObject {
   const selectedRepo = input.runtimeStatus.repos?.find((repo) => repo.repoId === input.repoId) ?? input.runtimeStatus.repos?.[0];
   const queue = selectedRepo?.queue ?? input.runtimeStatus.queue ?? emptyDaemonQueue;
@@ -84,6 +89,8 @@ export function daemonStatusPayload(input: {
       active: input.connections.active,
       total: input.connections.total
     },
+    lastReconcileAt: input.reconcileStatus?.lastReconcileAt ?? null,
+    lastReconcileError: reconcileErrorPayload(input.reconcileStatus?.lastReconcileError ?? null),
     lastRecovery: toJsonValue(lastRecovery),
     projectionGeneration: toJsonValue(projectionGeneration),
     ...(input.runtimeStatus.repos ? {
@@ -97,9 +104,20 @@ export function daemonStatusPayload(input: {
         lastRecovery: toJsonValue(repo.lastRecovery ?? null),
         projectionGeneration: toJsonValue(repo.projectionGeneration ?? null),
         lastError: repo.lastError ?? null,
-        lastMaterializerError: repo.lastMaterializerError ?? null
+        lastMaterializerError: repo.lastMaterializerError ?? null,
+        lastReconcileError: reconcileErrorPayload(input.reconcileStatus?.repoErrors.get(repo.repoId) ?? null)
       }))
     } : {})
+  };
+}
+
+function reconcileErrorPayload(error: DaemonReconcileError | null): JsonObject | null {
+  if (!error) return null;
+  return {
+    at: error.at,
+    code: error.code,
+    message: error.message,
+    repoId: error.repoId
   };
 }
 

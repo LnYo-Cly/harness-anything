@@ -6,9 +6,83 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import {
+  createDaemonReconcileState,
+  reconcileDaemonRepoRegistry,
+  type DaemonRepoReconcileAdapter
+} from "../src/daemon/registry-reconciler.ts";
 import { ensureTestHarnessIdentity } from "./helpers/git-fixtures.ts";
 
 const cliEntry = path.resolve("packages/cli/src/index.ts");
+
+test("registry reconciler isolates attach, bind, detach, and retry failures by repo", async () => {
+  const desiredRepos = ["attach-bad", "retry-bad", "bind-bad", "healthy"].map((repoId) => ({
+    repoId,
+    canonicalRoot: `/repos/${repoId}`,
+    displayName: repoId,
+    state: "enabled" as const,
+    registeredAt: "2026-07-16T08:00:00.000Z"
+  }));
+  const known = new Set(["retry-bad", "bind-bad", "healthy", "detach-bad", "detach-good"]);
+  const statuses = new Map<string, { state: string; lastError?: string }>([
+    ["retry-bad", { state: "unavailable", lastError: "retry unavailable" }],
+    ["bind-bad", { state: "attached" }],
+    ["healthy", { state: "attached" }],
+    ["detach-bad", { state: "attached" }],
+    ["detach-good", { state: "attached" }]
+  ]);
+  const bound: string[] = [];
+  const removed: string[] = [];
+  let injectFailures = true;
+  const adapter: DaemonRepoReconcileAdapter = {
+    loadDesiredRepos: () => desiredRepos,
+    knownRepoIds: () => [...known],
+    repoStatus: (repoId: string) => statuses.get(repoId),
+    attachRepo: async (repo) => {
+      known.add(repo.repoId);
+      if (injectFailures && (repo.repoId === "attach-bad" || repo.repoId === "retry-bad")) {
+        throw new Error(`${repo.repoId} attach failure`);
+      }
+      const status = { state: "attached" };
+      statuses.set(repo.repoId, status);
+      return status;
+    },
+    bindRepo: (repo) => {
+      if (injectFailures && repo.repoId === "bind-bad") throw new Error("bind failure");
+      bound.push(repo.repoId);
+    },
+    detachRepo: async (repoId: string) => {
+      if (injectFailures && repoId === "detach-bad") throw new Error("detach failure");
+      statuses.set(repoId, { state: "detached" });
+    },
+    removeRepo: (repoId: string) => {
+      known.delete(repoId);
+      removed.push(repoId);
+    },
+    now: () => new Date("2026-07-16T08:30:00.000Z")
+  };
+  const state = createDaemonReconcileState();
+
+  await reconcileDaemonRepoRegistry(adapter, state);
+
+  assert.deepEqual([...state.repoErrors.keys()].sort(), ["attach-bad", "bind-bad", "detach-bad", "retry-bad"]);
+  assert.deepEqual(bound, ["healthy"]);
+  assert.deepEqual(removed, ["detach-good"]);
+  assert.equal(known.has("detach-bad"), true);
+  assert.equal(state.lastReconcileError?.repoId, "detach-bad");
+  assert.match(state.repoErrors.get("retry-bad")?.message ?? "", /^retry failed:/u);
+
+  injectFailures = false;
+  await reconcileDaemonRepoRegistry(adapter, state);
+
+  assert.equal(state.repoErrors.size, 0);
+  assert.equal(state.lastReconcileError, null);
+  assert.deepEqual(removed, ["detach-good", "detach-bad"]);
+  assert.equal(bound.includes("healthy"), true);
+  assert.equal(bound.includes("attach-bad"), true);
+  assert.equal(bound.includes("retry-bad"), true);
+  assert.equal(bound.includes("bind-bad"), true);
+});
 
 test("daemon client routes writes for two registered repos through one user-level daemon", () => {
   withTempRoot((workspaceRoot) => {
@@ -131,6 +205,75 @@ test("registering a new tmp repo cannot replace the canonical daemon or break ca
   }, "/tmp");
 });
 
+test("daemon service releases the final repo lock and reattaches after empty and all-disabled registry states", async () => {
+  await withTempRootAsync(async (workspaceRoot) => {
+    const userRoot = path.join(workspaceRoot, "user-daemon");
+    const alphaRoot = path.join(workspaceRoot, "alpha");
+    mkdirSync(alphaRoot, { recursive: true });
+    ensureTestHarnessIdentity(alphaRoot);
+    runRawJson(alphaRoot, ["init"], { HARNESS_DAEMON_MODE: "direct", HARNESS_DAEMON_USER_ROOT: userRoot });
+    writePeopleRoster(alphaRoot, "person_alpha");
+    registerRepo(alphaRoot, userRoot, "alpha");
+
+    try {
+      const started = runDaemonCommand(alphaRoot, ["daemon", "start", "--service", "--user-root", userRoot, "--json"], {
+        HARNESS_DAEMON_USER_ROOT: userRoot
+      });
+      const servicePid = Number(started.pid);
+      const lockPath = path.join(alphaRoot, ".harness/locks/global.lock");
+      assert.equal(Number.isInteger(servicePid) && servicePid > 0, true);
+      assert.equal(existsSync(lockPath), true);
+
+      writeFileSync(path.join(userRoot, "registry.json"), `${JSON.stringify({
+        schema: "harness-daemon-registry/v1",
+        repos: []
+      }, null, 2)}\n`, "utf8");
+      await waitForCondition(() => !existsSync(lockPath));
+      assert.equal(processIsAlive(servicePid), true);
+      const emptyStatus = runDaemonCommand(alphaRoot, ["--repo", "alpha", "daemon", "status", "--user-root", userRoot, "--json"], {
+        HARNESS_DAEMON_USER_ROOT: userRoot
+      });
+      assert.equal(emptyStatus.pid, servicePid);
+      assert.equal(emptyStatus.reachable, true);
+      assert.equal(requireStatusRepo(emptyStatus, "alpha").state, "detached");
+
+      registerRepo(alphaRoot, userRoot, "alpha");
+      const afterEmpty = await waitForRepoState(alphaRoot, userRoot, "alpha", "alpha", "attached");
+      assert.equal(afterEmpty.pid, servicePid);
+      const afterEmptyWrite = runRawJson(alphaRoot, ["new-task", "--title", "Alpha After Empty Registry"], {
+        HARNESS_DAEMON_MODE: "local",
+        HARNESS_DAEMON_USER_ROOT: userRoot,
+        HARNESS_DAEMON_IDLE_MS: "60000"
+      });
+      assert.equal(afterEmptyWrite.ok, true);
+
+      runDaemonCommand(alphaRoot, ["daemon", "repo", "unregister", "--repo-id", "alpha", "--user-root", userRoot, "--no-link", "--json"], {
+        HARNESS_DAEMON_USER_ROOT: userRoot
+      });
+      await waitForCondition(() => !existsSync(lockPath));
+      assert.equal(processIsAlive(servicePid), true);
+      const disabledStatus = runDaemonCommand(alphaRoot, ["--repo", "alpha", "daemon", "status", "--user-root", userRoot, "--json"], {
+        HARNESS_DAEMON_USER_ROOT: userRoot
+      });
+      assert.equal(disabledStatus.pid, servicePid);
+      assert.equal(disabledStatus.reachable, true);
+      assert.equal(requireStatusRepo(disabledStatus, "alpha").state, "detached");
+
+      registerRepo(alphaRoot, userRoot, "alpha");
+      const afterDisabled = await waitForRepoState(alphaRoot, userRoot, "alpha", "alpha", "attached");
+      assert.equal(afterDisabled.pid, servicePid);
+      const afterDisabledWrite = runRawJson(alphaRoot, ["new-task", "--title", "Alpha After Disabled Registry"], {
+        HARNESS_DAEMON_MODE: "local",
+        HARNESS_DAEMON_USER_ROOT: userRoot,
+        HARNESS_DAEMON_IDLE_MS: "60000"
+      });
+      assert.equal(afterDisabledWrite.ok, true);
+    } finally {
+      stopDaemonQuietly(alphaRoot, userRoot);
+    }
+  });
+});
+
 test("daemon service isolates held repo locks, retries after release, and preserves per-repo fail-closed writes", async () => {
   await withTempRootAsync(async (workspaceRoot) => {
     const { userRoot, alphaRoot, betaRoot } = setupRegisteredRepos(workspaceRoot);
@@ -149,6 +292,17 @@ test("daemon service isolates held repo locks, retries after release, and preser
       assert.match(String(startAlpha.lastError), /lock already held|global\.lock/u);
       assert.equal(startBeta.state, "attached");
       assert.equal(typeof startBeta.lockPath, "string");
+      const healthyPid = start.pid;
+      const healthyLockOwnerToken = startBeta.lockOwnerToken;
+
+      const failedReconcile = await waitForRepoReconcileError(betaRoot, userRoot, "beta", "alpha");
+      const failedAlpha = requireStatusRepo(failedReconcile, "alpha");
+      const stillHealthyBeta = requireStatusRepo(failedReconcile, "beta");
+      assert.equal((failedReconcile.lastReconcileError as { repoId?: unknown }).repoId, "alpha");
+      assert.equal((failedAlpha.lastReconcileError as { repoId?: unknown }).repoId, "alpha");
+      assert.equal(stillHealthyBeta.lastReconcileError, null);
+      assert.equal(failedReconcile.pid, healthyPid);
+      assert.equal(stillHealthyBeta.lockOwnerToken, healthyLockOwnerToken);
 
       const blockedAlphaWrite = runRawJsonMaybeFail(alphaRoot, ["new-task", "--title", "Blocked Alpha Write"], {
         HARNESS_DAEMON_MODE: "local",
@@ -168,12 +322,19 @@ test("daemon service isolates held repo locks, retries after release, and preser
       assert.equal(betaCreated.ok, true);
       assertTaskIndexContains(betaRoot, receiptTaskId(betaCreated), "beta-while-alpha-locked", "Beta While Alpha Locked");
       assertDirectCliWriteRejected(betaRoot, "Direct Beta Rejected");
+      const afterHealthyWrite = runDaemonCommand(betaRoot, ["--repo", "beta", "daemon", "status", "--user-root", userRoot, "--json"], {
+        HARNESS_DAEMON_USER_ROOT: userRoot
+      });
+      assert.equal(afterHealthyWrite.pid, healthyPid);
+      assert.equal(requireStatusRepo(afterHealthyWrite, "beta").lockOwnerToken, healthyLockOwnerToken);
 
       externalLock.release();
       const recovered = await waitForRepoState(betaRoot, userRoot, "beta", "alpha", "attached");
       const recoveredAlpha = requireStatusRepo(recovered, "alpha");
       assertRepoStatusFields(recoveredAlpha);
       assert.equal(recoveredAlpha.lastError, null);
+      assert.equal(recoveredAlpha.lastReconcileError, null);
+      assert.equal(recovered.lastReconcileError, null);
       assert.equal(typeof recoveredAlpha.lockPath, "string");
       assertDirectCliWriteRejected(alphaRoot, "Direct Alpha Rejected");
 
@@ -245,6 +406,12 @@ function setupRegisteredRepos(workspaceRoot: string): {
     HARNESS_DAEMON_USER_ROOT: userRoot
   });
   return { userRoot, alphaRoot, betaRoot };
+}
+
+function registerRepo(rootDir: string, userRoot: string, repoId: string): void {
+  runDaemonCommand(rootDir, ["daemon", "repo", "register", "--repo-id", repoId, "--root", rootDir, "--user-root", userRoot, "--no-link", "--json"], {
+    HARNESS_DAEMON_USER_ROOT: userRoot
+  });
 }
 
 function writePeopleRoster(rootDir: string, personId: string): void {
@@ -420,7 +587,7 @@ function requireStatusRepo(status: Record<string, unknown>, repoId: string): Rec
 }
 
 function assertRepoStatusFields(repo: Record<string, unknown>): void {
-  for (const key of ["state", "lockPath", "queue", "lastRecovery", "lastError"]) {
+  for (const key of ["state", "lockPath", "queue", "lastRecovery", "lastError", "lastReconcileError"]) {
     assert.equal(Object.hasOwn(repo, key), true, `missing ${key} in ${String(repo.repoId)}`);
   }
   assert.equal(isRecord(repo.queue), true);
@@ -447,6 +614,46 @@ async function waitForRepoState(
   }
   assert.equal(requireStatusRepo(lastStatus ?? {}, targetRepoId).state, state);
   return lastStatus ?? {};
+}
+
+async function waitForRepoReconcileError(
+  rootDir: string,
+  userRoot: string,
+  statusRepoId: string,
+  targetRepoId: string,
+  timeoutMs = 5_000
+): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + timeoutMs;
+  let lastStatus: Record<string, unknown> | undefined;
+  while (Date.now() <= deadline) {
+    lastStatus = runDaemonCommand(rootDir, ["--repo", statusRepoId, "daemon", "status", "--user-root", userRoot, "--json"], {
+      HARNESS_DAEMON_USER_ROOT: userRoot
+    });
+    const repo = Array.isArray(lastStatus.repos)
+      ? (lastStatus.repos as Array<Record<string, unknown>>).find((candidate) => candidate.repoId === targetRepoId)
+      : undefined;
+    if (isRecord(lastStatus.lastReconcileError) && isRecord(repo?.lastReconcileError)) return lastStatus;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.fail(`missing reconcile error for repo ${targetRepoId}: ${JSON.stringify(lastStatus)}`);
+}
+
+async function waitForCondition(condition: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.equal(condition(), true);
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function stopDaemonQuietly(rootDir: string, userRoot: string): void {
