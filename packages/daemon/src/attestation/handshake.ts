@@ -1,5 +1,6 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { credentialKey, type CredentialRef } from "../identity/types.ts";
+import { constantTimeStringEqual } from "./constant-time.ts";
 import {
   localIpcAttestationProtocol,
   LocalIpcAttestationError,
@@ -79,13 +80,13 @@ export async function verifyAttestationAssertion(input: VerifyAttestationAsserti
   if (assertion.proverRole !== challenge.proverRole || assertion.verifierRole !== challenge.verifierRole) {
     throw new LocalIpcAttestationError("role_mismatch");
   }
-  if (!constantEqual(assertion.nonce, challenge.nonce)
-    || !constantEqual(assertion.channelBindingDigest, challenge.channelBindingDigest)) {
+  if (!constantTimeStringEqual(assertion.nonce, challenge.nonce)
+    || !constantTimeStringEqual(assertion.channelBindingDigest, challenge.channelBindingDigest)) {
     throw new LocalIpcAttestationError("channel_mismatch");
   }
 
   const observedFingerprint = fingerprintCredential(input.observedCredential);
-  if (!constantEqual(assertion.credentialFingerprint, observedFingerprint)) {
+  if (!constantTimeStringEqual(assertion.credentialFingerprint, observedFingerprint)) {
     throw new LocalIpcAttestationError("credential_mismatch");
   }
   const canonicalTranscript = canonicalAttestationTranscript(challenge, observedFingerprint);
@@ -109,7 +110,7 @@ export async function performMutualAttestation(input: MutualAttestationInput): P
     channelBinding: input.channelBinding,
     ...(input.nonce ? { nonce: input.nonce } : {})
   });
-  if (constantEqual(brokerChallenge.nonce, clientChallenge.nonce)) {
+  if (constantTimeStringEqual(brokerChallenge.nonce, clientChallenge.nonce)) {
     throw new LocalIpcAttestationError("invalid_challenge");
   }
 
@@ -178,10 +179,4 @@ function oppositeRole(role: AttestationRole): AttestationRole {
 
 function digest(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-function constantEqual(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left, "utf8");
-  const rightBuffer = Buffer.from(right, "utf8");
-  return leftBuffer.byteLength === rightBuffer.byteLength && timingSafeEqual(leftBuffer, rightBuffer);
 }

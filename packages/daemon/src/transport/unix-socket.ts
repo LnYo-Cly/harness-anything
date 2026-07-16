@@ -7,12 +7,23 @@ import path from "node:path";
 import { connectionGeneration, createAcceptedConnectionEvidence } from "./accepted-connection-evidence.ts";
 import type { AcceptedConnectionBinding } from "../protocol/connection-context.ts";
 import type {
+  AcceptedConnectionEvidence,
   AcceptedConnectionEvidenceAdapter,
   DaemonAuthenticationContext
 } from "./auth-context.ts";
+import type {
+  AuthorityWireIngressHandler,
+  AuthorityWireIngressSession
+} from "./authority-wire-ingress.ts";
 import { serveJsonRpcStream, type DaemonTransportConnection } from "./json-rpc-stream.ts";
 import { createNodeSocketAcceptedConnectionEvidenceAdapter } from "./node-socket-peer-credential.ts";
-import { authenticateSshForcedCommandFrame, type AcceptSshForcedCommand } from "./ssh-forced-command.ts";
+import {
+  authenticateSshAuthorityWireFrame,
+  authenticateSshForcedCommandFrame,
+  isAuthorityWireFrameType,
+  isSshAuthorityWireBootstrapFrame,
+  type AcceptSshForcedCommand
+} from "./ssh-forced-command.ts";
 import type { JsonRpcProtocolServer } from "../protocol/json-rpc-server.ts";
 
 export interface UnixSocketTransportOptions {
@@ -26,6 +37,7 @@ export interface UnixSocketTransportOptions {
   readonly onConnection?: (connection: DaemonTransportConnection) => void;
   readonly onConnectionClosed?: (connection: DaemonTransportConnection) => void;
   readonly acceptSshForcedCommand?: boolean | AcceptSshForcedCommand;
+  readonly authorityWireIngress?: AuthorityWireIngressHandler;
 }
 
 export interface UnixSocketPathOptions {
@@ -146,22 +158,21 @@ export function createUnixSocketTransportServer(options: UnixSocketTransportOpti
       compatibilityBoundary
     }));
     if (socket.destroyed) return;
-    const connection = serveJsonRpcStream({
-      input: socket,
-      output: socket,
-      transportKind: "unix-socket",
-      authContext,
-      connectionId,
-      acceptedConnectionEvidence,
-      ...(options.acceptSshForcedCommand ? {
-        authenticateFirstFrame: (frame: unknown, context: DaemonAuthenticationContext) => authenticateSshForcedCommandFrame(
-          frame,
-          context,
-          typeof options.acceptSshForcedCommand === "function" ? options.acceptSshForcedCommand : undefined
-        )
-      } : {}),
-      createProtocolServer: options.createProtocolServer
-    });
+    let connection: DaemonTransportConnection;
+    try {
+      connection = serveUnixSocketProtocolRouter({
+        socket,
+        authContext,
+        connectionId,
+        acceptedConnectionEvidence,
+        createProtocolServer: options.createProtocolServer,
+        acceptSshForcedCommand: options.acceptSshForcedCommand,
+        authorityWireIngress: options.authorityWireIngress
+      });
+    } catch {
+      socket.destroy();
+      return;
+    }
     options.onConnection?.(connection);
     socket.once("close", () => options.onConnectionClosed?.(connection));
   }
@@ -188,6 +199,170 @@ export function createUnixSocketTransportServer(options: UnixSocketTransportOpti
       rmSync(endpoint, { force: true });
     }
   };
+}
+
+interface UnixSocketProtocolRouterOptions {
+  readonly socket: net.Socket;
+  readonly authContext: DaemonAuthenticationContext;
+  readonly connectionId: string;
+  readonly acceptedConnectionEvidence: AcceptedConnectionEvidence;
+  readonly createProtocolServer: UnixSocketTransportOptions["createProtocolServer"];
+  readonly acceptSshForcedCommand?: UnixSocketTransportOptions["acceptSshForcedCommand"];
+  readonly authorityWireIngress?: AuthorityWireIngressHandler;
+}
+
+const maximumBootstrapLineBytes = 64 * 1024;
+
+function serveUnixSocketProtocolRouter(options: UnixSocketProtocolRouterOptions): DaemonTransportConnection {
+  const { socket, acceptedConnectionEvidence: evidence } = options;
+  let active = true;
+  let buffered = Buffer.alloc(0);
+  let jsonConnection: DaemonTransportConnection | undefined;
+  let authoritySession: AuthorityWireIngressSession | undefined;
+  let routedAuthContext = options.authContext;
+  const acceptedConnection = liveAcceptedConnectionBinding(socket, evidence, options.connectionId, () => active);
+
+  const connection: DaemonTransportConnection = {
+    connectionId: options.connectionId,
+    transportKind: "unix-socket",
+    get authContext() {
+      return jsonConnection?.authContext ?? routedAuthContext;
+    },
+    acceptedConnectionEvidence: evidence,
+    isConnectionGenerationActive: () => active && !socket.destroyed,
+    close: async () => {
+      active = false;
+      if (jsonConnection) {
+        await jsonConnection.close();
+        return;
+      }
+      await authoritySession?.close();
+      socket.destroy();
+    }
+  };
+
+  const invalidate = () => {
+    if (!active) return;
+    active = false;
+    void authoritySession?.close().catch(() => undefined);
+  };
+  socket.once("close", invalidate);
+  socket.on("data", routeFirstLine);
+  socket.resume();
+  return connection;
+
+  function routeFirstLine(chunk: Buffer): void {
+    buffered = buffered.length === 0 ? Buffer.from(chunk) : Buffer.concat([buffered, chunk]);
+    const newline = buffered.indexOf(0x0a);
+    if (newline < 0) {
+      if (buffered.length > maximumBootstrapLineBytes) failClosed();
+      return;
+    }
+    socket.pause();
+    socket.off("data", routeFirstLine);
+    const firstLine = buffered.subarray(0, newline).toString("utf8").replace(/\r$/u, "");
+    const remainder = buffered.subarray(newline + 1);
+    const frame = parseJson(firstLine);
+    if (!isAuthorityWireFrameType(frame)) {
+      routeJsonRpc();
+      return;
+    }
+    if (!isSshAuthorityWireBootstrapFrame(frame)) {
+      failClosed();
+      return;
+    }
+    const accept = authorityBootstrapAcceptance(options.acceptSshForcedCommand);
+    const authenticated = authenticateSshAuthorityWireFrame(frame, options.authContext, accept);
+    if (!authenticated.ok || !authenticated.authContext?.sshForcedCommand || !options.authorityWireIngress) {
+      failClosed();
+      return;
+    }
+    if (!evidence.peerCredential.available) {
+      failClosed();
+      return;
+    }
+    routedAuthContext = authenticated.authContext;
+    if (remainder.length > 0) socket.unshift(remainder);
+    void Promise.resolve(options.authorityWireIngress({
+      bootstrap: frame,
+      authContext: authenticated.authContext as typeof routedAuthContext & {
+        readonly sshForcedCommand: NonNullable<DaemonAuthenticationContext["sshForcedCommand"]>;
+      },
+      input: socket,
+      output: socket,
+      acceptedConnection,
+      acceptedConnectionEvidence: evidence
+    })).then((session) => {
+      if (session) authoritySession = session;
+      if (!active) return session?.close();
+      socket.resume();
+    }).catch(() => failClosed());
+
+    function routeJsonRpc(): void {
+      socket.unshift(buffered);
+      jsonConnection = serveJsonRpcStream({
+        input: socket,
+        output: socket,
+        transportKind: "unix-socket",
+        authContext: options.authContext,
+        connectionId: options.connectionId,
+        acceptedConnectionEvidence: evidence,
+        ...(options.acceptSshForcedCommand ? {
+          authenticateFirstFrame: (candidate: unknown, context: DaemonAuthenticationContext) => authenticateSshForcedCommandFrame(
+            candidate,
+            context,
+            typeof options.acceptSshForcedCommand === "function" ? options.acceptSshForcedCommand : undefined
+          )
+        } : {}),
+        createProtocolServer: options.createProtocolServer
+      });
+      socket.resume();
+    }
+  }
+
+  function failClosed(): void {
+    active = false;
+    socket.off("data", routeFirstLine);
+    socket.destroy();
+  }
+}
+
+function liveAcceptedConnectionBinding(
+  socket: net.Socket,
+  evidence: AcceptedConnectionEvidence,
+  connectionId: string,
+  active: () => boolean
+): AcceptedConnectionBinding {
+  if (evidence.connectionId !== connectionId
+    || evidence.transportKind !== "unix-socket"
+    || evidence.channelBinding.source !== "transport-observed"
+    || evidence.channelBinding.digest.byteLength !== 32) {
+    throw new Error("accepted connection evidence does not match the live Unix socket");
+  }
+  return Object.freeze({
+    evidence,
+    connectionId,
+    connectionGeneration: evidence.connectionGeneration,
+    isActive: () => active() && !socket.destroyed,
+    assertActive: () => {
+      if (!active() || socket.destroyed) throw new Error("accepted connection generation is closed");
+    }
+  });
+}
+
+function authorityBootstrapAcceptance(
+  configured: UnixSocketTransportOptions["acceptSshForcedCommand"]
+): AcceptSshForcedCommand {
+  if (typeof configured === "function") return configured;
+  return configured === true ? () => true : () => false;
+}
+
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return undefined;
+  }
 }
 
 function safeUnixSocketEndpointId(value: string): string {

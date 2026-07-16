@@ -6,6 +6,10 @@ export {
   type LocalConflictRecord
 } from "./conflict-store.ts";
 export { BrokerDurableStateStore } from "./durable-state-store.ts";
+export {
+  createBrokerCompoundReceiptCoordinatorV2,
+  type BrokerCompoundReceiptCoordinatorV2
+} from "./compound-receipt-coordinator-v2.ts";
 export { materializationWitnessToAppliedExactAtCutV2 } from "./compound-receipt-witness.ts";
 export {
   fingerprintBytes,

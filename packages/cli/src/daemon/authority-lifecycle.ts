@@ -19,6 +19,8 @@ import {
   type WriteCoordinator
 } from "../../../kernel/src/index.ts";
 import type { DaemonAuthorityCommandSubmissionV2 } from "./authority-command-submission.ts";
+import type { AuthorityForcedCommandSession } from "../../../daemon/src/index.ts";
+import type { Readable, Writable } from "node:stream";
 import {
   createGitCanonicalPublicationInspector,
   type CanonicalPublicationEvidence
@@ -52,8 +54,15 @@ export interface AuthorityRepoServerData {
 
 export interface AuthorityRepoComponent {
   readonly commandSubmissionV2: DaemonAuthorityCommandSubmissionV2;
-  readonly bindConnection: (context: AuthorityConnectionContext) => DaemonAuthorityCommandSubmissionV2;
+  readonly bindConnection: (context: AuthorityConnectionContext) => AuthorityRepoConnectionBinding;
   readonly stop: (reason: AuthorityRepoStopReason) => Promise<void>;
+}
+
+export interface AuthorityRepoConnectionBinding extends DaemonAuthorityCommandSubmissionV2 {
+  readonly serveForcedCommand?: (input: {
+    readonly input: Readable;
+    readonly output: Writable;
+  }) => AuthorityForcedCommandSession;
 }
 
 export interface AuthorityRepoLifecycleHooks {

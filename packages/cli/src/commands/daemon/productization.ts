@@ -119,8 +119,14 @@ async function startDaemon(input: DaemonCommandInput): Promise<number> {
     autoRegisterSingleRepo: true
   });
   const socketPath = readOption(input.args, "--socket") ?? target.socketPath;
+  const authorityManifest = readOption(input.args, "--authority-manifest")
+    ?? process.env.HARNESS_AUTHORITY_MANIFEST?.trim();
   if (foreground) {
-    await input.runServe(target.canonicalRoot, input.layoutOverrides, ["daemon", "serve", "--repo", target.repoId, "--socket", socketPath, "--user-root", target.userRoot, "--idle-ms", "0"], {
+    await input.runServe(target.canonicalRoot, input.layoutOverrides, [
+      "daemon", "serve", "--repo", target.repoId, "--socket", socketPath,
+      "--user-root", target.userRoot, "--idle-ms", "0",
+      ...(authorityManifest ? ["--authority-manifest", authorityManifest] : [])
+    ], {
       onStarted: (status) => emitDaemonResult("daemon-start", { ...status, mode: "foreground" }, input.json)
     });
     return 0;
@@ -141,7 +147,8 @@ async function startDaemon(input: DaemonCommandInput): Promise<number> {
       "--user-root",
       target.userRoot,
       "--idle-ms",
-      "0"
+      "0",
+      ...(authorityManifest ? ["--authority-manifest", authorityManifest] : [])
     ], {
       detached: true,
       stdio: "ignore",

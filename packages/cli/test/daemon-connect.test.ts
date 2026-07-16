@@ -1,15 +1,24 @@
 // harness-test-tier: fast
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync } from "node:fs";
+import net from "node:net";
+import os from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   daemonIdForUserRoot,
   defaultNamedPipePath,
+  encodeLengthPrefixedFrame,
   localUserDaemonEndpoint,
-  localUserDaemonSocketPath
+  localUserDaemonSocketPath,
+  type SshAuthorityWireBootstrapFrame
 } from "../../daemon/src/index.ts";
-import { resolveSshForcedCommandAuthentication } from "../src/commands/daemon/connect.ts";
+import {
+  resolveSshForcedCommandAuthentication,
+  runDaemonConnect
+} from "../src/commands/daemon/connect.ts";
 import { createDaemonLocalTransport } from "../src/commands/daemon/serve-transport.ts";
 import { hasPrivilegedSshdAncestor } from "../src/commands/daemon/sshd-witness.ts";
 import {
@@ -190,3 +199,92 @@ test("sshd witness requires a privileged sshd ancestor instead of a lookalike pr
   ]);
   assert.equal(hasPrivilegedSshdAncestor(42, (pid) => spoofedTable.get(pid)), false);
 });
+
+test("authority-wire connect emits the versioned bootstrap then relays raw bytes without a runtime", async (t) => {
+  if (process.platform === "win32") return;
+  const rootDir = mkdtempSync(path.join(os.tmpdir(), "ha-authority-connect-"));
+  const endpoint = path.join(rootDir, "relay.sock");
+  const authorityBytes = encodeLengthPrefixedFrame({
+    type: "harness-authority-wire/v1",
+    kind: "hello",
+    requestId: "relay",
+    connectionGeneration: 1
+  });
+  const received = new Promise<Buffer>((resolve, reject) => {
+    const server = net.createServer((socket) => {
+      let buffered = Buffer.alloc(0);
+      socket.on("data", (chunk: Buffer) => {
+        buffered = Buffer.concat([buffered, chunk]);
+        const newline = buffered.indexOf(0x0a);
+        if (newline < 0 || buffered.length < newline + 1 + authorityBytes.length) return;
+        resolve(buffered);
+        socket.end();
+      });
+      socket.once("error", reject);
+    });
+    server.once("error", reject);
+    server.listen(endpoint);
+    t.after(async () => new Promise<void>((resolveClose, rejectClose) => {
+      server.close((error) => error ? rejectClose(error) : resolveClose());
+    }));
+  });
+  await waitForEndpoint(endpoint);
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const error = new PassThrough();
+  input.end(authorityBytes);
+
+  const exitCode = await runDaemonConnect([
+    "daemon", "connect", "--stdio", "--authority-wire", "--socket", endpoint,
+    "--principal", "person_alice", "--expect-original-command", "ha-authority-connect"
+  ], {
+    rootDir,
+    env: { SSH_ORIGINAL_COMMAND: "ha-authority-connect" },
+    streams: { input, output, error },
+    verifySshdContext: () => true
+  });
+  const bytes = await received;
+  const newline = bytes.indexOf(0x0a);
+  const bootstrap = JSON.parse(bytes.subarray(0, newline).toString("utf8")) as SshAuthorityWireBootstrapFrame;
+
+  assert.equal(exitCode, 0, error.read()?.toString());
+  assert.deepEqual(bootstrap, {
+    type: "harness-daemon.ssh-forced-command/v2",
+    streamProtocol: "harness-authority-wire/v1",
+    personId: "person_alice",
+    canonicalRoot: path.resolve(rootDir)
+  });
+  assert.deepEqual(bytes.subarray(newline + 1), authorityBytes);
+  assert.equal(existsSync(path.join(rootDir, "harness")), false);
+});
+
+test("authority-wire connect requires authenticated forced-command inputs", async () => {
+  const error = new PassThrough();
+  const exitCode = await runDaemonConnect(["daemon", "connect", "--stdio", "--authority-wire"], {
+    env: {},
+    streams: { input: new PassThrough(), output: new PassThrough(), error },
+    verifySshdContext: () => false
+  });
+
+  assert.equal(exitCode, 2);
+  assert.match(error.read()?.toString() ?? "", /requires an authenticated SSH forced-command context/u);
+});
+
+test("authority-wire local ingress is explicitly unavailable on named pipes", () => {
+  assert.throws(() => createDaemonLocalTransport({
+    daemonId: "daemon-test",
+    endpoint: "\\\\.\\pipe\\daemon-test",
+    platform: "win32",
+    createProtocolServer: () => { throw new Error("not used"); },
+    acceptSshForcedCommand: () => true,
+    authorityWireIngress: () => undefined
+  }), /requires a Unix socket with server-observed peer credentials/u);
+});
+
+async function waitForEndpoint(endpoint: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (existsSync(endpoint)) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`endpoint did not become ready: ${endpoint}`);
+}

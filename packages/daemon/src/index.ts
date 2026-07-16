@@ -186,11 +186,22 @@ export {
   type NodeSocketAcceptedConnectionEvidenceAdapterOptions
 } from "./transport/node-socket-peer-credential.ts";
 export {
+  authenticateSshAuthorityWireFrame,
   authenticateSshForcedCommandFrame,
+  isSshAuthorityWireBootstrapFrame,
+  sshAuthorityWireBootstrapFrame,
   sshForcedCommandBootstrapFrame,
+  type AcceptSshForcedCommand,
+  type SshAuthenticatedBootstrapFrame,
+  type SshAuthorityWireBootstrapFrame,
   type SshForcedCommandBootstrapFrame,
   type SshForcedCommandBootstrapInput
 } from "./transport/ssh-forced-command.ts";
+export type {
+  AuthorityWireIngressHandler,
+  AuthorityWireIngressRequest,
+  AuthorityWireIngressSession
+} from "./transport/authority-wire-ingress.ts";
 export {
   createJsonLineFrameReader,
   encodeJsonLineFrame,

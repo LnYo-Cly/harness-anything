@@ -19,7 +19,6 @@ export type {
 export { readModuleAttributionProjection } from "../../kernel/src/index.ts";
 export {
   authorityProtocolTuple,
-  canonicalAuthorityAttributionEventStorageBytesV2,
   canonicalAuthorityRequestDigest,
   completeAuthorityCommittedReceiptV2,
   createDurableAuthorityCommittedEventPublisherV2,
@@ -35,8 +34,6 @@ export {
 } from "./authority/index.ts";
 export type {
   AttributedCoordinatorFactory,
-  AuthorityAttributionEventLogPrimitiveV2,
-  AuthorityAttributionEventLogRecordV2,
   AuthorityCommittedEventPublisherV2,
   AuthorityCommittedPhysicalObservationPortV2,
   AuthorityCommittedPhysicalObservationV2,

@@ -30,7 +30,7 @@ test("ReplicaChangeLog snapshots materialize an ordinary folder with separate co
         acquire: async (paths) => ({ release: async () => { releases.push(paths.join(",")); } })
       },
       watcherFence: {
-        fence: async () => ({ harness: "fence-1", guards: "fence-2" })
+        fence: async () => ({ "tasks/a.md": "fence-1", "tasks/b.md": "fence-2" })
       }
     });
 
@@ -45,7 +45,10 @@ test("ReplicaChangeLog snapshots materialize an ordinary folder with separate co
     assert.equal(barrier.tag, "SATISFIED_EXACT_AT_CUT");
     if (barrier.tag === "SATISFIED_EXACT_AT_CUT") {
       assert.equal(barrier.witness.revision, 1);
-      assert.deepEqual(barrier.witness.watcherFenceVector, { harness: "fence-1", guards: "fence-2" });
+      assert.deepEqual(barrier.witness.watcherFenceVector, {
+        "tasks/a.md": "fence-1",
+        "tasks/b.md": "fence-2"
+      });
     }
     assert.deepEqual(releases, ["tasks/a.md,tasks/b.md"]);
   } finally {
