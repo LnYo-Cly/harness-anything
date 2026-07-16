@@ -22,7 +22,8 @@ import { openLocalAuthorityKeyStore } from "../src/authority/local-key-store.ts"
 const authorityId = "authority-local-test";
 const issuer = "host:test";
 
-test("local authority key store keeps private material external and requires canonical lifecycle activation", () => {
+// POSIX-only: on win32 the store intentionally fails closed (AUTHORITY_KEY_STORE_DIRECTORY_UNSAFE) because 0700/uid privacy cannot be verified.
+test("local authority key store keeps private material external and requires canonical lifecycle activation", { skip: process.platform === "win32" }, () => {
   withStoreLayout(({ workspaceRoot, serviceRoot, stateDirectory }) => {
     const store = openLocalAuthorityKeyStore({
       serviceStateRoot: serviceRoot,
@@ -82,7 +83,7 @@ test("local authority key store keeps private material external and requires can
   });
 });
 
-test("local authority key store rejects governed roots, symlinks, broad files, and owner mismatches", () => {
+test("local authority key store rejects governed roots, symlinks, broad files, and owner mismatches", { skip: process.platform === "win32" }, () => {
   withStoreLayout(({ root, workspaceRoot, serviceRoot, stateDirectory }) => {
     assert.throws(() => openLocalAuthorityKeyStore({
       serviceStateRoot: path.join(workspaceRoot, ".service-state"),
