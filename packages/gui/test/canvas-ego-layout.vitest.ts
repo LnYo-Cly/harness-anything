@@ -3,6 +3,8 @@ import {
   layoutCanvasEgo,
   buildEgoGraph,
   bfsShown,
+  neighborsOf,
+  oneHopHighlightIds,
   egoFocusIdOf,
   estimateCardHeight,
 } from "../src/renderer/graph/canvasEgoLayout";
@@ -566,5 +568,90 @@ describe("D3/G1 · 聚焦 3:4 竖卡 + 内容驱动高度", () => {
     // B2:不再写 style.width / style.height —— 让 NodeResizer 控盒子。
     expect(node.style?.width).toBeUndefined();
     expect(node.style?.height).toBeUndefined();
+  });
+});
+
+// ══ 聚光灯单击单跳高亮 ══
+// 需求:单击节点 → {node}∪一跳邻居保持高亮,其余灰化;边两端都在集合才醒目。
+// 复用 neighborsOf(入+出,轴过滤),不重造邻接;selectId=null 时全亮。
+describe("oneHopHighlightIds (聚光灯单击单跳高亮集合)", () => {
+  // A --refines--> B --derives--> C
+  // A --evidenced-by--> F
+  // (无 A-C 直接边 → C 不在 A 的单跳邻居里)
+  function hopScene() {
+    const tasks = [task("task_C")];
+    const decisions = [decision("dec_A"), decision("dec_B")];
+    const facts = [fact("task_x", "F1")];
+    const relations = [
+      rel("decision/dec_A", "decision/dec_B", "refines"),
+      rel("decision/dec_B", "task/task_C", "derives"),
+      rel("decision/dec_A", "fact/task_x/F1", "evidenced-by"),
+    ];
+    return { tasks, decisions, facts, relations };
+  }
+
+  it("selectId=null → null(全亮,无灰化)", () => {
+    const { tasks, decisions, facts, relations } = hopScene();
+    const graph = buildEgoGraph(tasks, decisions, facts, relations);
+    expect(oneHopHighlightIds(graph, null, ALL_AXES)).toBeNull();
+  });
+
+  it("选中 A → 含 A 自身 + 直接邻居 B、F1,不含二跳 C", () => {
+    const { tasks, decisions, facts, relations } = hopScene();
+    const graph = buildEgoGraph(tasks, decisions, facts, relations);
+    const hl = oneHopHighlightIds(graph, "decision/dec_A", ALL_AXES)!;
+    expect(hl.has("decision/dec_A")).toBe(true);
+    expect(hl.has("decision/dec_B")).toBe(true); // 出边
+    expect(hl.has("fact/task_x/F1")).toBe(true); // 出边
+    expect(hl.has("task_C")).toBe(false); // 二跳,不算
+  });
+
+  it("选中 B → 含入边邻居 A + 出边邻居 C(方向无关)", () => {
+    const { tasks, decisions, facts, relations } = hopScene();
+    const graph = buildEgoGraph(tasks, decisions, facts, relations);
+    const hl = oneHopHighlightIds(graph, "decision/dec_B", ALL_AXES)!;
+    expect(hl.has("decision/dec_B")).toBe(true);
+    expect(hl.has("decision/dec_A")).toBe(true); // 入边
+    expect(hl.has("task_C")).toBe(true); // 出边
+    expect(hl.has("fact/task_x/F1")).toBe(false); // 与 B 无直接边
+  });
+
+  it("轴过滤:关掉 evidence 后 F1 不进高亮集合", () => {
+    const { tasks, decisions, facts, relations } = hopScene();
+    const graph = buildEgoGraph(tasks, decisions, facts, relations);
+    const axesNoEvidence: AxisFilter = {
+      authority: true,
+      evidence: false,
+      execution: true,
+      assoc: true,
+    };
+    const hl = oneHopHighlightIds(graph, "decision/dec_A", axesNoEvidence)!;
+    expect(hl.has("decision/dec_B")).toBe(true);
+    expect(hl.has("fact/task_x/F1")).toBe(false);
+  });
+
+  it("与 neighborsOf 契约一致(高亮 = {id}∪neighborsOf)", () => {
+    const { tasks, decisions, facts, relations } = hopScene();
+    const graph = buildEgoGraph(tasks, decisions, facts, relations);
+    const id = "decision/dec_A";
+    const hl = oneHopHighlightIds(graph, id, ALL_AXES)!;
+    const nbs = new Set(neighborsOf(graph, id, ALL_AXES));
+    expect(hl.size).toBe(nbs.size + 1);
+    expect(hl.has(id)).toBe(true);
+    for (const nb of nbs) expect(hl.has(nb)).toBe(true);
+  });
+
+  it("边淡化判定:两端都在高亮集合才 keep(消费层契约)", () => {
+    // 纯函数层不改边;这里固定消费层的 keep 谓词,防回归。
+    const { tasks, decisions, facts, relations } = hopScene();
+    const graph = buildEgoGraph(tasks, decisions, facts, relations);
+    const hl = oneHopHighlightIds(graph, "decision/dec_A", ALL_AXES)!;
+    const keep = (src: string, tgt: string) => hl.has(src) && hl.has(tgt);
+    // A-B 两端都在 → keep
+    expect(keep("decision/dec_A", "decision/dec_B")).toBe(true);
+    // A-F1 两端都在 → keep
+    expect(keep("decision/dec_A", "fact/task_x/F1")).toBe(true);
+    // B-C:B 在、C 不在 → 淡化
+    expect(keep("decision/dec_B", "task_C")).toBe(false);
   });
 });

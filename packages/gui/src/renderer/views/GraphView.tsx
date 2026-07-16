@@ -163,17 +163,22 @@ function GraphViewInner({
     });
   }, [availableModules]);
 
-  // 无限画布 ego 状态机(焦点 / 累积可见集 / 已展开卡片 / 焦点历史 / 换焦点即居中)。
+  // 无限画布 ego 状态机(焦点 / 累积可见集 / 已展开卡片 / 焦点历史 / 换焦点即居中 /
+  // 单击单跳高亮 selectId+oneHopHighlight)。
   const {
     focusId,
     shown,
     expanded,
     canBack,
     canForward,
+    selectId,
+    oneHopHighlight,
     openFocus,
     expandNode,
     collapseNode,
     clearFocus,
+    selectNode,
+    clearSelect,
     goBack,
     goForward,
   } = useEgoCanvas({
@@ -235,9 +240,12 @@ function GraphViewInner({
   // 从 useEgoCanvas 抽出来放这儿,因为此 hook 在 useGraphLayout 之后调用,能拿到真实节点盒子。
   useCenterOnFocus(nodes, resolvedFocusId);
 
-  // 单击 chip = 就地展开成卡片并长出邻居(累积,永不重排已有画布)。
-  // territory 模式下 territoryChip 单击 → 切到聚光灯(enterSpotlight);fold chip → toggleZone。
-  // unified(全域)模式下 ego 节点单击 → enterSpotlight(整图是总览,深入靠聚光灯)。
+  // 单击:
+  //   territoryChip / territoryZone / unified ego → 既有领地行为(不变)。
+  //   聚光灯 ego:
+  //     - 始终写入 selectNode(单跳高亮/灰化);再点同节点 = 取消。
+  //     - 未展开 chip 另 expandNode(就地展开+长邻居),已展开卡片只高亮不收起。
+  // 双击 = 设焦点(onNodeDoubleClick),与本单击 select 正交。
   const onNodeClick = useCallback(
     (_evt: any, node: any) => {
       if (node.type === "territoryChip") {
@@ -261,10 +269,14 @@ function GraphViewInner({
         if (navRef) enterSpotlight(navRef);
         return;
       }
+      // 聚光灯:单击 = select 高亮单跳邻居(与 expand 叠加,不互斥)。
+      if (viewMode === "spotlight") {
+        selectNode(node.id);
+      }
       if (node.data?.expanded) return;
       expandNode(node.id);
     },
-    [expandNode, toggleZone, enterSpotlight, viewMode, skel],
+    [expandNode, toggleZone, enterSpotlight, viewMode, skel, selectNode],
   );
 
   // 双击 = 设为画布中心(openFocus:重排前后各 2 跳,推历史)。
@@ -288,18 +300,21 @@ function GraphViewInner({
 
   const onPaneClick = useCallback(() => {
     setDrawerState((prev) => ({ ...prev, selectedId: null, focusEdgeId: null }));
-  }, []);
+    // 点空白取消单击单跳高亮。
+    clearSelect();
+  }, [clearSelect]);
 
-  // Esc = 关抽屉(不退焦点;焦点有显式「退出聚焦」按钮)。
+  // Esc = 关抽屉 + 取消单击单跳高亮(不退焦点;焦点有显式「退出聚焦」按钮)。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (e.target instanceof HTMLElement && e.target.closest("input,textarea,select")) return;
       setDrawerState((prev) => ({ ...prev, selectedId: null, focusEdgeId: null }));
+      clearSelect();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [clearSelect]);
 
   // 抽屉状态(节点选中 / 边选中)+ 派生数据 + 回调,外置到 useGraphDrawer。
   // onEdgeClick / onPaneClick / Esc 通过 setDrawerState 原子更新两个 id(避免竞态)。
@@ -345,16 +360,21 @@ function GraphViewInner({
   );
 
   // 注入卡片交互回调(收起 / 设为中心 / 详情跳转 / 拖拽 resize)+ id 到 ego 节点 data。
+  // 聚光灯单击高亮:oneHopHighlight 非 null 时,不在集合内的节点 dimmed=true(降透明度)。
   // territory 节点注入 onOpen(chip → 聚光灯)+ onFold(zone 折叠)。
   const displayNodes = useMemo(
     () =>
       nodes.map((n) => {
         if (n.type === "ego") {
+          const dimmed =
+            oneHopHighlight !== null && !oneHopHighlight.has(n.id);
           return {
             ...n,
+            selected: selectId !== null && n.id === selectId,
             data: {
               ...n.data,
               id: n.id,
+              dimmed,
               onCollapse: collapseNode,
               onRefocus: openFocus,
               onNavigate: onNavigateEntity,
@@ -370,8 +390,36 @@ function GraphViewInner({
         }
         return n;
       }),
-    [nodes, collapseNode, openFocus, onNavigateEntity, setSizeOverride, enterSpotlight, toggleZone],
+    [
+      nodes,
+      collapseNode,
+      openFocus,
+      onNavigateEntity,
+      setSizeOverride,
+      enterSpotlight,
+      toggleZone,
+      oneHopHighlight,
+      selectId,
+    ],
   );
+
+  // 边:两端都在高亮集合 → 保持醒目;否则淡化(opacity 0.18)。
+  // 无选中(oneHopHighlight=null)时全部保持原样。
+  const displayEdges = useMemo(() => {
+    if (oneHopHighlight === null) return edges;
+    return edges.map((e) => {
+      const keep =
+        oneHopHighlight.has(e.source) && oneHopHighlight.has(e.target);
+      if (keep) return e;
+      return {
+        ...e,
+        style: {
+          ...(e.style ?? {}),
+          opacity: 0.18,
+        },
+      };
+    });
+  }, [edges, oneHopHighlight]);
 
   // Switcher 入口:点选 = 设为画布中心(openFocus 重排 ±2)。
   const switchFocusFromList = useCallback(
@@ -455,7 +503,7 @@ function GraphViewInner({
         />
         <ReactFlow
           nodes={displayNodes}
-          edges={edges}
+          edges={displayEdges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onNodeClick={onNodeClick}
