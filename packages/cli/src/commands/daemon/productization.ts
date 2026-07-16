@@ -9,10 +9,7 @@ import {
   registerDaemonRepo,
   resolveHarnessLayout,
 } from "../../../../kernel/src/index.ts";
-import {
-  currentDaemonProtocolVersion,
-  type JsonObject
-} from "../../../../daemon/src/index.ts";
+import { currentDaemonProtocolVersion } from "../../../../daemon/src/index.ts";
 import { initializeHarness } from "../init.ts";
 import { resolveCliVersion } from "../core/version.ts";
 import { cliError, CliErrorCode } from "../../cli/error-codes.ts";
@@ -21,6 +18,14 @@ import { resolveLocalDaemonTarget, requestLocalDaemonJsonRpc, type LocalDaemonTa
 import { renderDaemonHelp } from "./help.ts";
 import { loadDaemonIdentityWithEmail } from "./identity.ts";
 import { runDaemonRepoCommand } from "./repo-registry.ts";
+import {
+  runDaemonControl,
+  type DaemonControlKind,
+  type DaemonControlLifecycle,
+  type DaemonControlRequest
+} from "./control.ts";
+
+export type { DaemonControlLifecycle } from "./control.ts";
 
 export {
   daemonStatusPayload,
@@ -40,11 +45,7 @@ export interface DaemonCommandInput {
     hooks?: DaemonServeHooks
   ) => Promise<void>;
   readonly requestDaemonControl?: (request: DaemonControlRequest) => Promise<Record<string, unknown>>;
-}
-
-export interface DaemonControlRequest {
-  readonly method: "admin.daemon.restart" | "admin.daemon.refresh";
-  readonly params: JsonObject;
+  readonly daemonControlLifecycle?: DaemonControlLifecycle;
 }
 
 export interface DaemonServeHooks {
@@ -100,59 +101,10 @@ export async function runDaemonProductCommand(input: DaemonCommandInput): Promis
   }
 }
 
-type DaemonControlKind = "restart" | "refresh";
-type DaemonRefreshTrigger = "explicit" | "post-merge" | "dist-watcher";
-
 async function controlDaemon(input: DaemonCommandInput, kind: DaemonControlKind): Promise<number> {
-  const drainTimeoutMs = daemonControlTimeoutMs(input.args);
-  const trigger = kind === "refresh" ? daemonRefreshTrigger(input.args) : undefined;
-  const params = {
-    payload: {
-      reason: readOption(input.args, "--reason") ?? `${trigger ?? "explicit"} daemon ${kind} request`,
-      drainTimeoutMs,
-      ...(trigger ? { trigger } : {})
-    }
-  };
-  const method: DaemonControlRequest["method"] = kind === "restart"
-    ? "admin.daemon.restart"
-    : "admin.daemon.refresh";
-  const request = input.requestDaemonControl ?? ((control: DaemonControlRequest) => requestLocalDaemonJsonRpc(
-    input.rootDir,
-    control.method,
-    control.params,
-    5_000,
-    {
-      userRoot: readDaemonUserRootOption(input.args),
-      socketPath: readOption(input.args, "--socket"),
-      allowLegacySocket: false
-    }
-  ));
-  const receipt = await request({ method, params });
-  if (receipt.schema !== "daemon-control-accepted/v1"
-    || receipt.accepted !== true
-    || receipt.kind !== kind
-    || typeof receipt.operationId !== "string"
-    || receipt.operationId.length === 0) {
-    throw new Error(`${method} did not return daemon-control-accepted/v1`);
-  }
-  const { schema: controlSchema, ...controlResult } = receipt;
-  emitDaemonResult(`daemon-${kind}`, { ...controlResult, controlSchema }, input.json);
+  const result = await runDaemonControl({ ...input, daemonEntryPath: productizationCliEntrypointPath }, kind);
+  emitDaemonResult(`daemon-${kind}`, result, input.json);
   return 0;
-}
-
-function daemonControlTimeoutMs(args: ReadonlyArray<string>): number {
-  const raw = readOption(args, "--timeout-ms") ?? "5000";
-  const timeoutMs = Number(raw);
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 120_000) {
-    throw new Error("Use --timeout-ms with an integer from 100 through 120000.");
-  }
-  return timeoutMs;
-}
-
-function daemonRefreshTrigger(args: ReadonlyArray<string>): DaemonRefreshTrigger {
-  const trigger = readOption(args, "--trigger") ?? "explicit";
-  if (trigger === "explicit" || trigger === "post-merge" || trigger === "dist-watcher") return trigger;
-  throw new Error("Use --trigger explicit|post-merge|dist-watcher.");
 }
 
 async function startDaemon(input: DaemonCommandInput): Promise<number> {
