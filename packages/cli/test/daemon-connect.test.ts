@@ -26,7 +26,10 @@ test("daemon endpoint selection uses a named pipe on Windows and a unix socket o
     localUserDaemonEndpoint(userRoot, daemonId, "win32"),
     defaultNamedPipePath(daemonIdForUserRoot(userRoot, daemonId))
   );
-  assert.equal(localUserDaemonEndpoint(userRoot, daemonId, "linux"), localUserDaemonSocketPath(userRoot, daemonId));
+  assert.equal(
+    localUserDaemonEndpoint(userRoot, daemonId, "linux"),
+    localUserDaemonSocketPath(userRoot, daemonId, { platform: "linux" })
+  );
 });
 
 test("daemon client resolves the same Linux per-user runtime socket authority", () => {

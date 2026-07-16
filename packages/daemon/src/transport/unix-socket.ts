@@ -51,10 +51,10 @@ export function unixSocketDirectory(options: UnixSocketPathOptions = {}): string
   const platform = options.platform ?? process.platform;
   const pathApi = platform === "win32" ? path.win32 : path.posix;
   const uid = options.uid ?? process.getuid?.() ?? 0;
-  const tmpdir = readNonEmptyPath(env.TMPDIR) ?? options.tmpdir ?? os.tmpdir();
+  const tmpdir = readNonEmptyPath(env.TMPDIR, pathApi) ?? options.tmpdir ?? os.tmpdir();
 
   if (platform === "linux") {
-    const xdgRuntimeDir = readNonEmptyPath(env.XDG_RUNTIME_DIR);
+    const xdgRuntimeDir = readNonEmptyPath(env.XDG_RUNTIME_DIR, pathApi);
     if (xdgRuntimeDir) return pathApi.join(xdgRuntimeDir, "harness-anything");
 
     const userRuntimeDir = pathApi.join(options.linuxRuntimeRoot ?? "/run/user", String(uid));
@@ -153,9 +153,9 @@ function safeUnixSocketEndpointId(value: string): string {
   return value.replace(/[^A-Za-z0-9_.-]/gu, "-");
 }
 
-function readNonEmptyPath(value: string | undefined): string | undefined {
+function readNonEmptyPath(value: string | undefined, pathApi: path.PlatformPath = path): string | undefined {
   const trimmed = value?.trim();
-  return trimmed ? path.resolve(trimmed) : undefined;
+  return trimmed ? pathApi.resolve(trimmed) : undefined;
 }
 
 function privateDirectoryError(
