@@ -5,15 +5,11 @@ import path from "node:path";
 import test from "node:test";
 import {
   actorAxesBindingCoreDigestV2,
-  authorityAttributionEventV2FilePath,
-  AuthorityAttributionEventV2ProtocolDamageError,
   canonicalAttributionEventDigestV2,
-  encodeAuthorityAttributionEventV2Bytes,
   encodeCanonicalCbor,
   makeLocalAuthorityAttributionEventV2Log,
   physicalChangeSetDigestV2,
   readUnionAttributionEvents,
-  recoverAuthorityAttributionEventV2FromOperationRecord,
   resolveHarnessLayout,
   semanticMutationSetDigestV2,
   semanticMutationWireV2,
@@ -23,7 +19,13 @@ import {
   type SemanticMutationSetV2,
   type SemanticMutationV2
 } from "../../src/index.ts";
+import {
+  AuthorityAttributionEventV2ProtocolDamageError,
+  encodeAuthorityAttributionEventV2Bytes
+} from "../../src/integrity/authority-attribution-event-v2-log.ts";
 import { readAttributionEvents } from "../../src/local/attribution-event-source.ts";
+import { authorityAttributionEventV2FilePath } from "../../src/store/authority-attribution-event-v2-log.ts";
+import { recoverAuthorityAttributionEventV2FromOperationRecord } from "../../src/store/authority-attribution-event-v2-recovery.ts";
 import { withTempStore, withTempStoreAsync } from "./helpers.ts";
 
 const digestA = "11".repeat(32);
