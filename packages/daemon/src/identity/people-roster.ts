@@ -184,6 +184,7 @@ function parsePeopleYaml(body: string): { readonly schema: string; readonly peop
   const roles: MutableRole[] = [];
 
   for (const rawLine of body.split(/\r?\n/u)) {
+    if (rawLine.trimStart().startsWith("#")) continue;
     const line = rawLine.replace(/\s+#.*$/u, "");
     if (!line.trim()) continue;
     const topLevel = /^([A-Za-z][A-Za-z0-9_-]*):(?:\s*(.*))?$/u.exec(line);

@@ -156,6 +156,26 @@ test("split person registry contains no credential or role policy and supplies a
   assert.equal(personRegistryFromLegacyRoster(legacy).find("person_alice")?.displayName, "Alice Admin");
 });
 
+test("people roster YAML accepts full-line comments", () => {
+  const roster = peopleRosterFromDocument([
+    "# Local identity bindings are repository-authored.",
+    "schema: harness-people/v1",
+    "people:",
+    "  # Bind the local operator.",
+    "  - personId: person_alice",
+    "    displayName: Alice",
+    "    roles: [owner]",
+    "    credentials: []",
+    "roles:",
+    "  - roleId: owner",
+    "    commandClasses: [repo-write]",
+    ""
+  ].join("\n"));
+
+  assert.equal(roster.people[0]?.personId, "person_alice");
+  assert.equal(roster.roleAllows("owner", "repo-write"), true);
+});
+
 test("an existing people.yaml stays authoritative and empty credentials fail as credential_unknown", async (t) => {
   const rootDir = createIdentityRoot("person_local");
   t.after(() => rmSync(rootDir, { recursive: true, force: true }));
