@@ -323,6 +323,10 @@ jobs:
         run: npm ci
       - if: ${{ needs.metadata-source-proof.outputs.reuse_source != 'true' }}
         run: npm run check:local
+        env:
+          # Exercise the native developer stop-point instead of letting the
+          # runner's ambient CI=true upgrade this smoke into check:ci.
+          CI: "false"
 
   source-validation-proof:
     if: github.event_name == 'pull_request' && needs.metadata-source-proof.outputs.reuse_source != 'true'
