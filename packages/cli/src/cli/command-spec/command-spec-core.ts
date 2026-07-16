@@ -131,7 +131,7 @@ export const coreCommandSpecs = defineCommandSpecs([
     "usage": "task claim <id> [--execution] [--ttl-ms <ms>] [--json]",
     "options": [{"flag":"--execution","description":"Open a new Execution round, or rotate the active holder's credential."},{"flag":"--ttl-ms","description":"Set the task holder lease duration in milliseconds."},{"flag":"--json","description":"Emit command-receipt/v2 JSON."}],
     "summary": "Claim a task holder lease; repeating an Execution claim as its current holder rotates the lease token.",
-    "examples": ["harness-anything task claim task_01ABC --ttl-ms 1800000", "harness-anything task claim task_01ABC --execution --json"],
+    "examples": ["harness-anything task claim task_01ABC --ttl-ms 86400000", "harness-anything task claim task_01ABC --execution --json"],
     "parse": parseCoreTaskArgs,
     "run": runTaskLifecycleCommand,
     "receiptContract": {
@@ -181,7 +181,7 @@ export const coreCommandSpecs = defineCommandSpecs([
   {
     "kind": "status-set",
     "usage": "task transition <id> <planned|active|blocked|in_review|done|cancelled> [--force --reason <reason>]",
-    "options": [{"flag":"--force","description":"Force audited cancellation recovery; this never certifies done."},{"flag":"--reason","description":"Record the reason for the lifecycle change."},{"flag":"--execution-id","description":"Submit the exact active Execution when transitioning to in_review."},{"flag":"--lease-token","description":"Authenticate the Holder V2 execution lease."},{"flag":"--completion-claim","description":"Record the required textual completion claim."},{"flag":"--deliverable","description":"Record a deliverable description; repeat as needed."},{"flag":"--output","description":"Record inline OutputEvidence text; repeat as needed."},{"flag":"--verification","description":"Record a verification note; repeat as needed."},{"flag":"--known-gap","description":"Record a known gap; repeat as needed."},{"flag":"--residual-risk","description":"Record a residual risk; repeat as needed."}],
+    "options": [{"flag":"--force","description":"Force audited cancellation recovery; this never certifies done."},{"flag":"--reason","description":"Record the reason for the lifecycle change."},{"flag":"--execution-id","description":"Submit the exact active Execution when transitioning to in_review."},{"flag":"--lease-token","description":"Explicitly authenticate the Holder V2 lease; optional for its active local actor."},{"flag":"--completion-claim","description":"Record the required textual completion claim."},{"flag":"--deliverable","description":"Record a deliverable description; repeat as needed."},{"flag":"--output","description":"Record inline OutputEvidence text; repeat as needed."},{"flag":"--verification","description":"Record a verification note; repeat as needed."},{"flag":"--known-gap","description":"Record a known gap; repeat as needed."},{"flag":"--residual-risk","description":"Record a residual risk; repeat as needed."}],
     "aliases": ["task status set <id> <status> (deprecated, use task transition; retires at E77/F6 acceptance)"],
     "summary": "Move a local task to a new lifecycle status.",
     "examples": ["harness-anything task transition task_01ABC active --reason \"work started\""],

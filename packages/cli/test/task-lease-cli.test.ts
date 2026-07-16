@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { unwrapCommandReceipt } from "./helpers/receipt.ts";
+import { writeSubstantiveTaskPlan } from "./helpers/task-plan-fixture.ts";
 
 const cliEntry = path.resolve("packages/cli/src/index.ts");
 const taskIdPattern = /^task_[0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}$/u;
@@ -98,6 +99,72 @@ test("explicit true environment override enables lease enforcement without confi
   });
 });
 
+test("task claim defaults to a 24 hour lease when no TTL setting is present", () => {
+  withTempRoot((rootDir) => {
+    const created = runJson(rootDir, ["new-task", "--title", "Default Lease TTL"]);
+    const claimed = runJson(rootDir, ["task", "claim", created.taskId]);
+
+    assert.equal(leaseDurationMs(claimed.report), 86_400_000);
+  });
+});
+
+test("task claim resolves YAML then environment TTL defaults while explicit --ttl-ms stays authoritative", () => {
+  withTempRoot((rootDir) => {
+    writeHarnessConfig(rootDir, [
+      "settings:",
+      "  identity:",
+      "    personId: person_tester",
+      "    displayName: Harness Tester",
+      "  tasks:",
+      "    leaseTtlMs: 120000"
+    ]);
+    const created = runJson(rootDir, ["new-task", "--title", "Configured Lease TTL"]);
+
+    const fromYaml = runJson(rootDir, ["task", "claim", created.taskId]);
+    assert.equal(leaseDurationMs(fromYaml.report), 120_000);
+
+    const fromEnv = runJson(rootDir, ["task", "claim", created.taskId], true, {
+      HARNESS_TASK_LEASE_TTL_MS: "180000"
+    });
+    assert.equal(leaseDurationMs(fromEnv.report), 180_000);
+
+    const explicit = runJson(rootDir, ["task", "claim", created.taskId, "--ttl-ms", "60000"], true, {
+      HARNESS_TASK_LEASE_TTL_MS: "180000"
+    });
+    assert.equal(leaseDurationMs(explicit.report), 60_000);
+  });
+});
+
+test("task claim fails closed for invalid YAML and environment TTL defaults", () => {
+  withTempRoot((rootDir) => {
+    const created = runJson(rootDir, ["new-task", "--title", "Invalid YAML Lease TTL"]);
+    writeHarnessConfig(rootDir, [
+      "settings:",
+      "  identity:",
+      "    personId: person_tester",
+      "    displayName: Harness Tester",
+      "  tasks:",
+      "    leaseTtlMs: 0"
+    ]);
+
+    const rejected = runJson(rootDir, ["task", "claim", created.taskId], false);
+    assert.equal(rejected.error?.code, "harness_settings_invalid");
+    assert.match(rejected.error?.hint ?? "", /settings\.tasks\.leaseTtlMs must be a positive integer/u);
+    assert.equal(existsTaskHolder(rootDir, created.taskId), false);
+  });
+
+  withTempRoot((rootDir) => {
+    const created = runJson(rootDir, ["new-task", "--title", "Invalid Environment Lease TTL"]);
+    const rejected = runJson(rootDir, ["task", "claim", created.taskId], false, {
+      HARNESS_TASK_LEASE_TTL_MS: "not-a-duration"
+    });
+
+    assert.equal(rejected.error?.code, "harness_settings_invalid");
+    assert.match(rejected.error?.hint ?? "", /HARNESS_TASK_LEASE_TTL_MS must be a positive integer/u);
+    assert.equal(existsTaskHolder(rootDir, created.taskId), false);
+  });
+});
+
 test("task claim fails closed when HARNESS_ACTOR names an agent but machine identity is missing", () => {
   withTempRoot((rootDir) => {
     writeHarnessIdentity(rootDir, "person_zeyu", "Zeyu Li");
@@ -167,10 +234,11 @@ test("configured identity supports direct human claim through --actor", () => {
   });
 });
 
-test("default claim and submit use Holder V2 without requiring an execution id", () => {
+test("default claim preserves status and the Holder V2 actor can submit without replaying credentials", () => {
   withTempRoot((rootDir) => {
     writeHarnessIdentity(rootDir, "person_zeyu", "Zeyu Li");
     const created = runJson(rootDir, ["new-task", "--title", "Execution Saga"]);
+    writeSubstantiveTaskPlan(rootDir, created.packagePath);
     const claimed = runJson(rootDir, ["task", "claim", created.taskId], true, {
       HARNESS_ACTOR: "agent:test",
       CLAUDE_SESSION_ID: "",
@@ -197,6 +265,17 @@ test("default claim and submit use Holder V2 without requiring an execution id",
     assert.equal(execution.session_bindings[0]?.role, "primary");
     assert.equal(execution.session_bindings[0]?.session_ref, "session/codex-primary-session");
     assert.equal(execution.session_bindings[0]?.archive_status, "pending");
+    const indexPath = path.join(rootDir, `harness/tasks/${created.taskId}-execution-saga/INDEX.md`);
+    assert.match(readFileSync(indexPath, "utf8"), /^  status: planned$/mu);
+
+    const activated = runJson(rootDir, ["task", "transition", created.taskId, "active"], true, {
+      HARNESS_ACTOR: "agent:test",
+      CLAUDE_SESSION_ID: "",
+      CLAUDE_CODE_SESSION_ID: "",
+      CODEX_THREAD_ID: "codex-primary-session",
+      CODEX_SESSION_ID: "codex-primary-session"
+    });
+    assert.equal(activated.status, "active");
 
     const otherHolder = runJson(rootDir, ["task", "claim", created.taskId], false, {
       HARNESS_ACTOR: "agent:other-worker",
@@ -257,7 +336,6 @@ test("default claim and submit use Holder V2 without requiring an execution id",
 
     const submitted = runJson(rootDir, [
       "task", "transition", created.taskId, "in_review",
-      "--lease-token", renewed.report.leaseToken,
       "--summary", "ready for review",
       "--verification", "node:test",
       "--output", "commit:abc123"
@@ -430,6 +508,10 @@ function readTaskHolder(rootDir: string, taskId: string): Record<string, any> {
   return JSON.parse(readFileSync(path.join(rootDir, ".harness/task-holders", `${taskId}.json`), "utf8")) as Record<string, any>;
 }
 
+function leaseDurationMs(report: Record<string, any>): number {
+  return Date.parse(report.leaseExpiresAt) - Date.parse(report.acquiredAt);
+}
+
 function expireTaskHolder(rootDir: string, taskId: string): void {
   const record = readTaskHolder(rootDir, taskId);
   writeFileSync(path.join(rootDir, ".harness/task-holders", `${taskId}.json`), JSON.stringify({
@@ -465,8 +547,12 @@ function runJson(rootDir: string, args: ReadonlyArray<string>, expectSuccess = t
       ...env
     };
     delete childEnv.HARNESS_TASK_LEASE_ENFORCEMENT;
+    delete childEnv.HARNESS_TASK_LEASE_TTL_MS;
     if (env.HARNESS_TASK_LEASE_ENFORCEMENT !== undefined) {
       childEnv.HARNESS_TASK_LEASE_ENFORCEMENT = env.HARNESS_TASK_LEASE_ENFORCEMENT;
+    }
+    if (env.HARNESS_TASK_LEASE_TTL_MS !== undefined) {
+      childEnv.HARNESS_TASK_LEASE_TTL_MS = env.HARNESS_TASK_LEASE_TTL_MS;
     }
     const stdout = execFileSync(process.execPath, [cliEntry, "--root", rootDir, "--json", ...args], {
       encoding: "utf8",

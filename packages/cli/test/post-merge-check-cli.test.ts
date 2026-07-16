@@ -102,6 +102,23 @@ test("CLI check --post-merge hard-fails a relation to a missing decision", () =>
   });
 });
 
+test("CLI check --post-merge distinguishes checker profiles from real entity references", () => {
+  withTempRoot((rootDir) => {
+    writeIndex(rootDir, "task-a", "A", "planned");
+    const artifactPath = path.join(rootDir, "harness/tasks/task-a/analysis.md");
+    writeFileSync(artifactPath, "checkerProfile: task/default-v2\n", "utf8");
+
+    const profileOnly = runJson(rootDir, ["check", "--post-merge"]);
+    assert.equal(profileOnly.warnings.some((warning: any) => warning.code === "dangling_entity_ref"), false);
+
+    writeFileSync(artifactPath, "checkerProfile: task/default-v2\ndepends on task/missing-task\n", "utf8");
+    const realDangling = runJson(rootDir, ["check", "--post-merge"], false);
+    const warning = realDangling.warnings.find((entry: any) => entry.code === "dangling_entity_ref");
+    assert.ok(warning);
+    assert.match(warning.message, /task\/missing-task/u);
+  });
+});
+
 test("CLI check --post-merge excludes generated artifact captures from dangling entity refs", () => {
   withTempRoot((rootDir) => {
     writeIndex(rootDir, "task-a", "A", "planned");

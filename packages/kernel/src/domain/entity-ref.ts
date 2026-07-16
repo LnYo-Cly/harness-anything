@@ -15,6 +15,7 @@ const taskOrDecisionRefPattern = /^(?<kind>task|decision)\/(?<id>[A-Za-z0-9_-]+)
 const factRefPattern = /^fact\/(?<ownerTaskId>[A-Za-z0-9_-]+)\/(?<factId>[A-Za-z0-9_-]+)$/u;
 const relationRefPattern = /^relation\/(?<relationId>rel_[a-f0-9]{16})$/u;
 const entityRefSearchPattern = /(?<![A-Za-z0-9_/-])(?:[A-Za-z][A-Za-z0-9_-]*:)?(?:fact\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+|relation\/rel_[a-f0-9]{16}|(?:task|decision)\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)?)\b(?!\/)/gu;
+const namespaceLiteralFieldPrefix = /(?:^|[{,])\s*["']?(?:schema|profile|checkerProfile)["']?\s*:\s*["']?$/u;
 
 function isPlausibleTaskRefId(id: string): boolean {
   return id.startsWith("task_") || id.includes("-");
@@ -82,6 +83,12 @@ export function parseEntityRef(value: string): ParsedEntityRef | null {
 
 export function findEntityRefs(body: string): ReadonlyArray<ParsedEntityRef> {
   return [...body.matchAll(entityRefSearchPattern)]
+    .filter((match) => !isNamespaceLiteralFieldValue(body, match.index))
     .map((match) => parseEntityRef(match[0]))
     .filter((ref): ref is ParsedEntityRef => ref !== null);
+}
+
+function isNamespaceLiteralFieldValue(body: string, matchIndex: number): boolean {
+  const lineStart = body.lastIndexOf("\n", matchIndex - 1) + 1;
+  return namespaceLiteralFieldPrefix.test(body.slice(lineStart, matchIndex));
 }

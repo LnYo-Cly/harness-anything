@@ -123,13 +123,13 @@ export interface TaskHolderService {
   readonly reserveExecution: (input: { readonly taskId: string; readonly executionId: string; readonly principal: TaskHolderPrincipal; readonly ttlMs?: number }) => Promise<ExecutionLeaseReservation>;
   readonly renewExecution: (input: { readonly taskId: string; readonly principal: TaskHolderPrincipal; readonly ttlMs?: number }) => Promise<ExecutionLeaseContext | null>;
   readonly activateExecution: (input: { readonly taskId: string; readonly executionId: string; readonly leaseToken: string; readonly principal: TaskHolderPrincipal }) => Promise<ExecutionLeaseContext>;
-  readonly releaseExecution: (input: { readonly taskId: string; readonly executionId: string; readonly leaseToken: string; readonly principal: TaskHolderPrincipal }) => Promise<TaskHolderReleaseResult>;
-  readonly assertExecutionLease: (input: { readonly taskId: string; readonly executionId: string; readonly leaseToken: string; readonly principal: TaskHolderPrincipal }) => Promise<void>;
+  readonly releaseExecution: (input: { readonly taskId: string; readonly executionId: string; readonly leaseToken?: string; readonly principal: TaskHolderPrincipal }) => Promise<TaskHolderReleaseResult>;
+  readonly assertExecutionLease: (input: { readonly taskId: string; readonly executionId: string; readonly leaseToken?: string; readonly principal: TaskHolderPrincipal }) => Promise<void>;
   readonly reconcileExecution: (input: { readonly taskId: string; readonly executionId: string; readonly authoredState: "active" | "submitted" | "missing" }) => Promise<void>;
   readonly executionLeases: () => Promise<ReadonlyArray<Pick<ExecutionLeaseRecord, "taskId" | "executionId">>>;
 }
 
-const defaultTtlMs = 30 * 60 * 1_000;
+const defaultTtlMs = 24 * 60 * 60 * 1_000;
 
 export function makeTaskHolderService(options: TaskHolderServiceOptions): TaskHolderService {
   const now = () => options.now?.() ?? new Date();

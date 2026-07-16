@@ -20,7 +20,7 @@ import { actionTaskId } from "../cli/parse-args.ts";
 import { requiresConflictMarkerPreflight, runRegisteredCommand } from "../cli/runner-registry.ts";
 import type { CliResult, ParsedCommand } from "../cli/types.ts";
 import { finalizeDryRunResult } from "../cli/dry-run-preview.ts";
-import { leaseEnforcementEnabled } from "../commands/settings.ts";
+import { leaseEnforcementEnabled, resolveTaskLeaseTtlMs } from "../commands/settings.ts";
 import { CliActorAttributionError, migrationWriteAttribution, type CliActorAttribution } from "./actor-attribution.ts";
 import { CliPrincipalResolutionError, resolveCliTaskHolderPrincipal, resolveLocalCliActorAttribution } from "./local-principal.ts";
 import {
@@ -49,6 +49,10 @@ export async function runRegisteredCommandWithCliComposition(
     rootDir: command.rootDir,
     layoutOverrides: command.layoutOverrides
   };
+  const taskLeaseTtl = command.action.kind === "version" || command.action.kind === "gui"
+    ? undefined
+    : resolveTaskLeaseTtlMs(layoutInput, process.env, command.action.kind);
+  if (taskLeaseTtl && !taskLeaseTtl.ok) return taskLeaseTtl.result;
   let enforceTaskLeaseResolved = false;
   let enforceTaskLeaseValue = false;
   const enforceTaskLease = () => {
@@ -165,7 +169,11 @@ export async function runRegisteredCommandWithCliComposition(
   const appendLeaseEvent: ReturnType<typeof makeRuntimeEventAppendPromise> = async (event) => {
     await makeRuntimeEventAppendPromise(getRuntimeEventLedgerService())(event);
   };
-  const makeTaskHolder = () => makeTaskHolderService({ rootInput: layoutInput, appendLeaseEvent });
+  const makeTaskHolder = () => makeTaskHolderService({
+    rootInput: layoutInput,
+    appendLeaseEvent,
+    ...(taskLeaseTtl ? { defaultTtlMs: taskLeaseTtl.ttlMs } : {})
+  });
   const makeSessionExporter = () => makeProvenanceSessionExporter({
     rootInput: layoutInput,
     currentSessionProbe: getCurrentSessionProbe(),

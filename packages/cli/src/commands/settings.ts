@@ -15,6 +15,7 @@ export interface ProjectHarnessIdentity {
 
 export interface ProjectHarnessTaskSettings {
   readonly leaseEnforcement: boolean;
+  readonly leaseTtlMs?: number;
 }
 
 export interface ProjectHarnessSettings {
@@ -56,6 +57,7 @@ const EMPTY_USER_SETTINGS: UserHarnessSettings = {
 
 const SETTINGS_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9]*$/u;
 const SETTINGS_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9/_@.-]*$/u;
+const DEFAULT_TASK_LEASE_TTL_MS = 24 * 60 * 60 * 1_000;
 
 export function readProjectHarnessSettings(rootInput: HarnessLayoutInput, command = "settings"): SettingsResult {
   const layout = resolveHarnessLayout(rootInput);
@@ -122,6 +124,29 @@ export function leaseEnforcementEnabled(
   if (envOverride !== undefined) return envOverride;
   const settings = readProjectHarnessSettings(rootInput, "lease-enforcement");
   return settings.ok && settings.settings.tasks.leaseEnforcement;
+}
+
+export function resolveTaskLeaseTtlMs(
+  rootInput: HarnessLayoutInput,
+  env: NodeJS.ProcessEnv = process.env,
+  command = "task-claim"
+): { readonly ok: true; readonly ttlMs: number } | Extract<SettingsResult, { readonly ok: false }> {
+  const settings = readProjectHarnessSettings(rootInput, command);
+  if (!settings.ok) return { ok: false, result: settings.result };
+
+  const envValue = env.HARNESS_TASK_LEASE_TTL_MS?.trim();
+  if (envValue) {
+    const parsed = positiveInteger(envValue);
+    if (parsed === undefined) {
+      return {
+        ok: false,
+        result: settingsError(command, "HARNESS_TASK_LEASE_TTL_MS must be a positive integer in milliseconds.")
+      };
+    }
+    return { ok: true, ttlMs: parsed };
+  }
+
+  return { ok: true, ttlMs: settings.settings.tasks.leaseTtlMs ?? DEFAULT_TASK_LEASE_TTL_MS };
 }
 
 export function customVerticalGateResult(
@@ -277,10 +302,15 @@ function parseYamlSettings(body: string): { readonly present: boolean; readonly 
     }
     if (inTasks && customNested) {
       const [, key, rawValue = ""] = customNested;
-      if (key !== "leaseEnforcement") throw new Error(`Unknown settings.tasks key: ${key}`);
+      if (key !== "leaseEnforcement" && key !== "leaseTtlMs") throw new Error(`Unknown settings.tasks key: ${key}`);
       const value = rawValue.trim();
-      if (value !== "true" && value !== "false") throw new Error("settings.tasks.leaseEnforcement must be true or false.");
-      settings.tasks = { leaseEnforcement: value === "true" };
+      if (!value) throw new Error(`settings.tasks.${key} must be a scalar value.`);
+      if (key === "leaseEnforcement") {
+        if (value !== "true" && value !== "false") throw new Error("settings.tasks.leaseEnforcement must be true or false.");
+        settings.tasks = { ...(isRecord(settings.tasks) ? settings.tasks : {}), leaseEnforcement: value === "true" };
+      } else {
+        settings.tasks = { ...(isRecord(settings.tasks) ? settings.tasks : {}), leaseTtlMs: unquoteScalar(value) };
+      }
       continue;
     }
 
@@ -304,11 +334,21 @@ function validateSettings(command: string, raw: RawSettings): SettingsResult {
   const identity = validateIdentity(command, raw.identity);
   if (!identity.ok) return identity;
   const tasks = raw.tasks;
+  let leaseTtlMs: number | undefined;
   if (tasks !== undefined) {
     if (!isRecord(tasks)) return invalid(command, "settings.tasks must be a mapping.");
     const keys = Object.keys(tasks);
-    if (keys.length !== 1 || keys[0] !== "leaseEnforcement" || typeof tasks.leaseEnforcement !== "boolean") {
-      return invalid(command, "settings.tasks.leaseEnforcement must be a boolean.");
+    if (keys.length === 0 || keys.some((key) => key !== "leaseEnforcement" && key !== "leaseTtlMs")) {
+      return invalid(command, "settings.tasks supports only leaseEnforcement and leaseTtlMs.");
+    }
+    if (tasks.leaseEnforcement !== undefined && typeof tasks.leaseEnforcement !== "boolean") {
+      return invalid(command, "settings.tasks.leaseEnforcement must be a boolean when provided.");
+    }
+    if (tasks.leaseTtlMs !== undefined) {
+      leaseTtlMs = positiveInteger(tasks.leaseTtlMs);
+      if (leaseTtlMs === undefined) {
+        return invalid(command, "settings.tasks.leaseTtlMs must be a positive integer in milliseconds.");
+      }
     }
   }
   const customVerticals = raw.customVerticals;
@@ -331,7 +371,10 @@ function validateSettings(command: string, raw: RawSettings): SettingsResult {
       defaultPreset: normalizeDefaultSentinel(defaultPreset.value),
       defaultProfile: normalizeDefaultSentinel(defaultProfile.value),
       ...(identity.value ? { identity: identity.value } : {}),
-      tasks: { leaseEnforcement: isRecord(tasks) && tasks.leaseEnforcement === true },
+      tasks: {
+        leaseEnforcement: isRecord(tasks) && tasks.leaseEnforcement === true,
+        ...(leaseTtlMs !== undefined ? { leaseTtlMs } : {})
+      },
       customVerticalsEnabled: isRecord(customVerticals) ? customVerticals.enabled === true : false
     }
   };
@@ -411,6 +454,12 @@ function parseLeaseEnforcementEnv(value: string | undefined): boolean | undefine
     default:
       return undefined;
   }
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  if (typeof value === "string" && !/^[0-9]+$/u.test(value)) return undefined;
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: ReadonlyArray<string>): boolean {

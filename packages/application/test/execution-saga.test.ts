@@ -147,6 +147,8 @@ test("a real coordinated claim and submit preserves the hosted Execution round",
       detectedAt: "2026-07-11T00:00:00.000Z"
     };
     const claimed = await saga.claim({ taskId, principal: aliceCodex, primarySession });
+    const indexPath = path.join(taskRoot, "INDEX.md");
+    writeFileSync(indexPath, readFileSync(indexPath, "utf8").replace(/^(  status:\s*).+$/mu, "$1active"), "utf8");
     const bodyRef = writeContentAddressedBlob(rootDir, "# finalized session\n", "text/markdown; charset=utf-8");
     Effect.runSync(writeSessionEntity(coordinator, rootDir, {
       schema: "session-entity/v1",
@@ -337,6 +339,7 @@ test("submit-for-review finalizes the Session before changing authored state or 
         detectedAt: "2026-07-11T00:00:00.000Z"
       }
     });
+    authored.taskStatus = "active";
 
     await assert.rejects(saga.submitForReview({
       taskId,
