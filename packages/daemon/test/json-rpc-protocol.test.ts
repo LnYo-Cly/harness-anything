@@ -181,7 +181,15 @@ test("repo methods fail closed when the repo runtime is unavailable", async () =
 
   assert.equal(receipt.ok, false);
   assert.equal(receipt.error?.code, "repo_lock_held");
+  assert.equal(receipt.error?.hint, "Repo locked is not attached to this daemon.");
   assert.equal((receipt.details.repo as { state?: string }).state, "unavailable");
+  assert.deepEqual(receipt.next, [{
+    command: "ha --repo locked daemon status --json",
+    description: "Inspect this repo's daemon attachment state; unavailable repos are retried automatically."
+  }, {
+    command: "ha daemon repo register --repo-id locked --root /tmp/locked",
+    description: "Register or re-enable this repo if it is missing or disabled, then retry the original command."
+  }]);
   assert.equal(serviceCalls, 0);
 });
 
@@ -217,7 +225,12 @@ test("repo methods fail closed when the repo runtime context is missing", async 
 
   assert.equal(receipt.ok, false);
   assert.equal(receipt.error?.code, "repo_unavailable");
+  assert.equal(receipt.error?.hint, "Repo canonical is not attached to this daemon.");
   assert.equal((receipt.details.repo as { lastError?: string }).lastError, "runtime context not found");
+  assert.deepEqual(receipt.next?.map((action: { command: string }) => action.command), [
+    "ha --repo canonical daemon status --json",
+    "ha daemon repo register --repo-id canonical --root /tmp/canonical"
+  ]);
   assert.equal(serviceCalls, 0);
 });
 

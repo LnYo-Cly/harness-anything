@@ -1,7 +1,13 @@
 import type { CliResult } from "./types.ts";
 import { cliError, CliErrorCode } from "./error-codes.ts";
 import { commandReceiptContractsByKind, type CommandReceiptContract } from "./receipt-contracts.ts";
-import { commandReceiptEnvelope, type CommandFailureReceipt, type CommandReceipt } from "../../../application/src/index.ts";
+import {
+  commandReceiptEnvelope,
+  failureReceiptNextActions,
+  type CommandFailureReceipt,
+  type CommandReceipt,
+  type CommandReceiptEnvelope
+} from "../../../application/src/index.ts";
 
 export { commandReceiptEnvelope };
 export type { CommandFailureReceipt, CommandReceipt };
@@ -64,7 +70,8 @@ export function toCommandReceipt(result: CliResult): CommandReceipt | CommandFai
   return legacyToV2(legacy);
 }
 
-export function renderReceiptText(receipt: CommandReceipt): string {
+export function renderReceiptText(receipt: CommandReceiptEnvelope): string {
+  if (!receipt.ok) return renderFailureReceiptText(receipt);
   if (receipt.command === "capabilities") return renderCapabilitiesText(receipt);
   if (receipt.command === "preset list") return renderPresetListText(receipt);
   const data = receiptDetailsData(receipt);
@@ -87,6 +94,16 @@ export function renderReceiptText(receipt: CommandReceipt): string {
   const mode = launchMode(data.launchPlan);
   if (mode) parts.push(`mode=${formatToken(mode.mode)}`, `package=${formatToken(mode.packageName)}`);
   parts.push(`summary=${formatToken(receipt.summary)}`);
+  return parts.join(" ");
+}
+
+function renderFailureReceiptText(receipt: CommandFailureReceipt): string {
+  const parts = [
+    "error",
+    `code=${formatToken(receipt.error?.code ?? "unknown")}`,
+    `hint=${formatToken(receipt.error?.hint ?? "Command failed.")}`
+  ];
+  for (const action of receipt.next ?? []) parts.push(`next=${formatToken(action.command)}`);
   return parts.join(" ");
 }
 
@@ -176,6 +193,7 @@ function failureToReceipt(result: CliFailureResult): CommandFailureReceipt {
   const data = Object.fromEntries(Object.entries(raw).filter(([key, value]) =>
     !["ok", "command", "error", "warnings"].includes(key) && value !== undefined
   ));
+  const next = failureReceiptNextActions(result.error?.code, data);
   return {
     ok: false,
     schema: commandReceiptEnvelope,
@@ -184,6 +202,7 @@ function failureToReceipt(result: CliFailureResult): CommandFailureReceipt {
     summary: result.error?.hint ?? "Command failed.",
     ...(result.error ? { error: result.error } : {}),
     ...(result.warnings && result.warnings.length > 0 ? { warnings: result.warnings } : {}),
+    ...(next ? { next } : {}),
     ...(Object.keys(data).length > 0 ? { details: { data } } : {}),
     meta: { generatedAt: new Date().toISOString(), compatibility: { legacyReceipt: legacyReceiptEnvelope } }
   };

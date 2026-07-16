@@ -213,7 +213,7 @@ function emit(output: CommandReceipt | CommandFailureReceipt, json: boolean): vo
     return;
   }
 
-  console.error(`error code=${output.error?.code ?? "unknown"} hint=${output.error?.hint ?? "Command failed."}`);
+  console.error(renderReceiptText(output));
 }
 
 function renderHelp(result: Record<string, unknown>): string {

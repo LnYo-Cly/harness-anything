@@ -1,6 +1,7 @@
 // harness-test-tier: contract
 import assert from "node:assert/strict";
 import test from "node:test";
+import { toCliError } from "../src/cli/error-mapper.ts";
 import { commandReceiptContractsByKind } from "../src/cli/receipt-contracts.ts";
 import { renderReceiptText, toCommandReceipt } from "../src/cli/receipt.ts";
 
@@ -132,6 +133,45 @@ test("plain text receipts prioritize pending materialization and print its next 
   if (!receipt.ok) return;
   assert.match(renderReceiptText(receipt), /pending materialization|not readable/iu);
   assert.match(renderReceiptText(receipt), /next="ha materializer run --json"/u);
+});
+
+test("failure JSON and text render the same structured task lease recovery command", () => {
+  const taskId = "task_01KXN3G16TKNHCV29Z4ZWM4VY2";
+  const receipt = toCommandReceipt({
+    ok: false,
+    command: "progress-append",
+    taskId,
+    error: {
+      code: "task_lease_required",
+      hint: "Task requires an active lease."
+    }
+  });
+
+  assert.equal(receipt.ok, false);
+  if (receipt.ok) return;
+  const command = `ha task claim ${taskId}`;
+  assert.equal(receipt.error?.code, "task_lease_required");
+  assert.equal(receipt.error?.hint, "Task requires an active lease.");
+  assert.deepEqual(receipt.next, [{
+    command,
+    description: "Claim the task lease, then retry the original command."
+  }]);
+  assert.match(renderReceiptText(receipt), new RegExp(`next=${JSON.stringify(command)}`, "u"));
+});
+
+test("task lease write rejection preserves its specific CLI error code and hint", () => {
+  const error = toCliError({
+    _tag: "WriteRejected",
+    taskId: "task_01KXN3G16TKNHCV29Z4ZWM4VY2",
+    code: "task_lease_required",
+    reason: "Original task lease hint.",
+    retryable: false
+  });
+
+  assert.deepEqual(error, {
+    code: "task_lease_required",
+    hint: "Original task lease hint."
+  });
 });
 
 test("command receipts accept explicitly optional declared data when present", () => {
