@@ -20,19 +20,24 @@ export { readModuleAttributionProjection } from "../../kernel/src/index.ts";
 export {
   authorityProtocolTuple,
   canonicalAuthorityRequestDigest,
+  completeAuthorityCommittedReceiptV2,
   createAuthoritySubmissionService,
+  makeCompositeAuthoritySemanticCompilerV2,
   createInMemoryShadowPublicationLog,
   createInMemoryAuthorityOperationRegistry,
   createInMemoryReplicaChangeLog,
+  isCompleteAuthorityCommittedReceiptV2,
   reconcileShadowPublications,
   shadowPublicationSchema,
   shadowReconciliationSchema
 } from "./authority/index.ts";
 export type {
   AttributedCoordinatorFactory,
+  AuthorityCommittedEventPublisherV2,
   AuthorityCommittedReceipt,
   AuthorityFenceWitness,
   AuthorityIndeterminateReceipt,
+  AuthorityIntegrityTupleV2,
   AuthorityOperationEnvelope,
   AuthorityOperationReceipt,
   AuthorityOperationRecord,
@@ -42,6 +47,7 @@ export type {
   AuthorityProtocolTuple,
   AuthorityRejectedReceipt,
   AuthorityRetryableReceipt,
+  AuthoritySemanticCompilerRouteV2,
   AuthoritySubmissionService,
   AuthoritySubmissionServiceOptions,
   CanonicalPublication,
@@ -53,6 +59,7 @@ export type {
   ReplicaChangeRecord
 } from "./authority/index.ts";
 export * from "./authority/actor-axes-binding-v2.ts";
+export * from "./authority/key-registry-v1.ts";
 export * from "./authority/canonical-cbor.ts";
 export * from "./authority/semantic-mutation-envelope-v2.ts";
 export * from "./authority/fact-relation-semantic-compiler-v2.ts";

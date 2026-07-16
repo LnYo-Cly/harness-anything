@@ -6,9 +6,10 @@ import { cliError, CliErrorCode } from "../cli/error-codes.ts";
 import { toCommandReceipt, type CommandFailureReceipt, type CommandReceipt } from "../cli/receipt.ts";
 import type { ParsedCommand } from "../cli/types.ts";
 import { isPlainRecord } from "../cli/value-utils.ts";
-import { CliActorAttributionError, daemonActorAttribution, migrationWriteAttribution } from "../composition/actor-attribution.ts";
+import { CliActorAttributionError, daemonActorAttributionForParsedCommand, migrationWriteAttribution } from "../composition/actor-attribution.ts";
 import { runRegisteredCommandWithCliComposition } from "../composition/command-executor.ts";
 import { materializerCommandResult } from "../commands/core/materializer.ts";
+import { makeDaemonAuthorityWriteCoordinator, type DaemonAuthorityCommandSubmissionV2 } from "./authority-command-submission.ts";
 import { makeDaemonQueuedOperationalWriteCoordinator, makeDaemonQueuedWriteCoordinator, type CliDaemonRuntime } from "./queued-write-coordinator.ts";
 
 export interface CliCommandService {
@@ -18,6 +19,7 @@ export interface CliCommandService {
 export interface CliCommandServiceOptions {
   readonly onCommandStart?: () => void;
   readonly onCommandSettled?: () => void;
+  readonly authoritySubmissionV2?: DaemonAuthorityCommandSubmissionV2;
 }
 
 export function createCliCommandService(runtime: CliDaemonRuntime, options: CliCommandServiceOptions = {}): CliCommandService {
@@ -34,7 +36,16 @@ export function createCliCommandService(runtime: CliDaemonRuntime, options: CliC
           const report = await runtime.enqueueMaterializerBatch({ dryRun: parsedCommand.action.dryRun });
           return toCommandReceipt(materializerCommandResult(report));
         }
-        const attribution = daemonActor ? daemonActorAttribution(daemonActor, context?.executor) : undefined;
+        const attribution = daemonActor
+          ? daemonActorAttributionForParsedCommand(daemonActor, parsedCommand, context?.executor)
+          : undefined;
+        const authorityCoordinator = attribution && options.authoritySubmissionV2
+          ? makeDaemonAuthorityWriteCoordinator(options.authoritySubmissionV2, {
+            command: parsedCommand,
+            attribution,
+            currentSession
+          })
+          : undefined;
         const result = await runRegisteredCommandWithCliComposition(parsedCommand, {
           requireProvidedActorAttribution: true,
           ...(attribution ? { actorAttribution: attribution } : {
@@ -43,15 +54,17 @@ export function createCliCommandService(runtime: CliDaemonRuntime, options: CliC
           ...(currentSession ? { currentSession } : {}),
           syncExportedSession: (exported) => materializeExportedSessionEffect(runtime, exported),
           makeWriteCoordinator: (actor) => attribution
-            ? makeDaemonQueuedWriteCoordinator(
-              runtime,
-              `${parsedCommand.action.kind}:${actor.kind}:${actor.id}`,
-              {
-                attribution: attribution.writeAttribution,
-                commitAuthor: attribution.commitAuthor,
-                ...(currentSession?.source === "runtime" ? { sessionId: currentSession.sessionId } : {})
-              }
-            )
+            ? authorityCoordinator
+              ? authorityCoordinator
+              : makeDaemonQueuedWriteCoordinator(
+                runtime,
+                `${parsedCommand.action.kind}:${actor.kind}:${actor.id}`,
+                {
+                  attribution: attribution.writeAttribution,
+                  commitAuthor: attribution.commitAuthor,
+                  ...(currentSession?.source === "runtime" ? { sessionId: currentSession.sessionId } : {})
+                }
+              )
             : missingDaemonActorCoordinator(parsedCommand.action.kind, actor),
           makeMigrationWriteCoordinator: (actor, evidenceRef) => attribution
             ? makeDaemonQueuedWriteCoordinator(
