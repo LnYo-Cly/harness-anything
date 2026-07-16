@@ -131,7 +131,7 @@ export const coreCommandSpecs = defineCommandSpecs([
     "usage": "task claim <id> [--execution] [--ttl-ms <ms>] [--json]",
     "options": [{"flag":"--execution","description":"Open a new Execution round, or rotate the active holder's credential."},{"flag":"--ttl-ms","description":"Set the task holder lease duration in milliseconds."},{"flag":"--json","description":"Emit command-receipt/v2 JSON."}],
     "summary": "Claim a task holder lease; repeating an Execution claim as its current holder rotates the lease token.",
-    "examples": ["harness-anything task claim task_01ABC --ttl-ms 1800000", "harness-anything task claim task_01ABC --execution --json"],
+    "examples": ["harness-anything task claim task_01ABC --ttl-ms 86400000", "harness-anything task claim task_01ABC --execution --json"],
     "parse": parseCoreTaskArgs,
     "run": runTaskLifecycleCommand,
     "receiptContract": {

@@ -129,7 +129,7 @@ export interface TaskHolderService {
   readonly executionLeases: () => Promise<ReadonlyArray<Pick<ExecutionLeaseRecord, "taskId" | "executionId">>>;
 }
 
-const defaultTtlMs = 30 * 60 * 1_000;
+const defaultTtlMs = 24 * 60 * 60 * 1_000;
 
 export function makeTaskHolderService(options: TaskHolderServiceOptions): TaskHolderService {
   const now = () => options.now?.() ?? new Date();

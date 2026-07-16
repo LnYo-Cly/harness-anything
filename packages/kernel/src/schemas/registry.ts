@@ -95,7 +95,8 @@ export const HarnessConfigSchema = Schema.Struct({
       displayName: Schema.optional(Schema.String)
     })),
     tasks: Schema.optional(Schema.Struct({
-      leaseEnforcement: Schema.Boolean
+      leaseEnforcement: Schema.optional(Schema.Boolean),
+      leaseTtlMs: Schema.optional(Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(1)))
     })),
     customVerticals: Schema.optional(Schema.Struct({
       enabled: Schema.Boolean
