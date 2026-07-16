@@ -56,21 +56,30 @@ test("completion scripts track command registry fixture changes", () => {
   );
 });
 
-test("registry-derived bash and zsh scripts pass shell syntax checks", () => {
+test("registry-derived scripts expose expected values and pass available shell syntax checks", async (t) => {
   const model = deriveShellCompletionModel(commandRegistry);
   const taskCreate = model.commands.find((command) => command.path.join(" ") === "task create");
   const taskTransition = model.commands.find((command) => command.path.join(" ") === "task transition");
   assert.deepEqual(taskCreate?.options.find((option) => option.value === "--kind")?.values, ["feat", "fix", "refactor", "docs", "test", "chore"]);
   assert.deepEqual(taskTransition?.positionals.find((positional) => positional.index === 1)?.values, ["planned", "active", "blocked", "in_review", "done", "cancelled"]);
 
-  for (const shell of ["bash", "zsh"] as const) {
-    const script = generateShellCompletion(shell, commandRegistry);
-    assert.match(script, /task create/u);
+  const bashScript = generateShellCompletion("bash", commandRegistry);
+  assert.match(bashScript, /task create/u);
+  const bashSyntax = spawnSync("bash", ["-n"], { input: bashScript, encoding: "utf8" });
+  assert.equal(bashSyntax.error, undefined);
+  assert.equal(bashSyntax.status, 0, bashSyntax.stderr);
 
-    const syntax = spawnSync(shell, ["-n"], { input: script, encoding: "utf8" });
+  await t.test("zsh script passes syntax check when zsh is installed", (zshTest) => {
+    const zshScript = generateShellCompletion("zsh", commandRegistry);
+    assert.match(zshScript, /task create/u);
+    const syntax = spawnSync("zsh", ["-n"], { input: zshScript, encoding: "utf8" });
+    if ((syntax.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+      zshTest.skip("zsh executable is unavailable; zsh -n syntax check skipped");
+      return;
+    }
     assert.equal(syntax.error, undefined);
     assert.equal(syntax.status, 0, syntax.stderr);
-  }
+  });
 });
 
 test("ha completion emits the generated script through the standard CLI entrypoint", () => {
