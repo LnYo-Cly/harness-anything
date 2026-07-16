@@ -5,7 +5,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { daemonActorAttribution } from "../src/composition/actor-attribution.ts";
+import {
+  daemonActorAttribution,
+  daemonActorAttributionForParsedCommand
+} from "../src/composition/actor-attribution.ts";
 import { resolveLocalCliActorAttribution } from "../src/composition/local-principal.ts";
 import { createCliCommandService, materializeExportedSession } from "../src/daemon/command-service.ts";
 import type { CliDaemonRuntime } from "../src/daemon/queued-write-coordinator.ts";
@@ -105,6 +108,41 @@ test("daemon attribution preserves authenticated principal and asserted executor
   });
   assert.equal(directHuman.writeAttribution.actor.executor, null);
   assert.equal(directHuman.writeAttribution.executorSource, "none");
+});
+
+test("negative trust-boundary test: preset executor is derived from the parsed command and client self-report is ignored", () => {
+  const attribution = daemonActorAttributionForParsedCommand({
+    personId: "person_alice",
+    displayName: "Alice",
+    primaryEmail: "alice@example.test",
+    roles: ["writer"],
+    providerId: "forced-command",
+    resolvedCredential: {
+      kind: "ssh-forced-command-person",
+      issuer: "test",
+      subject: "person_alice"
+    }
+  }, {
+    rootDir: "/repo",
+    json: true,
+    action: {
+      kind: "preset-run",
+      presetId: "usage-acceptance",
+      entrypoint: "check",
+      taskId: "task_01TEST",
+      allowScripts: true,
+      inputs: {}
+    }
+  }, { kind: "agent", id: "client-self-report-must-be-ignored" });
+
+  assert.deepEqual(attribution.writeAttribution.actor.executor, {
+    kind: "agent",
+    id: "preset:usage-acceptance"
+  });
+  // S3a still has no daemon command-service V2 authority submissions, so the
+  // existing V1 journal source vocabulary remains unchanged in this patch.
+  assert.equal(attribution.writeAttribution.executorSource, "client-asserted");
+  assert.deepEqual(attribution.executor, { kind: "agent", id: "preset:usage-acceptance" });
 });
 
 test("daemon command service preserves A/X attribution through the queued coordinator boundary", async () => {

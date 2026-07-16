@@ -6,7 +6,7 @@ import { cliError, CliErrorCode } from "../cli/error-codes.ts";
 import { toCommandReceipt, type CommandFailureReceipt, type CommandReceipt } from "../cli/receipt.ts";
 import type { ParsedCommand } from "../cli/types.ts";
 import { isPlainRecord } from "../cli/value-utils.ts";
-import { CliActorAttributionError, daemonActorAttribution, migrationWriteAttribution } from "../composition/actor-attribution.ts";
+import { CliActorAttributionError, daemonActorAttributionForParsedCommand, migrationWriteAttribution } from "../composition/actor-attribution.ts";
 import { runRegisteredCommandWithCliComposition } from "../composition/command-executor.ts";
 import { materializerCommandResult } from "../commands/core/materializer.ts";
 import { makeDaemonQueuedOperationalWriteCoordinator, makeDaemonQueuedWriteCoordinator, type CliDaemonRuntime } from "./queued-write-coordinator.ts";
@@ -34,7 +34,9 @@ export function createCliCommandService(runtime: CliDaemonRuntime, options: CliC
           const report = await runtime.enqueueMaterializerBatch({ dryRun: parsedCommand.action.dryRun });
           return toCommandReceipt(materializerCommandResult(report));
         }
-        const attribution = daemonActor ? daemonActorAttribution(daemonActor, context?.executor) : undefined;
+        const attribution = daemonActor
+          ? daemonActorAttributionForParsedCommand(daemonActor, parsedCommand, context?.executor)
+          : undefined;
         const result = await runRegisteredCommandWithCliComposition(parsedCommand, {
           requireProvidedActorAttribution: true,
           ...(attribution ? { actorAttribution: attribution } : {

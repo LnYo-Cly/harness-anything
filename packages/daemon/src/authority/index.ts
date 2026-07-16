@@ -24,3 +24,9 @@ export type {
   AuthorityForcedCommandSession,
   AuthorityTransportObserver
 } from "./forced-command-session.ts";
+export {
+  openLocalAuthorityKeyStore,
+  type CreatePrepublishedAuthorityKeyInput,
+  type LocalAuthorityKeyStore,
+  type LocalAuthorityKeyStoreOptions
+} from "./local-key-store.ts";

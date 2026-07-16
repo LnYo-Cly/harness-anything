@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { AuthenticatedActor } from "../../../daemon/src/index.ts";
 import type { TaskHolderExecutor, TaskHolderPersonPrincipal } from "../../../application/src/index.ts";
 import type { WriteAttribution } from "../../../kernel/src/index.ts";
+import type { ParsedCommand } from "../cli/types.ts";
 import { readNonBlankEnv } from "./environment.ts";
 
 export interface CliJournalActor {
@@ -83,6 +84,25 @@ export function daemonActorAttribution(actor: AuthenticatedActor, executor: Task
       credential: actor.resolvedCredential
     }
   };
+}
+
+/**
+ * Preset execution identity is bound to the semantic command observed by the
+ * daemon. An independently reported executor cannot override that binding.
+ */
+export function daemonActorAttributionForParsedCommand(
+  actor: AuthenticatedActor,
+  command: ParsedCommand,
+  reportedExecutor: TaskHolderExecutor | null = null
+): CliActorAttribution {
+  const action = command.action;
+  if (action.kind !== "preset-run" && action.kind !== "preset-action") {
+    return daemonActorAttribution(actor, reportedExecutor);
+  }
+  if (typeof action.presetId !== "string" || action.presetId.trim() === "") {
+    throw new CliActorAttributionError(`Daemon ${action.kind} requires a non-empty parsed preset id.`);
+  }
+  return daemonActorAttribution(actor, { kind: "agent", id: `preset:${action.presetId}` });
 }
 
 export function readCliJournalActorFromEnv(env: NodeJS.ProcessEnv): CliJournalActor | undefined {
