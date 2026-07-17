@@ -12,6 +12,7 @@ const publicRuntimeSurface = [
   "ArtifactStore",
   "CurrentSessionProbe",
   "CurrentSessionRuntimeSchema",
+  "DaemonDrainTimeoutError",
   "DecisionPackageSchema",
   "DecisionStateSchema",
   "DocsReleasePromotionBundleSchema",

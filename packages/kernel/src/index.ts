@@ -149,6 +149,7 @@ export {
   readContentAddressedTextBlob,
   writeContentAddressedBlob
 } from "./composition/index.ts";
+export { DaemonDrainTimeoutError } from "./daemon/drain-timeout.ts";
 export { writeCoordinatedPayload, writeCoordinatedTaskDocuments } from "./write-coordination/write-helpers.ts";
 export {
   readDaemonRegistry,

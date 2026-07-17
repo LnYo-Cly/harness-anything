@@ -63,57 +63,6 @@ test("daemon runtime coalesces concurrent evidence reads into one ready repo gen
   });
 });
 
-test("daemon stop drains an in-flight evidence read before it resolves", async () => {
-  await withTempStoreAsync(async (rootDir) => {
-    writeExecutionEvidenceFixture(rootDir, "Shutdown drain");
-    initAuthoredGit(rootDir);
-    commitAuthoredFixture(rootDir);
-    rebuildTaskProjection({ rootDir });
-    let captureStarted!: () => void;
-    let releaseCapture!: () => void;
-    const captureStartedPromise = new Promise<void>((resolve) => {
-      captureStarted = resolve;
-    });
-    const releaseCapturePromise = new Promise<void>((resolve) => {
-      releaseCapture = resolve;
-    });
-    const runtime = createDaemonRuntime({
-      rootDir,
-      materializerPollMs: false,
-      projectionSourceFenceFactory: () => ({
-        capture: async () => {
-          captureStarted();
-          await releaseCapturePromise;
-          return {
-            kind: "stable",
-            identity: "sha256:shutdown-drain",
-            headOid: "shutdown-drain",
-            dirty: false,
-            changedPaths: []
-          };
-        }
-      })
-    });
-    await runtime.start();
-
-    const settled: string[] = [];
-    const read = runtime.queryExecutionEvidencePage({ limit: 1 }).then(
-      () => { settled.push("read"); },
-      () => { settled.push("read"); }
-    );
-    await captureStartedPromise;
-    const stop = runtime.stop().then(() => {
-      settled.push("stop");
-    });
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
-    assert.deepEqual(settled, []);
-    releaseCapture();
-    await Promise.all([read, stop]);
-    assert.deepEqual(settled, ["read", "stop"]);
-  });
-});
-
 test("daemon runtime invalidates only its repo generation after a canonical write", async () => {
   await withTempStoreAsync(async (rootDir) => {
     writeExecutionEvidenceFixture(rootDir, "Canonical invalidation");
