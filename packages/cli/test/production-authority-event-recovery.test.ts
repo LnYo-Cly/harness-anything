@@ -8,7 +8,55 @@ import type {
 } from "../../application/src/index.ts";
 import type { makeLocalAuthorityAttributionEventV2Log } from "../../kernel/src/index.ts";
 import { recoverPendingProductionEvents } from "../src/daemon/production-authority-lifecycle.ts";
-import type { createGitCanonicalPublicationInspector } from "../src/daemon/authority-publication-evidence.ts";
+import {
+  assertPublicationMatchesMutationSet,
+  type createGitCanonicalPublicationInspector
+} from "../src/daemon/authority-publication-evidence.ts";
+
+test("publication proof accepts only the declared hosted path inside a slugged task package", () => {
+  const evidence = {
+    commitSha: "b".repeat(40),
+    previousCommit: "a".repeat(40),
+    parentCommits: ["a".repeat(40), "c".repeat(40)],
+    pipelineGeneratedPaths: [],
+    contentAddressedPaths: [],
+    physicalChanges: [{
+      path: "tasks/task_T-production-route/facts.md",
+      beforeDigest: null,
+      afterDigest: "33".repeat(32)
+    }]
+  };
+  const mutationSet = {
+    registryVersion: 1,
+    mutations: [{
+      entity: { registryVersion: 1, entityKind: "fact", canonicalRef: "fact/task_T/F-TEST0001" },
+      action: { registryVersion: 1, action: "create" }
+    }]
+  } as const;
+  assertPublicationMatchesMutationSet(evidence, mutationSet);
+  assert.throws(
+    () => assertPublicationMatchesMutationSet({
+      ...evidence,
+      physicalChanges: [{
+        path: "tasks/task_T-production-route/INDEX.md",
+        beforeDigest: null,
+        afterDigest: "44".repeat(32)
+      }]
+    }, mutationSet),
+    /AUTHORITY_PUBLICATION_TREE_MISMATCH:tasks\/task_T-production-route\/INDEX\.md/u
+  );
+  assert.throws(
+    () => assertPublicationMatchesMutationSet({
+      ...evidence,
+      physicalChanges: [{
+        path: "tasks/task_X-production-route/facts.md",
+        beforeDigest: null,
+        afterDigest: "55".repeat(32)
+      }]
+    }, mutationSet),
+    /AUTHORITY_PUBLICATION_TREE_MISMATCH:tasks\/task_X-production-route\/facts\.md/u
+  );
+});
 
 test("restart recovery publishes one missing event for a committed effect without reapplying it", async () => {
   const record: AuthorityStoredOperationRecord = {
@@ -114,7 +162,7 @@ function publicationEvidence() {
     pipelineGeneratedPaths: [],
     contentAddressedPaths: [],
     physicalChanges: [{
-      path: "tasks/task_RECOVERY/progress.md",
+      path: "tasks/task_RECOVERY-production-route/progress.md",
       beforeDigest: null,
       afterDigest: "1".repeat(64)
     }]

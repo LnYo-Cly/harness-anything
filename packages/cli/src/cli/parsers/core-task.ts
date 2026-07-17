@@ -84,7 +84,8 @@ function parseProgressAppend(args: ReadonlyArray<string>, rootDir: string, json:
     kind: "progress-append",
     taskId: args[3],
     text,
-    evidence: evidence.value
+    evidence: evidence.value,
+    dryRun: args.includes("--dry-run")
   });
 }
 

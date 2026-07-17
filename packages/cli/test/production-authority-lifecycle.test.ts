@@ -76,7 +76,7 @@ test("production lifecycle uses external Ed25519 material, durable state, live c
       command: {
         rootDir: fixture.repoRoot,
         json: true,
-        action: { kind: "progress-append", taskId: "task_A", text: "production authority path\n" }
+        action: { kind: "progress-append", taskId: "task_A", text: "production authority path\n", dryRun: false }
       },
       attribution: daemonActorAttribution(actor, { kind: "agent", id: "codex" }),
       currentSession: {

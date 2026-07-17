@@ -46,7 +46,7 @@ test("forced-command progress writes preserve the thin-client executor in the ta
           command: {
             rootDir,
             json: true,
-            action: { kind: "progress-append", taskId, text: "refresh lease", evidence: [] }
+            action: { kind: "progress-append", taskId, text: "refresh lease", evidence: [], dryRun: false }
           },
           executor: codex
         }

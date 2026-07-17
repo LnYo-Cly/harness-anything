@@ -357,7 +357,10 @@ test("publication-tree-mismatch uses real Git trees and rejects paths outside th
         afterDigest: "22".repeat(32)
       }]
     };
-    assert.throws(() => assertPublicationMatchesMutationSet(mismatched, mutationSet), /AUTHORITY_PUBLICATION_TREE_MISMATCH/u);
+    assert.throws(
+      () => assertPublicationMatchesMutationSet(mismatched, mutationSet),
+      /AUTHORITY_PUBLICATION_TREE_MISMATCH:private\/outside\.txt;expectedTargets=.*;observedPaths=.*private\/outside\.txt;taskPackageAliasAllowed=true/u
+    );
 
     writeFileSync(path.join(alphaRoot, "outside.txt"), "unowned\n");
     git(alphaRoot, "add", ".");

@@ -212,20 +212,18 @@ export function assertPublicationMatchesMutationSet(
     }
   });
   const permitsContentAddressedBlob = mutationSet.mutations.some((mutation) => mutation.entity.entityKind === "session");
-  const permitsTaskCreateAlias = mutationSet.mutations.some((mutation) =>
-    mutation.entity.entityKind === "task" && mutation.action.action === "create"
-  );
+  const permitsTaskPackageAlias = targets.some((target) => target.path.startsWith("tasks/"));
   if (evidence.physicalChanges.length === 0) throw new Error("AUTHORITY_PUBLICATION_TREE_EMPTY");
   for (const change of evidence.physicalChanges) {
     if (evidence.pipelineGeneratedPaths.includes(change.path)) continue;
     if (permitsContentAddressedBlob && evidence.contentAddressedPaths.includes(change.path)) continue;
-    if (!targets.some((target) => publicationChangeMatchesTarget(change.path, target, permitsTaskCreateAlias))) {
-      throw new Error(`AUTHORITY_PUBLICATION_TREE_MISMATCH:${change.path}`);
+    if (!targets.some((target) => publicationChangeMatchesTarget(change.path, target, permitsTaskPackageAlias))) {
+      throw publicationTreeMismatchError(change.path, targets, evidence.physicalChanges, permitsTaskPackageAlias);
     }
   }
   for (const target of targets) {
     const observed = evidence.physicalChanges.some((change) =>
-      publicationChangeMatchesTarget(change.path, target, permitsTaskCreateAlias)
+      publicationChangeMatchesTarget(change.path, target, permitsTaskPackageAlias)
     );
     if (!observed) throw new Error(`AUTHORITY_PUBLICATION_DECLARED_PATH_MISSING:${target.path}`);
   }
@@ -234,13 +232,36 @@ export function assertPublicationMatchesMutationSet(
 function publicationChangeMatchesTarget(
   changedPath: string,
   target: { readonly path: string; readonly access: string },
-  permitsTaskCreateAlias: boolean
+  permitsTaskPackageAlias: boolean
 ): boolean {
-  if (target.access === "exact") return changedPath === target.path;
-  if (changedPath === target.path || changedPath.startsWith(`${target.path}/`)) return true;
-  if (!permitsTaskCreateAlias || !target.path.startsWith("tasks/")) return false;
-  const relative = changedPath.slice(target.path.length);
-  return /^-[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\//u.test(relative);
+  if (changedPath === target.path) return true;
+  if (target.access !== "exact" && changedPath.startsWith(`${target.path}/`)) return true;
+  if (!permitsTaskPackageAlias || !target.path.startsWith("tasks/")) return false;
+  const targetMatch = /^(tasks\/[^/]+)(\/.*)?$/u.exec(target.path);
+  const changedMatch = /^(tasks\/[^/]+)(\/.*)?$/u.exec(changedPath);
+  if (!targetMatch?.[1] || !changedMatch?.[1]) return false;
+  if (!changedMatch[1].startsWith(`${targetMatch[1]}-`)) return false;
+  const slug = changedMatch[1].slice(targetMatch[1].length);
+  if (!/^-[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u.test(slug)) return false;
+  const targetSuffix = targetMatch[2] ?? "";
+  const changedSuffix = changedMatch[2] ?? "";
+  return target.access === "exact"
+    ? changedSuffix === targetSuffix
+    : changedSuffix === targetSuffix || changedSuffix.startsWith(`${targetSuffix}/`);
+}
+
+function publicationTreeMismatchError(
+  changedPath: string,
+  targets: ReadonlyArray<{ readonly path: string; readonly access: string }>,
+  physicalChanges: ReadonlyArray<PhysicalChangeV2>,
+  taskPackageAliasAllowed: boolean
+): Error {
+  return new Error([
+    `AUTHORITY_PUBLICATION_TREE_MISMATCH:${changedPath}`,
+    `expectedTargets=${targets.map((target) => `${target.access}:${target.path}`).join(",") || "none"}`,
+    `observedPaths=${physicalChanges.map((change) => change.path).join(",") || "none"}`,
+    `taskPackageAliasAllowed=${String(taskPackageAliasAllowed)}`
+  ].join(";"));
 }
 
 function blobDigest(rootDir: string, revision: string, changedPath: string): string | null {
