@@ -44,7 +44,6 @@ import {
   entityRegistryKinds,
   actorAxesBindingCoreDigestV2,
   makeLocalAuthorityAttributionEventV2Log,
-  recoverAuthorityAttributionEventV2FromOperationRecord,
   resolveHarnessLayout,
   taskEntityId,
   type EntityRegistration
@@ -180,12 +179,11 @@ export function createProductionAuthorityLifecycle(input: {
             previousCommit: change.previousCommit,
             authorityIntegrity: record.authorityIntegrity
           };
-          await recoverAuthorityAttributionEventV2FromOperationRecord({
+          await eventLog.recoverFromOperationRecord({
             workspaceId: record.workspaceId,
             opId: record.opId,
             operationRecords: state.operationRegistry,
-            materializeExactEvent: async () => basePublisher.publish({ receipt: baseReceipt, actorAxesBinding, occurredAt: change.changedAt }),
-            log: eventLog
+            materializeExactEvent: async () => basePublisher.publish({ receipt: baseReceipt, actorAxesBinding, occurredAt: change.changedAt })
           });
           return completeAuthorityCommittedReceiptV2({
             publisher: basePublisher,

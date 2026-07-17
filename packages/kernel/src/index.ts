@@ -142,7 +142,6 @@ export * from "./schemas/task-schema-resolver.ts";
 export {
   makeJournaledWriteCoordinator,
   makeLocalAuthorityAttributionEventV2Log,
-  recoverAuthorityAttributionEventV2FromOperationRecord,
   makeOperationalJournaledWriteCoordinator,
   makeLocalLockRegistry,
   makeLocalVersionControlSystem,
