@@ -10,6 +10,7 @@ import type { CurrentSessionRef, WriteCoordinator } from "../../../kernel/src/in
 import { cliError, CliErrorCode } from "../cli/error-codes.ts";
 import { toCommandReceipt, type CommandFailureReceipt, type CommandReceipt } from "../cli/receipt.ts";
 import type { ParsedCommand } from "../cli/types.ts";
+import { dryRunResult, isDryRunAction } from "../cli/dry-run-preview.ts";
 import { isPlainRecord } from "../cli/value-utils.ts";
 import { CliActorAttributionError, daemonActorAttributionForParsedCommand, migrationWriteAttribution } from "../composition/actor-attribution.ts";
 import { runRegisteredCommandWithCliComposition } from "../composition/command-executor.ts";
@@ -56,6 +57,9 @@ export function createCliCommandService(runtime: CliDaemonRuntime, options: CliC
           const report = await runtime.enqueueMaterializerBatch({ dryRun: parsedCommand.action.dryRun });
           return toCommandReceipt(materializerCommandResult(report));
         }
+        if (isDryRunAction(parsedCommand.action)) {
+          return toCommandReceipt(dryRunResult(parsedCommand.action));
+        }
         const attribution = daemonActor
           ? daemonActorAttributionForParsedCommand(daemonActor, parsedCommand, context?.executor)
           : undefined;
@@ -77,6 +81,7 @@ export function createCliCommandService(runtime: CliDaemonRuntime, options: CliC
             missingActorAttributionMessage: "Daemon writes require a per-request authenticated actor from harness/people.yaml."
           }),
           ...(currentSession ? { currentSession } : {}),
+          ...(authorityCoordinator ? { inlineCreateProvenanceOnly: true } : {}),
           syncExportedSession: (exported) => materializeExportedSessionEffect(runtime, exported),
           makeWriteCoordinator: (actor) => attribution
             ? authorityCoordinator

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { Effect } from "effect";
-import type { EngineError, TaskContractSnapshot, WriteError } from "../../../kernel/src/index.ts";
+import type { EngineError, ProvenancePayload, TaskContractSnapshot, WriteError } from "../../../kernel/src/index.ts";
 import { explainStatusTransition, isTerminalStatus } from "../../../kernel/src/index.ts";
 import { evaluateEntityDisposition } from "../../../kernel/src/index.ts";
 import { stablePayloadHash } from "../../../kernel/src/index.ts";
@@ -174,6 +174,17 @@ function createTask(
     const provenance = yield* bindProvenance(createdAt).pipe(
       Effect.mapError((error) => ({ _tag: "WriteRejected", taskId: input.taskId, reason: error.reason } satisfies WriteError))
     );
+    const writes = buildLocalTaskCreateWrites(input, createdAt, provenance);
+    yield* writeTaskPackageDocuments(coordinator, stablePayloadHash, input.taskId, writes);
+    return { taskId: input.taskId, status: "planned", engine: "local" } satisfies LocalTaskResult;
+  });
+}
+
+export function buildLocalTaskCreateWrites(
+  input: CreateLocalTaskInput,
+  createdAt: string,
+  provenance: ProvenancePayload | undefined
+): ReadonlyArray<{ readonly path: string; readonly body: string; readonly packageSlug?: string }> {
     const index = makeIndex({
       taskId: input.taskId,
       title: input.title,
@@ -211,13 +222,10 @@ function createTask(
       },
       documents: []
     } as const satisfies TaskContractSnapshot;
-    const writes = [
+    return [
       { path: "INDEX.md", body: renderIndex(index), packageSlug: input.slug },
       { path: "task-contract.json", body: `${JSON.stringify(contractSnapshot, null, 2)}\n`, packageSlug: input.slug }
     ];
-    yield* writeTaskPackageDocuments(coordinator, stablePayloadHash, input.taskId, writes);
-    return { taskId: input.taskId, status: "planned", engine: "local" } satisfies LocalTaskResult;
-  });
 }
 
 function defaultCreateProvenance(boundAt: string) {

@@ -196,7 +196,10 @@ export interface CanonicalPublication {
 
 export interface CanonicalPublicationInspector {
   readonly currentHead: () => Promise<string | null>;
-  readonly inspectPublishedHead: (expectedPreviousHead: string | null) => Promise<CanonicalPublication>;
+  readonly inspectPublishedHead: (
+    expectedPreviousHead: string | null,
+    expectedOpIds: ReadonlyArray<string>
+  ) => Promise<CanonicalPublication>;
 }
 
 export interface AuthorityFenceWitness {

@@ -42,6 +42,7 @@ import {
   type DurableAuthorityBindingRuntimeV2
 } from "./authority-production-state.ts";
 import { productionLifecycleAttemptIntent } from "./production-authority-lifecycle-intents.ts";
+import { defaultCliAdapterProvider } from "../composition/adapter-registry.ts";
 
 type KeyMaterial = ReturnType<typeof openAuthorityProductionKeyMaterial>;
 
@@ -82,7 +83,11 @@ export function createProductionCanonicalAttemptCompiler(input: {
           "task lifecycle closeout commands, task-consent-record, or fact-invalidate"
         );
       }
-      if (canonicalEntityId !== intent.physicalEntityId) throw new Error("AUTHORITY_CANONICAL_ENTITY_MISMATCH");
+      if (canonicalEntityId !== intent.physicalEntityId) {
+        throw new Error(
+          `AUTHORITY_CANONICAL_ENTITY_MISMATCH:submittedEntityId=${canonicalEntityId};intentEntityId=${intent.physicalEntityId}`
+        );
+      }
       const executorAgentId = attribution.executor?.id ?? null;
       if (executorAgentId && !input.config.allowedExecutorAgentIds.includes(executorAgentId)
         && !executorDerivedFromPreset(command, executorAgentId)) {
@@ -195,6 +200,42 @@ async function canonicalAttemptIntent(
     executor: actor.executor,
     responsibleHuman: actor.principal.personId
   };
+  if (action.kind === "new-task" && action.taskId
+    && !action.fromLegacyId && !action.vertical && !action.preset && !action.profile
+    && !action.moduleKey && !action.registerModule) {
+    const provenance = {
+      runtime: currentSession.runtime,
+      sessionId: currentSession.sessionId,
+      boundAt: currentSession.detectedAt
+    };
+    const writes = defaultCliAdapterProvider().buildLocalTaskCreateWrites({
+      taskId: action.taskId,
+      title: action.title,
+      allowManualId: action.allowManualId,
+      slug: action.slug,
+      parent: action.parent,
+      workKind: action.workKind,
+      riskTier: action.riskTier,
+      urgency: action.urgency
+    }, currentSession.detectedAt, provenance);
+    const indexBody = writes.find((write) => write.path === "INDEX.md")!.body;
+    const entity = ref("task", `task/${action.taskId}`);
+    const payload: TaskDecisionModuleCommandPayloadV2 = {
+      schema: "task.create/v1",
+      taskId: action.taskId,
+      packageSlug: action.slug,
+      indexBody,
+      writes
+    };
+    return canonicalIntent(
+      "task.create",
+      encodeTaskDecisionModuleCommandPayloadV2(payload),
+      [{ entity, action: "create" }],
+      [entity],
+      writes.map((write) => `tasks/${action.taskId}/${write.path}`),
+      taskEntityId(action.taskId)
+    );
+  }
   if (action.kind === "progress-append") {
     const evidence = action.evidence?.map((entry) => `Evidence: ${entry.type}:${entry.path}:${entry.summary}`).join("\n");
     const payload: TaskDecisionModuleCommandPayloadV2 = {
@@ -319,7 +360,7 @@ async function canonicalAttemptIntent(
       body
     };
     const entity = ref("session", `session/${action.sessionId}`);
-    return canonicalIntent("session.export", encodeSessionExecutionReviewCommandPayloadV2(payload), [{ entity, action: "export" }], [entity], [`sessions/${action.sessionId}.md`, `objects/sha256/${digest.slice(0, 2)}/${digest.slice(2)}`], `session/${action.sessionId}`);
+    return canonicalIntent("session.export", encodeSessionExecutionReviewCommandPayloadV2(payload), [{ entity, action: "export" }], [entity], [`sessions/${action.sessionId}.md`, `objects/sha256/${digest.slice(0, 2)}/${digest.slice(2)}`], `entity/session/${action.sessionId}`);
   }
   if (action.kind === "task-claim" && action.executionId) {
     const executionId = action.executionId;

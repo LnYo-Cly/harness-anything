@@ -399,13 +399,10 @@ export function createAuthoritySubmissionService(options: AuthoritySubmissionSer
     let commitSha: string;
     try {
       await options.fenceWitness.assertHeld();
-      const publication = await options.publicationInspector.inspectPublishedHead(previousHead);
-      if (publication.parentCommits.length !== (previousHead ? 1 : 0)
-        || (previousHead && publication.parentCommits[0] !== previousHead)) {
-        await settlePrepared(candidates, receipts, "INDETERMINATE", (entry) =>
-          indeterminate(entry, entry.semanticDigest, "NON_LINEAR_CANONICAL_PUBLICATION", publication.commitSha));
-        return batchReceipts(admissions, receipts);
-      }
+      const publication = await options.publicationInspector.inspectPublishedHead(
+        previousHead,
+        candidates.map((entry) => entry.opId)
+      );
       commitSha = publication.commitSha;
       for (const entry of candidates) {
         await put(entry, entry.semanticDigest, "PUBLISHED", undefined, commitSha, entry.authorityIntegrity, entry.canonicalRequestEnvelope);

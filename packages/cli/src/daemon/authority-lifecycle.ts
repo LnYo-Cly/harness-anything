@@ -84,7 +84,11 @@ export interface AuthorityRepoLifecycleHooks {
     readonly namespaceVerifier: OperationNamespaceVerifierV2;
     readonly fenceWitness: AuthorityFenceWitness;
     readonly committedEventPublisher: AuthorityCommittedEventPublisherV2;
-    readonly inspectPublication: (previousCommit: string | null) => Promise<CanonicalPublicationEvidence>;
+    readonly inspectPublication: (
+      previousCommit: string | null,
+      expectedOpIds: ReadonlyArray<string>,
+      expectedCommitSha?: string
+    ) => Promise<CanonicalPublicationEvidence>;
     readonly admissionBudget: DaemonAdmissionBudget;
   }) => Promise<AuthorityRepoComponent>;
   readonly serve: (input: { readonly repo: DaemonRepoNamespace; readonly component: AuthorityRepoComponent }) => Promise<void>;
@@ -101,6 +105,14 @@ export interface AuthorityLifecycleRuntime {
     readonly sessionId: string;
   }) => WriteCoordinator;
   readonly assertWriteFenceHeld: () => Promise<void>;
+  readonly enqueueMaterializerBatch: (options: { readonly sessionId: string }) => Promise<{
+    readonly branches: ReadonlyArray<{
+      readonly branch: string;
+      readonly commitCount: number;
+      readonly status: "merged" | "would_merge" | "skipped" | "conflict";
+      readonly warning?: string;
+    }>;
+  }>;
   readonly admissionBudget: DaemonAdmissionBudget;
 }
 
@@ -281,7 +293,20 @@ export function makeHeldLockAttributedCoordinatorFactory(
       const shared: WriteCoordinator = {
         enqueue: coordinator.enqueue,
         flush: (reason) => Effect.ensuring(
-          coordinator.flush(reason),
+          coordinator.flush(reason).pipe(Effect.flatMap((report) => Effect.tryPromise({
+            try: async () => {
+              if (!report.committed || report.opCount === 0) return report;
+              const materialized = await runtime.enqueueMaterializerBatch({ sessionId });
+              const branch = materialized.branches.find((entry) => entry.branch === `sessions/${sessionId}`);
+              if (!branch || branch.commitCount === 0 || branch.status !== "merged") {
+                throw new Error(
+                  `AUTHORITY_SESSION_MATERIALIZATION_FAILED:sessionId=${sessionId};status=${branch?.status ?? "missing"};commitCount=${branch?.commitCount ?? 0};warning=${branch?.warning ?? "none"}`
+                );
+              }
+              return report;
+            },
+            catch: (cause) => ({ _tag: "JournalUnavailable" as const, cause })
+          }))),
           Effect.sync(() => {
             if (active.get(key) === shared) active.delete(key);
           })
