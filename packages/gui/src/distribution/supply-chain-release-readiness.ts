@@ -72,7 +72,7 @@ export interface ElectronUpgradeContract {
 
 export interface SupplyChainReleaseBoundaryContract {
   readonly packagesPrivateExceptCli: true;
-  readonly privateWorkspaceVersion: "0.0.0";
+  readonly privateWorkspaceVersion: "0.1.0";
   readonly cliPublishDryRunVersion: "0.1.0";
   readonly npmReleaseClaimed: false;
   readonly releaseArtifactsPublished: false;
@@ -263,7 +263,7 @@ export const harnessSupplyChainReleaseReadiness: SupplyChainReleaseReadinessPoli
   },
   releaseBoundary: {
     packagesPrivateExceptCli: true,
-    privateWorkspaceVersion: "0.0.0",
+    privateWorkspaceVersion: "0.1.0",
     cliPublishDryRunVersion: "0.1.0",
     npmReleaseClaimed: false,
     releaseArtifactsPublished: false,
@@ -357,7 +357,7 @@ export function validateSupplyChainReleaseReadiness(
   const boundary = policy.releaseBoundary;
   if (
     boundary.packagesPrivateExceptCli !== true ||
-    boundary.privateWorkspaceVersion !== "0.0.0" ||
+    boundary.privateWorkspaceVersion !== "0.1.0" ||
     boundary.cliPublishDryRunVersion !== "0.1.0" ||
     boundary.npmReleaseClaimed !== false ||
     boundary.releaseArtifactsPublished !== false ||

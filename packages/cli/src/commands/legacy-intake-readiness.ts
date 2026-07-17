@@ -7,7 +7,7 @@ export interface LegacyIntakeReadinessEvidence {
   readonly packageReleaseDecision: {
     readonly publishState: "not-published";
     readonly packageBoundary: "cli-dry-run-only";
-    readonly privatePackageVersionPolicy: "0.0.0";
+    readonly privatePackageVersionPolicy: "0.1.0";
     readonly cliDryRunVersion: "0.1.0";
   };
   readonly behaviorCorpus: {
@@ -32,7 +32,7 @@ export function evaluateLegacyIntakeReadinessEvidence(rootDir: string): LegacyIn
     packageReleaseDecision: {
       publishState: "not-published",
       packageBoundary: "cli-dry-run-only",
-      privatePackageVersionPolicy: "0.0.0",
+      privatePackageVersionPolicy: "0.1.0",
       cliDryRunVersion: "0.1.0"
     },
     behaviorCorpus,
@@ -62,8 +62,8 @@ function checkPackageDecision(rootDir: string, violations: string[]): void {
       if (asObject(json.publishConfig).access !== "public") violations.push(`${packagePath}: publishConfig.access must be public for npm publish dry-run preflight`);
     } else {
       if (json.private !== true) violations.push(`${packagePath}: package must remain private for M2 Legacy Intake readiness`);
-      if (packagePath !== "package.json" && json.version !== "0.0.0") {
-        violations.push(`${packagePath}: version must remain 0.0.0 before publish planning`);
+      if (packagePath !== "package.json" && json.version !== "0.1.0") {
+        violations.push(`${packagePath}: version must match the unified 0.1.0 release version`);
       }
       if (json.publishConfig) violations.push(`${packagePath}: publishConfig is not allowed before publish planning`);
     }

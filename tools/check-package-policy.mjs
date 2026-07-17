@@ -42,7 +42,7 @@ for (const [relativePath, expectedName] of expectedPackages.entries()) {
     if (packageJson.engines?.node !== ">=24") record(`${relativePath} must declare Node >=24 runtime support`);
   } else {
     if (packageJson.private !== true) record(`${relativePath} must stay private until npm ownership is explicitly confirmed`);
-    if (packageJson.version !== "0.0.0") record(`${relativePath} must stay version 0.0.0 before first release planning`);
+    if (packageJson.version !== "0.1.0") record(`${relativePath} must match the unified 0.1.0 release version (operator decision 2026-07-17)`);
     if (packageJson.publishConfig) record(`${relativePath} must not define publishConfig before the npm publish decision`);
   }
 }
