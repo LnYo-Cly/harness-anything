@@ -15,7 +15,7 @@ export async function recoverKnownAuthorityOperationV2(input: {
   readonly persist: (receipt: AuthorityCommittedReceipt) => Promise<void>;
 }): Promise<AuthorityCommittedReceipt | undefined> {
   try {
-    const bindingDigest = hex(actorAxesBindingDigestV2(input.verified.token.claims));
+    const bindingDigest = actorBindingDigestHex(actorAxesBindingDigestV2(input.verified.token.claims));
     const integrity = input.known.authorityIntegrity;
     if (!integrity
       || integrity.semanticRequestDigest !== input.semanticDigest
@@ -40,6 +40,6 @@ export async function recoverKnownAuthorityOperationV2(input: {
   }
 }
 
-function hex(bytes: Uint8Array): string {
+function actorBindingDigestHex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("hex");
 }

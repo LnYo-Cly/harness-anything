@@ -141,7 +141,8 @@ export function createProductionAuthorityLifecycle(input: {
           }
         }
       });
-      const committedEventPublisher = Object.assign(basePublisher, {
+      const committedEventPublisher = {
+        ...basePublisher,
         recoverCommittedReceipt: async (record: import("../../../application/src/authority/types.ts").AuthorityStoredOperationRecord) => {
           return recoverProductionAuthorityCommittedReceiptV2({
             record,
@@ -152,7 +153,7 @@ export function createProductionAuthorityLifecycle(input: {
             publisher: basePublisher,
           });
         }
-      });
+      };
       materials.set(repo.repoId, {
         config,
         keyStore: keyMaterial.keyStore,
