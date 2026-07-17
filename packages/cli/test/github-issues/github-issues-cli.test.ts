@@ -76,7 +76,10 @@ test("CLI list command returns repo-scoped paginated projections and no authored
       requests
     }));
 
-    assert.deepEqual(receipt, legacy);
+    assert.deepEqual(
+      { ...receipt, meta: { ...receipt.meta, generatedAt: legacy.meta.generatedAt } },
+      legacy
+    );
     assert.equal(receipt.ok, true);
     assert.equal(receipt.command, "list github");
     assert.equal(receipt.rows, 1);
