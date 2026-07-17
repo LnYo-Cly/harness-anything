@@ -91,12 +91,12 @@ export function createProductionCompoundReceiptComposition(input: {
 }
 
 async function gitSnapshot(root: string, workspaceId: string, revision: number, commitSha: string) {
-  const listing = execFileSync("git", ["-C", root, "ls-tree", "-r", "-z", "--full-tree", commitSha]);
+  const listing = execFileSync("git", ["-C", root, "ls-tree", "-r", "-z", "--full-tree", commitSha], { windowsHide: true });
   const entries = Buffer.from(listing).toString("utf8").split("\0").filter(Boolean).map((row) => {
     const tab = row.indexOf("\t");
     if (tab < 0) throw new Error("COMPOUND_GIT_TREE_PROTOCOL_DAMAGED");
     const pathName = row.slice(tab + 1);
-    return { path: pathName, content: execFileSync("git", ["-C", root, "show", `${commitSha}:${pathName}`]) };
+    return { path: pathName, content: execFileSync("git", ["-C", root, "show", `${commitSha}:${pathName}`], { windowsHide: true }) };
   });
   return { workspaceId, revision, commitSha, entries };
 }
