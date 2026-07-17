@@ -60,6 +60,7 @@ import {
   actorAxesBindingCoreFromVerifiedV2,
   completeAuthorityCommittedReceiptV2
 } from "./committed-event-publication-v2.ts";
+import { isCompleteAuthorityCommittedReceiptV2 } from "./committed-event-publication-v2.ts";
 import {
   validateLegacyAuthorityIngress,
   validateLegacyTokenEnvelopeClaims
@@ -86,6 +87,7 @@ export interface AuthoritySubmissionV2Options {
   readonly semanticCompiler: AuthoritySemanticCompilerV2;
   readonly operationNamespaceVerifier: OperationNamespaceVerifierV2;
   readonly committedEventPublisher: AuthorityCommittedEventPublisherV2;
+  readonly recoverCommittedReceipt?: (record: import("./types.ts").AuthorityStoredOperationRecord) => Promise<AuthorityCommittedReceipt>;
   readonly matchEntityRefPrefix?: EntityRefPrefixMatcherV2;
 }
 
@@ -187,6 +189,32 @@ export function createAuthoritySubmissionService(options: AuthoritySubmissionSer
     const known = await options.operationRegistry.get(envelope.workspaceId, opId);
     if (known) {
       if (known.semanticDigest !== semanticDigest) return terminal(rejected(identity, semanticDigest, "OP_ID_REUSE"));
+      if (v2.recoverCommittedReceipt
+        && (known.state === "INDEXED" || known.state === "INDETERMINATE")
+        && known.recordedProtocol?.kind === "semantic-mutation-envelope/v2") {
+        try {
+          const bindingDigest = hex(actorAxesBindingDigestV2(verified.token.claims));
+          if (!known.authorityIntegrity
+            || known.authorityIntegrity.semanticRequestDigest !== semanticDigest
+            || known.authorityIntegrity.actorAxesBindingDigest !== bindingDigest
+            || known.canonicalRequestEnvelope !== canonicalRequestEnvelope
+            || !known.commitSha) throw new Error("AUTHORITY_V2_RECOVERY_RECORD_INCOMPLETE");
+          const recovered = await v2.recoverCommittedReceipt(known);
+          if (!isCompleteAuthorityCommittedReceiptV2(recovered)
+            || recovered.workspaceId !== known.workspaceId
+            || recovered.opId !== known.opId
+            || recovered.commitSha !== known.commitSha
+            || recovered.semanticDigest !== known.semanticDigest
+            || recovered.authorityIntegrity.semanticMutationSetDigest !== known.authorityIntegrity.semanticMutationSetDigest
+            || recovered.authorityIntegrity.actorAxesBindingDigest !== known.authorityIntegrity.actorAxesBindingDigest) {
+            throw new Error("AUTHORITY_V2_RECOVERY_RECEIPT_MISMATCH");
+          }
+          await put(identity, semanticDigest, "COMMITTED", recovered, known.commitSha, known.authorityIntegrity, known.canonicalRequestEnvelope);
+          return terminal(recovered);
+        } catch {
+          // Fail closed: an unverifiable recovery never upgrades durable state.
+        }
+      }
       if (known.receipt) return terminal(known.receipt);
       return terminal(indeterminate(identity, semanticDigest, `operation remains ${known.state}`));
     }

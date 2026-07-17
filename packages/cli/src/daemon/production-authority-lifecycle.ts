@@ -8,6 +8,8 @@ import {
   createAuthorityCutoverEntityRegistryQualification,
   createAuthorityCutoverControlService,
   createDurableAuthorityCommittedEventPublisherV2,
+  completeAuthorityCommittedReceiptV2,
+  decodeSemanticMutationEnvelopeV2,
   encodeSemanticMutationEnvelopeV2,
   encodeTaskDecisionModuleCommandPayloadV2,
   factRelationTypedCommandsV2,
@@ -24,6 +26,7 @@ import {
   taskDecisionModuleTypedCommandsV2,
   type ActorAxesBindingRuntimeV2,
   type AuthorityCutoverControlService,
+  type AuthoritySubmissionV2Options,
   type AuthoritySubmissionService,
   type SemanticMutationEnvelopeV2
 } from "../../../application/src/index.ts";
@@ -40,6 +43,7 @@ import {
   entityRegistry,
   entityRegistryKinds,
   makeLocalAuthorityAttributionEventV2Log,
+  recoverAuthorityAttributionEventV2FromOperationRecord,
   resolveHarnessLayout,
   taskEntityId,
   type EntityRegistration
@@ -121,11 +125,12 @@ export function createProductionAuthorityLifecycle(input: {
         table: state.namespaceState,
         proofKeys
       });
-      const committedEventPublisher = createDurableAuthorityCommittedEventPublisherV2({
-        eventLog: makeLocalAuthorityAttributionEventV2Log({
+      const eventLog = makeLocalAuthorityAttributionEventV2Log({
           rootDir: repo.canonicalRoot,
           ...(input.layoutOverrides ? { layoutOverrides: input.layoutOverrides } : {})
-        }),
+        });
+      const basePublisher = createDurableAuthorityCommittedEventPublisherV2({
+        eventLog,
         observation: {
           observe: async (request) => {
             const inspect = publicationObservers.get(repo.repoId);
@@ -136,6 +141,57 @@ export function createProductionAuthorityLifecycle(input: {
             }
             return { ...evidence, recordedAt: new Date().toISOString() };
           }
+        }
+      });
+      const committedEventPublisher = Object.assign(basePublisher, {
+        recoverCommittedReceipt: async (record: import("../../../application/src/authority/types.ts").AuthorityStoredOperationRecord) => {
+          const change = await state.replicaChangeLog.getByOperation(record.workspaceId, record.opId);
+          if (!change || !record.authorityIntegrity || !record.commitSha
+            || change.commitSha !== record.commitSha
+            || change.semanticDigest !== record.semanticDigest
+            || change.authorityIntegrity?.semanticMutationSetDigest !== record.authorityIntegrity.semanticMutationSetDigest) {
+            throw new Error("AUTHORITY_V2_RECOVERY_CHANGE_MISMATCH");
+          }
+          if (!record.canonicalRequestEnvelope) throw new Error("AUTHORITY_V2_RECOVERY_ENVELOPE_REQUIRED");
+          const envelope = decodeSemanticMutationEnvelopeV2(Buffer.from(record.canonicalRequestEnvelope, "base64url"));
+          const binding = await bindingRuntime.getBinding(envelope.binding.bindingId);
+          if (!binding) throw new Error("AUTHORITY_V2_RECOVERY_BINDING_REQUIRED");
+          const actorAxesBinding = {
+            bindingId: binding.bindingId,
+            principalPersonId: binding.principalPersonId,
+            executorAgentId: binding.executorAgentId,
+            workspaceId: binding.workspaceId,
+            deviceId: binding.deviceId,
+            viewId: binding.viewId,
+            sessionId: binding.sessionId,
+            schemaTuple: binding.schemaTuple
+          };
+          if (Buffer.from(actorAxesBindingDigestV2(actorAxesBinding)).toString("hex") !== record.authorityIntegrity.actorAxesBindingDigest) {
+            throw new Error("AUTHORITY_V2_RECOVERY_ACTOR_BINDING_MISMATCH");
+          }
+          const baseReceipt = {
+            tag: "COMMITTED" as const,
+            workspaceId: record.workspaceId,
+            opId: record.opId,
+            semanticDigest: record.semanticDigest,
+            revision: change.revision,
+            commitSha: change.commitSha,
+            previousCommit: change.previousCommit,
+            authorityIntegrity: record.authorityIntegrity
+          };
+          await recoverAuthorityAttributionEventV2FromOperationRecord({
+            workspaceId: record.workspaceId,
+            opId: record.opId,
+            operationRecords: state.operationRegistry,
+            materializeExactEvent: async () => basePublisher.publish({ receipt: baseReceipt, actorAxesBinding, occurredAt: change.changedAt }),
+            log: eventLog
+          });
+          return completeAuthorityCommittedReceiptV2({
+            publisher: basePublisher,
+            receipt: baseReceipt,
+            actorAxesBinding,
+            occurredAt: change.changedAt
+          });
         }
       });
       materials.set(repo.repoId, {
@@ -365,7 +421,10 @@ function createConnectionAuthorityService(
         compiler: makeConsentSemanticCompilerV2({ state: semanticState })
       }]),
       operationNamespaceVerifier: input.namespaceVerifier,
-      committedEventPublisher: input.committedEventPublisher
+      committedEventPublisher: input.committedEventPublisher,
+      recoverCommittedReceipt: (input.committedEventPublisher as typeof input.committedEventPublisher & {
+        recoverCommittedReceipt?: NonNullable<AuthoritySubmissionV2Options["recoverCommittedReceipt"]>
+      }).recoverCommittedReceipt
     }
   });
 }
