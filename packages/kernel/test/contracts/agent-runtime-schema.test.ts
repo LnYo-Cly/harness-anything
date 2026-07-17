@@ -2,10 +2,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Schema } from "effect";
-import {
-  AgentRuntimeInventorySchema,
-  runtimeKindRegistry
-} from "../../src/index.ts";
+import { runtimeKindRegistry } from "../../src/index.ts";
+import { AgentRuntimeInventorySchema } from "../../src/schemas/agent-runtime.ts";
 
 test("agent runtime schema accepts independent four-state evidence", () => {
   const fixture = {

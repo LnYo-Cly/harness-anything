@@ -1,4 +1,4 @@
-import type { RuntimeCapabilityName } from "../../kernel/src/index.ts";
+import type { RuntimeCapabilityName, RuntimeProcessWitness } from "../../kernel/src/index.ts";
 
 export type RuntimeAuthenticationConfigurationState = "configured" | "not-configured" | "invalid";
 
@@ -42,14 +42,7 @@ export interface AgentRuntimeSessionStatus {
   readonly runtimeSessionId: string;
   readonly kindId: string;
   readonly providerSessionId?: string;
-  readonly process: {
-    readonly state: "alive" | "exited" | "unknown";
-    readonly pid?: number;
-    readonly startedAt?: string;
-    readonly heartbeatAt?: string;
-    readonly exitedAt?: string;
-    readonly exitCode?: number | null;
-  };
+  readonly process: RuntimeProcessWitness;
   readonly attachable: boolean;
   readonly capabilities: Readonly<Record<RuntimeCapabilityName, boolean>>;
   readonly clientBinding?: {

@@ -16,7 +16,7 @@ const RuntimeCapabilitySchema = Schema.Struct({
   state: Schema.Literal("supported", "unsupported", "unknown")
 });
 
-export const RuntimeKindSchema = Schema.Struct({
+const RuntimeKindSchema = Schema.Struct({
   kindId: Schema.String,
   displayName: Schema.String,
   protocolFamily: Schema.Literal(...runtimeProtocolFamilies),
@@ -30,7 +30,7 @@ export const RuntimeKindSchema = Schema.Struct({
   }))
 });
 
-export const RuntimeInstallationSchema = Schema.Struct({
+const RuntimeInstallationSchema = Schema.Struct({
   installationId: Schema.String,
   kindId: Schema.String,
   hostId: Schema.Literal("local"),
@@ -45,7 +45,7 @@ export const RuntimeInstallationSchema = Schema.Struct({
   })
 });
 
-export const RuntimeSessionSchema = Schema.Struct({
+const RuntimeSessionSchema = Schema.Struct({
   runtimeSessionId: Schema.String,
   kindId: Schema.String,
   installationId: Schema.String,
@@ -74,5 +74,3 @@ export const AgentRuntimeInventorySchema = Schema.Struct({
   installations: Schema.Array(RuntimeInstallationSchema),
   sessions: Schema.Array(RuntimeSessionSchema)
 });
-
-export type AgentRuntimeInventoryDocument = Schema.Schema.Type<typeof AgentRuntimeInventorySchema>;
