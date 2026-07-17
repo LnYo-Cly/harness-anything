@@ -1,4 +1,5 @@
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { Schema } from "effect";
 import { sha256Text } from "../integrity/stable-hash.ts";
@@ -119,11 +120,15 @@ export function appendImmutableJsonLineDurably(filePath: string, value: object):
 
 export function appendImmutableBytesDurably(filePath: string, bytes: Uint8Array): boolean {
   mkdirSync(path.dirname(filePath), { recursive: true });
+  if (existsSync(filePath)) return false;
+  // Never expose an incomplete immutable object at its canonical name.  A
+  // hard-link install is an atomic, no-replace publish on the local volume;
+  // unlike rename(2), it cannot overwrite an already-complete shard.
+  const tempPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`);
   let fd: number;
   try {
-    fd = openSync(filePath, "wx");
+    fd = openSync(tempPath, "wx");
   } catch (error) {
-    if (existsSync(filePath)) return false;
     throw error;
   }
   try {
@@ -138,8 +143,20 @@ export function appendImmutableBytesDurably(filePath: string, bytes: Uint8Array)
   } finally {
     closeSync(fd);
   }
-  fsyncDirectory(path.dirname(filePath));
-  return true;
+  try {
+    try {
+      linkSync(tempPath, filePath);
+    } catch (error) {
+      if (existsSync(filePath)) return false;
+      throw error;
+    }
+    fsyncDirectory(path.dirname(filePath));
+    return true;
+  } finally {
+    // A crash may leave only this private temp object.  It is never treated as
+    // a replayable shard and a later attempt uses a fresh name.
+    if (existsSync(tempPath)) unlinkSync(tempPath);
+  }
 }
 
 function journalLineSchema(value: unknown): unknown {
