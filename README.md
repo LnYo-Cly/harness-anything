@@ -30,6 +30,8 @@ then gates *"done"* so progress compounds instead of evaporating into chat.
 
 </div>
 
+![Harness Anything desktop GUI showing the Aurora Commerce task, decision, and fact portfolio](./docs-release/assets/harness-gui.gif)
+
 ---
 
 ## Your agent can write code. Can your project learn?
@@ -133,7 +135,7 @@ The result is a repository that remembers more than its code:
 - [Learn](./docs-release/learn/en/00-overview.md) — understand the memory model, gates, and compounding loop. ([中文](./docs-release/learn/zh/00-overview.md))
 - [Architecture](./docs-release/architecture/en/00-overview.md) — explore the kernel, storage model, write path, and projections. ([中文](./docs-release/architecture/zh/00-overview.md))
 - [Release posture](./docs-release/release-posture.md) — see what is shipped, foundational, or planned.
-- [Minimal example](./examples/minimal-project/) — inspect the smallest working project.
+- [GUI demo project](./examples/minimal-project/) — explore a realistic portfolio with 40 tasks, 5 decisions, and 10 facts.
 
 ## Contributing
 

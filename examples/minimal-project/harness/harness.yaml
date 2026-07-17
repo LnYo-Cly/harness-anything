@@ -1,0 +1,17 @@
+schema: harness-anything/v1
+name: Aurora Commerce
+layout:
+  authoredRoot: harness
+  localRoot: .harness
+tasks:
+  root: harness/tasks
+  idPolicy: random-ulid
+settings:
+  locale: en-US
+  defaultVertical: software/coding
+  defaultPreset: standard-task
+  defaultProfile: baseline
+  identity:
+    mode: local
+  customVerticals:
+    enabled: false
