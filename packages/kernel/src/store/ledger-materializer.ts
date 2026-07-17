@@ -8,6 +8,7 @@ import { rebuildTaskProjection } from "../projection/sqlite-task-projection.ts";
 import { captureAuthoredProjectionFingerprint } from "../projection/projection-source-baseline.ts";
 import { makeLocalVersionControlSystem } from "./local-version-control-system.ts";
 import {
+  materializerCommitter,
   recoverScriptIngestArtifactConflicts,
   type PreservedMachineArtifact
 } from "./ledger-materializer-machine-recovery.ts";
@@ -126,7 +127,7 @@ function materializeBranches(
     const beforeMergeHead = vcs.currentHead(repoRoot);
     let preservedArtifacts: ReadonlyArray<PreservedMachineArtifact> = [];
     try {
-      vcs.mergeNoFf(repoRoot, branch, mergeMessage);
+      vcs.mergeNoFf(repoRoot, branch, mergeMessage, materializerCommitter);
     } catch (error) {
       let conflictPaths: ReadonlyArray<string>;
       let recoveryError: unknown;

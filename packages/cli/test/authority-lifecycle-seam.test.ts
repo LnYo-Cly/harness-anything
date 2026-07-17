@@ -241,9 +241,11 @@ test("restart-durable-recovery restores operation, replica, binding and namespac
 test("held-lock attributed factory gives one exact coordinator to a same-attribution microbatch", () => {
   let created = 0;
   let pending = 0;
+  let commitAuthor: { readonly name: string; readonly email: string } | undefined;
   const runtime: AuthorityLifecycleRuntime = {
-    createAttributedCoordinator: () => {
+    createAttributedCoordinator: (input) => {
       created += 1;
+      commitAuthor = input.commitAuthor;
       return {
         enqueue: (op) => Effect.sync(() => {
           pending += 1;
@@ -268,7 +270,49 @@ test("held-lock attributed factory gives one exact coordinator to a same-attribu
   const second = factory.create({ attribution, sessionId: "session-test" });
   assert.equal(first, second);
   assert.equal(created, 1);
+  assert.deepEqual(commitAuthor, {
+    name: "Harness Anything Authority",
+    email: "authority@harness-anything.local"
+  });
 });
+
+test("held-lock attributed factory preserves materializer error name and message", async () => {
+  const runtime: AuthorityLifecycleRuntime = {
+    createAttributedCoordinator: () => ({
+      enqueue: (op) => Effect.succeed({ opId: op.opId, entityId: op.entityId, accepted: true as const }),
+      flush: (reason) => Effect.succeed({ reason, opCount: 1, committed: true }),
+      recover: Effect.succeed({ replayedOps: 0 })
+    }),
+    enqueueMaterializerBatch: async () => { throw new Error("materializer unavailable"); },
+    assertWriteFenceHeld: async () => undefined
+  };
+  const coordinator = makeHeldLockAttributedCoordinatorFactory(runtime).create({
+    attribution: {
+      actor: { principal: { kind: "person", personId: "person_test" }, executor: null },
+      principalSource: { kind: "daemon-authenticated", providerId: "test", credentialFingerprint: "sha256:test" },
+      executorSource: "none"
+    },
+    sessionId: "session-test"
+  });
+
+  const result = await runEffect(Effect.either(coordinator.flush("explicit")));
+
+  assert.equal(result._tag, "Left");
+  if (result._tag === "Left") {
+    assert.deepEqual(result.left, {
+      _tag: "JournalUnavailable",
+      cause: { name: "Error", message: "materializer unavailable" }
+    });
+  }
+});
+
+function runEffect<A, E>(effect: Effect.Effect<A, E>): Promise<A> {
+  return new Promise((resolve, reject) => {
+    Effect.runCallback(effect, {
+      onExit: (exit) => exit._tag === "Success" ? resolve(exit.value) : reject(new Error(String(exit.cause)))
+    });
+  });
+}
 
 test("publication-tree-mismatch uses real Git trees and rejects paths outside the canonical mutation target", async () => {
   await withRoots(async ({ alphaRoot }) => {

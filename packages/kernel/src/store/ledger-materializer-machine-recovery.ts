@@ -12,7 +12,7 @@ export type MachineArtifactRecoveryResult =
   | { readonly recovered: true; readonly artifacts: ReadonlyArray<PreservedMachineArtifact> }
   | { readonly recovered: false; readonly conflictPaths: ReadonlyArray<string> };
 
-const materializerCommitter = {
+export const materializerCommitter = {
   name: "Harness Anything Materializer",
   email: "materializer@harness-anything.local"
 } as const;

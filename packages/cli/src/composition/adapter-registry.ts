@@ -53,7 +53,10 @@ export interface CliCompositionAdapterProvider {
   readonly createDaemonRuntime: typeof createDaemonRuntime;
   readonly createMultiRepoDaemonRuntime: typeof createMultiRepoDaemonRuntime;
   readonly buildLocalTaskCreateWrites: typeof buildLocalTaskCreateWrites;
-  readonly runLedgerMaterializer: (rootInput: HarnessLayoutInput, options: { readonly dryRun?: boolean }) => MaterializerCommandReport;
+  readonly runLedgerMaterializer: (rootInput: HarnessLayoutInput, options: {
+    readonly dryRun?: boolean;
+    readonly sessionId?: string;
+  }) => MaterializerCommandReport;
 }
 
 const localProvider = {

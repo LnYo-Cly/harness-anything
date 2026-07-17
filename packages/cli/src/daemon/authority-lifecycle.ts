@@ -103,6 +103,7 @@ export interface AuthorityLifecycleRuntime {
   readonly createAttributedCoordinator: (input: {
     readonly attribution: WriteAttribution;
     readonly sessionId: string;
+    readonly commitAuthor?: { readonly name: string; readonly email: string };
   }) => WriteCoordinator;
   readonly assertWriteFenceHeld: () => Promise<void>;
   readonly enqueueMaterializerBatch: (options: { readonly sessionId: string }) => Promise<{
@@ -289,7 +290,11 @@ export function makeHeldLockAttributedCoordinatorFactory(
       const key = stableStringify({ attribution, sessionId });
       const existing = active.get(key);
       if (existing) return existing;
-      const coordinator = runtime.createAttributedCoordinator({ attribution, sessionId });
+      const coordinator = runtime.createAttributedCoordinator({
+        attribution,
+        sessionId,
+        commitAuthor: authorityCommitter
+      });
       const shared: WriteCoordinator = {
         enqueue: coordinator.enqueue,
         flush: (reason) => Effect.ensuring(
@@ -305,7 +310,7 @@ export function makeHeldLockAttributedCoordinatorFactory(
               }
               return report;
             },
-            catch: (cause) => ({ _tag: "JournalUnavailable" as const, cause })
+            catch: (cause) => ({ _tag: "JournalUnavailable" as const, cause: diagnosticCause(cause) })
           }))),
           Effect.sync(() => {
             if (active.get(key) === shared) active.delete(key);
@@ -316,6 +321,23 @@ export function makeHeldLockAttributedCoordinatorFactory(
       active.set(key, shared);
       return shared;
     }
+  };
+}
+
+const authorityCommitter = {
+  name: "Harness Anything Authority",
+  email: "authority@harness-anything.local"
+} as const;
+
+function diagnosticCause(cause: unknown): unknown {
+  if (!(cause instanceof Error)) return cause;
+  const code = "code" in cause && (typeof cause.code === "string" || typeof cause.code === "number")
+    ? cause.code
+    : undefined;
+  return {
+    name: cause.name || "Error",
+    message: cause.message,
+    ...(code === undefined ? {} : { code })
   };
 }
 
