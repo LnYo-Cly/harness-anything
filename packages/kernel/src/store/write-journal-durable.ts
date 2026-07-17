@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { Schema } from "effect";
@@ -158,7 +158,7 @@ export function appendImmutableBytesDurably(filePath: string, bytes: Uint8Array)
   } finally {
     // A crash may leave only this private temp object.  It is never treated as
     // a replayable shard and a later attempt uses a fresh name.
-    if (existsSync(tempPath)) unlinkSync(tempPath);
+    if (existsSync(tempPath)) removeFileDurably(tempPath);
   }
 }
 
