@@ -1,0 +1,10 @@
+full-check (26)	Run npm run check	2026-07-16T16:12:21.1299210Z ✖ failing tests:
+full-check (26)	Run npm run check	2026-07-16T16:12:21.1299332Z
+full-check (26)	Run npm run check	2026-07-16T16:12:21.1299616Z test at packages/cli/test/daemon-thin-client-cli.test.ts:367:1
+full-check (26)	Run npm run check	2026-07-16T16:12:21.1300343Z ✖ daemon start service status and stop expose productized status contract (4321.767476ms)
+full-check (26)	Run npm run check	2026-07-16T16:12:21.1300974Z   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+full-check (24)	Run npm run check	2026-07-16T16:13:53.4447897Z ✖ failing tests:
+full-check (24)	Run npm run check	2026-07-16T16:13:53.4448031Z
+full-check (24)	Run npm run check	2026-07-16T16:13:53.4448298Z test at packages/cli/test/daemon-thin-client-cli.test.ts:367:1
+full-check (24)	Run npm run check	2026-07-16T16:13:53.4449038Z ✖ daemon start service status and stop expose productized status contract (4752.456592ms)
+full-check (24)	Run npm run check	2026-07-16T16:13:53.4449671Z   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:

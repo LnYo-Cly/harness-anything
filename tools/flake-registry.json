@@ -1,0 +1,12 @@
+{
+  "schema": "harness-anything/flake-registry/v1",
+  "entries": [
+    {
+      "testName": "daemon start service status and stop expose productized status contract",
+      "file": "packages/cli/test/daemon-thin-client-cli.test.ts",
+      "anchoredTask": "task_01KXNQABV1XSQHPXVQQCQNGWVA",
+      "firstSeen": "2026-07-16",
+      "notes": "Known daemon lifecycle timing flake; observed failing main five times, including runs 29512159972 and 29513133791 on Node 24 and 26."
+    }
+  ]
+}
