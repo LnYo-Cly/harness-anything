@@ -6,7 +6,6 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { Effect } from "effect";
 import {
   createAuthorityCutoverEntityRegistryQualification,
   createAuthorityCutoverControlService,
@@ -20,7 +19,13 @@ import {
   connectionGeneration,
   openLocalAuthorityKeyStore
 } from "../../daemon/src/index.ts";
-import { entityRegistry, entityRegistryKinds, taskEntityId, type WriteOp } from "../../kernel/src/index.ts";
+import {
+  entityRegistry,
+  entityRegistryKinds,
+  makeJournaledWriteCoordinator,
+  taskEntityId
+} from "../../kernel/src/index.ts";
+import { defaultCliAdapterProvider } from "../src/composition/adapter-registry.ts";
 import { daemonActorAttribution } from "../src/composition/actor-attribution.ts";
 import {
   authorityNamespaceProofBytes,
@@ -574,26 +579,12 @@ function productionTuple() {
 }
 
 function writerRuntime(authoredRoot: string) {
+  const repoRoot = path.dirname(authoredRoot);
   return {
-    createAttributedCoordinator: () => {
-      let pending: WriteOp | undefined;
-      return {
-        enqueue: (operation: WriteOp) => Effect.sync(() => {
-          pending = operation;
-          return { opId: operation.opId, entityId: operation.entityId, accepted: true as const };
-        }),
-        flush: (reason: "debounce" | "count" | "explicit" | "shutdown" | "recovery") => Effect.sync(() => {
-          if (!pending) return { reason, opCount: 0, committed: false };
-          const payload = pending.payload as { readonly append: string };
-          const progressPath = path.join(authoredRoot, "tasks/task_A/progress.md");
-          writeFileSync(progressPath, payload.append, { flag: "a" });
-          git(authoredRoot, "add", "tasks/task_A/progress.md");
-          git(authoredRoot, "commit", "-q", "-m", "append progress through authority");
-          return { reason, opCount: 1, committed: true, watermark: git(authoredRoot, "rev-parse", "HEAD") };
-        }),
-        recover: Effect.succeed({ replayedOps: 0 })
-      };
-    },
+    createAttributedCoordinator: (input: Omit<Parameters<typeof makeJournaledWriteCoordinator>[0], "rootDir">) =>
+      makeJournaledWriteCoordinator({ ...input, rootDir: repoRoot, autoMaterialize: false }),
+    enqueueMaterializerBatch: async ({ sessionId }: { readonly sessionId: string }) =>
+      defaultCliAdapterProvider().runLedgerMaterializer(repoRoot, { sessionId }),
     assertWriteFenceHeld: async () => undefined
   };
 }

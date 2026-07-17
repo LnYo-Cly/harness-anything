@@ -80,7 +80,7 @@ export interface FactWriteService {
 export function makeFactWriteService(options: FactWriteServiceOptions): FactWriteService {
   const hashPayload = options.hashPayload ?? stablePayloadHash;
   const timestamp = () => options.now?.() ?? new Date().toISOString();
-  const generateFactId = options.generateFactId ?? randomFactId;
+  const generateFactId = options.generateFactId ?? generateFactIdV1;
   return {
     record: (request) => Effect.gen(function* () {
       const layout = resolveHarnessLayout(options.rootInput);
@@ -209,7 +209,7 @@ function validateFactRecord(taskId: TaskId, record: FactRecord): FactWriteReject
   }
 }
 
-function randomFactId(): string {
+export function generateFactIdV1(): string {
   const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
   const bytes = randomBytes(8);
   let suffix = "";

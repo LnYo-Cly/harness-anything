@@ -14,32 +14,36 @@ import {
 import { createAuthorityKeyRegistryV1, firstPinAuthorityKeyV1 } from "../../../application/src/index.ts";
 import {
   decisionEntityId,
+  createTaskPackagePath,
   executionDeclaration,
-  makeJournaledWriteCoordinator,
   moduleEntityId,
   taskEntityId
 } from "../../../kernel/src/index.ts";
+import { defaultCliAdapterProvider } from "../../src/composition/adapter-registry.ts";
 import type { EntityId, ExecutionRecord } from "../../../kernel/src/index.ts";
 import type { ParsedCommand } from "../../src/cli/types.ts";
 import { daemonActorAttribution } from "../../src/composition/actor-attribution.ts";
+import { parseRecordArgs } from "../../src/cli/parsers/record.ts";
+import { parseNewTaskArgs } from "../../src/cli/parsers/new-task.ts";
+import { createCliCommandService } from "../../src/daemon/command-service.ts";
 import { authorityNamespaceProofBytes } from "../../src/daemon/authority-production-state.ts";
 import { createProductionAuthorityLifecycle } from "../../src/daemon/production-authority-lifecycle.ts";
 
 test("production canonical ingress accepts and journals one write for every canonical kind", async () => {
   const fixture = createFixture();
+  const daemon = defaultCliAdapterProvider().createMultiRepoDaemonRuntime({
+    repos: [{ repoId: "canonical", rootDir: fixture.repoRoot }],
+    materializerPollMs: 5,
+    materializerMaxBranchesPerBatch: 1
+  });
   try {
+    await daemon.start();
+    const runtime = daemon.getRepoRuntime("canonical");
+    assert.ok(runtime);
     const lifecycle = createProductionAuthorityLifecycle({ manifestPath: fixture.manifestPath });
     const started = await lifecycle.startRepo(
       { repoId: "canonical", canonicalRoot: fixture.repoRoot },
-      {
-        createAttributedCoordinator: ({ attribution }) => makeJournaledWriteCoordinator({
-          rootDir: fixture.repoRoot,
-          attribution,
-          commitAuthor: { name: "ZeyuLi", email: "33339424+FairladyZ625@users.noreply.github.com" },
-          autoMaterialize: false
-        }),
-        assertWriteFenceHeld: async () => undefined
-      }
+      runtime
     );
     assert.equal(started.ok, true, started.ok ? "" : started.error);
     if (!started.ok) return;
@@ -109,7 +113,7 @@ test("production canonical ingress accepts and journals one write for every cano
     }, {
       kind: "session",
       action: { kind: "session-export", sessionId: "session-ingress", runtime: "codex", source: "manual", detectedAt: "2026-07-17T00:00:00.000Z", transcriptFile: fixture.transcriptPath },
-      canonicalEntityId: "session/session-ingress" as EntityId,
+      canonicalEntityId: "entity/session/session-ingress" as EntityId,
       authoredPath: "sessions/session-ingress.md",
       authoredMarker: /session-ingress/u
     }, {
@@ -210,14 +214,106 @@ test("production canonical ingress accepts and journals one write for every cano
         .trim().split("\n").filter(Boolean);
       assert.equal(eventFiles.some((eventPath) => readFileSync(eventPath, "utf8").includes(sessionId)), true, `${fixtureCase.kind}:real-session-axis`);
     }
+    const commandService = createCliCommandService(runtime, {
+      resolveAuthoritySubmissionV2: () => submission
+    });
+    const commandActor = { ...actor, roles: ["owner"] };
+    const runCommand = async (action: ParsedCommand["action"], sessionId: string) => commandService.runCommand({
+      command: { rootDir: fixture.repoRoot, json: true, action },
+      session: {
+        runtime: "codex",
+        sessionId,
+        source: "runtime",
+        detectedAt: "2026-07-17T00:10:00.000Z"
+      }
+    }, { actor: commandActor, executor: { kind: "agent", id: "codex" } });
+
+    const appendReceipt = await runCommand({
+      kind: "progress-append",
+      taskId: "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG4",
+      text: "daemon command-service append",
+      dryRun: false
+    }, "smoke-progress");
+    assert.equal(appendReceipt.ok, true, `progress-append:${JSON.stringify(appendReceipt)}`);
+
+    const dryRunHead = git(fixture.authoredRoot, "rev-parse", "HEAD");
+    const dryRunReceipt = await runCommand({
+      kind: "progress-append",
+      taskId: "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG4",
+      text: "must remain a preview",
+      dryRun: true
+    }, "smoke-dry-run");
+    assert.equal(dryRunReceipt.ok, true, `progress-append-dry-run:${JSON.stringify(dryRunReceipt)}`);
+    assert.equal(git(fixture.authoredRoot, "rev-parse", "HEAD"), dryRunHead, "dry-run must not create a commit");
+
+    const explicitFact = parseRecordArgs([
+      "fact", "record", "--task", "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG4", "--id", "F-ABCD1234",
+      "--statement", "Explicit fact id smoke.", "--source", "production smoke"
+    ], fixture.repoRoot, true);
+    assert.ok(explicitFact?.ok);
+    if (explicitFact?.ok) {
+      const receipt = await runCommand(explicitFact.value.action, "smoke-fact-explicit");
+      assert.equal(receipt.ok, true, `fact-explicit:${JSON.stringify(receipt)}`);
+    }
+    const generatedFact = parseRecordArgs([
+      "fact", "record", "--task", "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG4",
+      "--statement", "Generated fact id smoke.", "--source", "production smoke"
+    ], fixture.repoRoot, true);
+    assert.ok(generatedFact?.ok);
+    if (generatedFact?.ok) {
+      assert.match(generatedFact.value.action.kind === "record-fact" ? generatedFact.value.action.factId ?? "" : "", /^F-[0-9A-HJKMNP-TV-Z]{8}$/u);
+      const receipt = await runCommand(generatedFact.value.action, "smoke-fact-generated");
+      assert.equal(receipt.ok, true, `fact-generated:${JSON.stringify(receipt)}`);
+    }
+
+    const decisionReceipt = await runCommand({
+      kind: "decision-propose", decisionId: "dec_SMOKE", title: "Smoke decision",
+      question: "Does typed provenance remain single-op?", chosen: [{ text: "Yes." }],
+      rejected: [{ text: "No.", why_not: "The authority submission must remain entity-aligned." }],
+      claims: [{ text: "The command settled cleanly." }], claimLoadBearing: false, fulfillments: [],
+      riskTier: "low", urgency: "low", modules: [], productLines: [], evidenceRelations: [], dryRun: false
+    }, "smoke-decision");
+    assert.equal(decisionReceipt.ok, true, `decision-propose:${JSON.stringify(decisionReceipt)}`);
+
+    const sessionReceipt = await runCommand({
+      kind: "session-export", sessionId: "session-smoke-explicit", runtime: "codex", source: "manual",
+      detectedAt: "2026-07-17T00:10:00.000Z", transcriptFile: fixture.transcriptPath
+    }, "smoke-session-export");
+    assert.equal(sessionReceipt.ok, true, `session-export:${JSON.stringify(sessionReceipt)}`);
+
+    const createdTask = parseNewTaskArgs([
+      "task", "create", "--title", "Production task create smoke"
+    ], fixture.repoRoot, true);
+    assert.ok(createdTask?.ok);
+    if (createdTask?.ok) {
+      assert.match(createdTask.value.action.kind === "new-task" ? createdTask.value.action.taskId ?? "" : "", /^task_[0-9A-HJKMNP-TV-Z]{26}$/u);
+      const receipt = await runCommand(createdTask.value.action, "smoke-task-create");
+      assert.equal(receipt.ok, true, `task-create:${JSON.stringify(receipt)}`);
+      if (createdTask.value.action.kind === "new-task") {
+        const taskRoot = createTaskPackagePath(fixture.repoRoot, createdTask.value.action.taskId!, createdTask.value.action.slug);
+        assert.equal(existsSync(path.join(taskRoot, "INDEX.md")), true);
+        assert.equal(existsSync(path.join(taskRoot, "task-contract.json")), true);
+      }
+    }
     await assert.rejects(submission.submit({
       command: { rootDir: fixture.repoRoot, json: true, action: { kind: "help" } },
       attribution: daemonActorAttribution(actor, { kind: "agent", id: "codex" }),
       currentSession: { runtime: "codex", sessionId: "session-production", source: "manual", detectedAt: "2026-07-17T00:00:00.000Z" },
       canonicalEntityId: taskEntityId("task_01KXQ4WTA7Q4XJ5GDDRS1YXNG0")
     }), /AUTHORITY_TYPED_COMMAND_UNSUPPORTED.*task lifecycle closeout/u);
+    await assert.rejects(submission.submit({
+      command: {
+        rootDir: fixture.repoRoot,
+        json: true,
+        action: { kind: "progress-append", taskId: "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG0", text: "entity mismatch evidence" }
+      },
+      attribution: daemonActorAttribution(actor, { kind: "agent", id: "codex" }),
+      currentSession: { runtime: "codex", sessionId: "session-mismatch", source: "manual", detectedAt: "2026-07-17T00:00:00.000Z" },
+      canonicalEntityId: moduleEntityId("wrong-entity")
+    }), /AUTHORITY_CANONICAL_ENTITY_MISMATCH:submittedEntityId=module\/wrong-entity;intentEntityId=task\/task_01KXQ4WTA7Q4XJ5GDDRS1YXNG0/u);
     await lifecycle.stopAll("daemon-shutdown");
   } finally {
+    await daemon.stop().catch(() => undefined);
     rmSync(fixture.root, { recursive: true, force: true });
   }
 });
@@ -256,7 +352,11 @@ function createFixture() {
   mkdirSync(path.join(authoredRoot, "tasks/task_01KXQ4WTA7Q4XJ5GDDRS1YXNG0/executions"), { recursive: true });
   writeFileSync(path.join(authoredRoot, "tasks/task_01KXQ4WTA7Q4XJ5GDDRS1YXNG0/executions/exe_01KXQ4WTA7Q4XJ5GDDRS1YXNG5.md"), executionDeclaration.documentCodec.encode(submittedExecution));
   const transcriptPath = path.join(root, "session-transcript.md");
-  writeFileSync(transcriptPath, "# Production session ingress\n");
+  writeFileSync(transcriptPath, `${JSON.stringify({
+    timestamp: "2026-07-17T00:00:00.000Z",
+    type: "event_msg",
+    payload: { type: "user_message", message: "Production session ingress." }
+  })}\n`);
   writeFileSync(path.join(authoredRoot, "people.yaml"), [
     "schema: harness-people/v1", "people:", "  - personId: person_alice", "    displayName: Alice",
     "    primaryEmail: alice@example.test", "    roles: [owner]", "    credentials:",
@@ -334,7 +434,9 @@ function taskIndexBody(taskId: string): string {
     "lifecycle:", "  bindingSchema: lifecycle-binding/v1", "  engine: local", "  status: active",
     "  ref: ", "  titleSnapshot: Production ingress", "  url: ",
     "  bindingCreatedAt: 2026-07-17T00:00:00.000Z", `  bindingFingerprint: sha256:${"b".repeat(64)}`,
-    "packageDisposition: active", "vertical: default", "preset: default", "---", "", "# Production ingress", ""
+    "packageDisposition: active", "vertical: default", "preset: default",
+    "provenance:", "  - {runtime: \"human\", sessionId: \"fixture\", boundAt: \"2026-07-17T00:00:00.000Z\"}",
+    "---", "", "# Production ingress", ""
   ].join("\n");
 }
 

@@ -133,11 +133,16 @@ function compileTaskCreate(payload: TaskCreatePayloadV2): CompiledTaskDecisionMo
   const task = parseTaskIndex(payload.indexBody);
   if (task.taskId !== payload.taskId) throw admission("TASK_ID_MISMATCH");
   if (task.status !== "planned") throw admission("TASK_CREATE_REQUIRES_PLANNED_STATUS");
-  return taskCompilation(payload.taskId, "create", "package_create", {
+  const operationPayload = payload.writes ? { writes: payload.writes.map((write) => ({ taskId: payload.taskId, ...write })) } : {
     path: "INDEX.md",
     body: payload.indexBody,
     ...(payload.packageSlug ? { packageSlug: payload.packageSlug } : {})
-  }, [taskDecisionModuleEntityRef("task", `task/${payload.taskId}`)]);
+  };
+  if (payload.writes) {
+    const indexWrite = payload.writes.find((write) => write.path === "INDEX.md");
+    if (!indexWrite || indexWrite.body !== payload.indexBody) throw admission("TASK_CREATE_INDEX_WRITE_MISMATCH");
+  }
+  return taskCompilation(payload.taskId, "create", "package_create", operationPayload, [taskDecisionModuleEntityRef("task", `task/${payload.taskId}`)]);
 }
 
 async function compileTaskTransition(
@@ -188,7 +193,9 @@ function taskCompilation(
   requiredBaseRefs: ReadonlyArray<RegistryEntityRefV2>,
   requiredPathSnapshots: ReadonlyArray<{ readonly path: string; readonly snapshot: HostedDocumentSnapshotV2 }> = []
 ): CompiledTaskDecisionModuleCommandV2 {
-  const documentPath = (payload as { readonly path: string }).path;
+  const documentPath = "path" in (payload as object)
+    ? (payload as { readonly path: string }).path
+    : "INDEX.md";
   return {
     mutationPlan: taskDecisionModulePlan([{ entityKind: "task", identity: { taskId }, action, storageContext: { documentPath } }]),
     operation: { opId: "authority-overrides-this", entityId: taskEntityId(taskId), kind, payload },

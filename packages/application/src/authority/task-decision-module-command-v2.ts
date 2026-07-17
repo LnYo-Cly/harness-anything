@@ -35,6 +35,11 @@ export interface TaskCreatePayloadV2 {
   readonly taskId: string;
   readonly packageSlug?: string;
   readonly indexBody: string;
+  readonly writes?: ReadonlyArray<{
+    readonly path: string;
+    readonly body: string;
+    readonly packageSlug?: string;
+  }>;
 }
 
 export interface TaskTransitionPayloadV2 {
@@ -168,12 +173,13 @@ function strictTaskDecisionModulePayload(value: unknown): TaskDecisionModuleComm
   const discriminator = exactTaskDecisionModuleObject(value, ["schema"], true);
   switch (discriminator.schema) {
     case "task.create/v1": {
-      const row = exactTaskDecisionModuleObject(value, ["schema", "taskId", "packageSlug", "indexBody"], false, ["packageSlug"]);
+      const row = exactTaskDecisionModuleObject(value, ["schema", "taskId", "packageSlug", "indexBody", "writes"], false, ["packageSlug", "writes"]);
       return {
         schema: discriminator.schema,
         taskId: taskDecisionModuleText(row.taskId),
         ...(row.packageSlug === undefined ? {} : { packageSlug: taskDecisionModuleText(row.packageSlug) }),
-        indexBody: semanticStringValueV2(row.indexBody)
+        indexBody: semanticStringValueV2(row.indexBody),
+        ...(row.writes === undefined ? {} : { writes: taskCreateWrites(row.writes) })
       };
     }
     case "task.transition/v1": {
@@ -240,7 +246,13 @@ function strictTaskDecisionModulePayload(value: unknown): TaskDecisionModuleComm
 function canonicalTaskDecisionModulePayloadWire(payload: TaskDecisionModuleCommandPayloadV2): object {
   switch (payload.schema) {
     case "task.create/v1":
-      return { schema: payload.schema, taskId: payload.taskId, ...(payload.packageSlug ? { packageSlug: payload.packageSlug } : {}), indexBody: payload.indexBody };
+      return {
+        schema: payload.schema,
+        taskId: payload.taskId,
+        ...(payload.packageSlug ? { packageSlug: payload.packageSlug } : {}),
+        indexBody: payload.indexBody,
+        ...(payload.writes ? { writes: payload.writes.map((write) => ({ path: write.path, body: write.body, ...(write.packageSlug ? { packageSlug: write.packageSlug } : {}) })) } : {})
+      };
     case "task.transition/v1":
       return { schema: payload.schema, taskId: payload.taskId, to: payload.to };
     case "task.append/v1":
@@ -262,6 +274,18 @@ function canonicalTaskDecisionModulePayloadWire(payload: TaskDecisionModuleComma
     case "module.step/v1":
       return { schema: payload.schema, moduleKey: payload.moduleKey, stepId: payload.stepId, state: payload.state };
   }
+}
+
+function taskCreateWrites(value: unknown): NonNullable<TaskCreatePayloadV2["writes"]> {
+  if (!Array.isArray(value) || value.length === 0) throw semanticAdmissionV2("TASK_CREATE_WRITES_INVALID");
+  return value.map((entry) => {
+    const row = exactTaskDecisionModuleObject(entry, ["path", "body", "packageSlug"], false, ["packageSlug"]);
+    return {
+      path: taskDecisionModuleText(row.path),
+      body: semanticStringValueV2(row.body),
+      ...(row.packageSlug === undefined ? {} : { packageSlug: taskDecisionModuleText(row.packageSlug) })
+    };
+  });
 }
 
 function decision(value: unknown): DecisionPackage {

@@ -84,7 +84,11 @@ export interface AuthorityRepoLifecycleHooks {
     readonly namespaceVerifier: OperationNamespaceVerifierV2;
     readonly fenceWitness: AuthorityFenceWitness;
     readonly committedEventPublisher: AuthorityCommittedEventPublisherV2;
-    readonly inspectPublication: (previousCommit: string | null) => Promise<CanonicalPublicationEvidence>;
+    readonly inspectPublication: (
+      previousCommit: string | null,
+      expectedOpIds: ReadonlyArray<string>,
+      expectedCommitSha?: string
+    ) => Promise<CanonicalPublicationEvidence>;
     readonly admissionBudget: DaemonAdmissionBudget;
   }) => Promise<AuthorityRepoComponent>;
   readonly serve: (input: { readonly repo: DaemonRepoNamespace; readonly component: AuthorityRepoComponent }) => Promise<void>;
@@ -99,8 +103,17 @@ export interface AuthorityLifecycleRuntime {
   readonly createAttributedCoordinator: (input: {
     readonly attribution: WriteAttribution;
     readonly sessionId: string;
+    readonly commitAuthor?: { readonly name: string; readonly email: string };
   }) => WriteCoordinator;
   readonly assertWriteFenceHeld: () => Promise<void>;
+  readonly enqueueMaterializerBatch: (options: { readonly sessionId: string }) => Promise<{
+    readonly branches: ReadonlyArray<{
+      readonly branch: string;
+      readonly commitCount: number;
+      readonly status: "merged" | "would_merge" | "skipped" | "conflict";
+      readonly warning?: string;
+    }>;
+  }>;
   readonly admissionBudget: DaemonAdmissionBudget;
 }
 
@@ -277,11 +290,28 @@ export function makeHeldLockAttributedCoordinatorFactory(
       const key = stableStringify({ attribution, sessionId });
       const existing = active.get(key);
       if (existing) return existing;
-      const coordinator = runtime.createAttributedCoordinator({ attribution, sessionId });
+      const coordinator = runtime.createAttributedCoordinator({
+        attribution,
+        sessionId,
+        commitAuthor: authorityCommitter
+      });
       const shared: WriteCoordinator = {
         enqueue: coordinator.enqueue,
         flush: (reason) => Effect.ensuring(
-          coordinator.flush(reason),
+          coordinator.flush(reason).pipe(Effect.flatMap((report) => Effect.tryPromise({
+            try: async () => {
+              if (!report.committed || report.opCount === 0) return report;
+              const materialized = await runtime.enqueueMaterializerBatch({ sessionId });
+              const branch = materialized.branches.find((entry) => entry.branch === `sessions/${sessionId}`);
+              if (!branch || branch.commitCount === 0 || branch.status !== "merged") {
+                throw new Error(
+                  `AUTHORITY_SESSION_MATERIALIZATION_FAILED:sessionId=${sessionId};status=${branch?.status ?? "missing"};commitCount=${branch?.commitCount ?? 0};warning=${branch?.warning ?? "none"}`
+                );
+              }
+              return report;
+            },
+            catch: (cause) => ({ _tag: "JournalUnavailable" as const, cause: diagnosticCause(cause) })
+          }))),
           Effect.sync(() => {
             if (active.get(key) === shared) active.delete(key);
           })
@@ -291,6 +321,23 @@ export function makeHeldLockAttributedCoordinatorFactory(
       active.set(key, shared);
       return shared;
     }
+  };
+}
+
+const authorityCommitter = {
+  name: "Harness Anything Authority",
+  email: "authority@harness-anything.local"
+} as const;
+
+function diagnosticCause(cause: unknown): unknown {
+  if (!(cause instanceof Error)) return cause;
+  const code = "code" in cause && (typeof cause.code === "string" || typeof cause.code === "number")
+    ? cause.code
+    : undefined;
+  return {
+    name: cause.name || "Error",
+    message: cause.message,
+    ...(code === undefined ? {} : { code })
   };
 }
 

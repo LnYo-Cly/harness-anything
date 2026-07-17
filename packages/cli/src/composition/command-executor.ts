@@ -37,6 +37,8 @@ export interface ParsedCommandExecutionOptions {
   readonly missingActorAttributionMessage?: string;
   readonly requireProvidedActorAttribution?: boolean;
   readonly currentSession?: CurrentSessionRef;
+  /** Typed authority intents already carry the current-session provenance inline. */
+  readonly inlineCreateProvenanceOnly?: boolean;
   readonly syncExportedSession?: (result: ProvenanceSessionExportResult) => Effect.Effect<void, ProvenanceSessionExporterRejected>;
 }
 
@@ -187,8 +189,10 @@ export async function runRegisteredCommandWithCliComposition(
     coordinator: makeWriteCoordinator(operationalActor("task-lifecycle")),
     bindCreateProvenance: (boundAt) => bindCreateProvenance({
       currentSessionProbe: getCurrentSessionProbe(),
-      provenanceSessionExporter: makeSessionExporter(),
-      syncExportedSession
+      ...(options.inlineCreateProvenanceOnly ? {} : {
+        provenanceSessionExporter: makeSessionExporter(),
+        syncExportedSession
+      })
     }, boundAt)
   }), enforceTaskLease(), makeTaskHolder, getTaskHolderPrincipal), makeArtifactStore, getCurrentSessionProbe, makeSessionExporter, syncExportedSession, makeWriteCoordinator, makeMigrationWriteCoordinator, getActorAttribution, getTaskHolderPrincipal, () => {
     const attribution = getActorAttribution().writeAttribution;
@@ -200,15 +204,19 @@ export async function runRegisteredCommandWithCliComposition(
         : makeWriteCoordinator(operationalActor("decision-cli")),
       attribution: repin ? migrationWriteAttribution(attribution, repin.migrationEvidence) : attribution,
       currentSessionProbe: getCurrentSessionProbe(),
-      provenanceSessionExporter: makeSessionExporter(),
-      syncExportedSession
+      ...(options.inlineCreateProvenanceOnly ? {} : {
+        provenanceSessionExporter: makeSessionExporter(),
+        syncExportedSession
+      })
     });
   }, () => withOptionalFactLeaseGuard(makeFactWriteService({
     rootInput: layoutInput,
     coordinator: makeWriteCoordinator(operationalActor("fact-cli")),
     currentSessionProbe: getCurrentSessionProbe(),
-    provenanceSessionExporter: makeSessionExporter(),
-    syncExportedSession
+    ...(options.inlineCreateProvenanceOnly ? {} : {
+      provenanceSessionExporter: makeSessionExporter(),
+      syncExportedSession
+    })
   }), enforceTaskLease(), makeTaskHolder, getTaskHolderPrincipal), makeTaskHolder, getRuntimeEventLedgerService, provider.runLedgerMaterializer).pipe(
     Effect.match({
       onFailure: (error): CliResult => ({

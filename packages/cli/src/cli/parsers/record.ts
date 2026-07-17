@@ -5,6 +5,7 @@ import { readOption } from "../parse-options.ts";
 import type { CliResult, ParsedCommand } from "../types.ts";
 import { isFactMemoryClass, isFactMemoryTag, type FactMemoryTag } from "../../../../kernel/src/index.ts";
 import { jsonBoolean, jsonPayloadFor, jsonString, jsonStringList, type JsonPayload } from "./json-values.ts";
+import { generateFactIdV1 } from "../../../../application/src/index.ts";
 
 type ParseResult = { readonly ok: true; readonly value: ParsedCommand } | { readonly ok: false; readonly error: CliResult["error"] };
 
@@ -99,7 +100,7 @@ function parseFactRecord(args: ReadonlyArray<string>, rootDir: string, json: boo
   if (memoryTags === null) {
     return { ok: false, error: cliError(CliErrorCode.InvalidFactMemoryTag, "Use known fact memory tags with --memory-tag.") };
   }
-  const factId = readOption(normalizedArgs, "--id") ?? jsonString(payload, "factId");
+  const factId = readOption(normalizedArgs, "--id") ?? jsonString(payload, "factId") ?? generateFactIdV1();
   if (factId && !/^F-[0-9A-HJKMNP-TV-Z]{8}$/u.test(factId)) {
     return { ok: false, error: cliError(CliErrorCode.InvalidFactId, "Use fact ids as F-<8 Crockford base32 chars>.") };
   }

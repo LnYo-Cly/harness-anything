@@ -147,6 +147,7 @@ export type {
 export { CODE_DOC_RECONCILIATION_DOCUMENT, evaluateCodeDocReconciliationGate, renderCodeDocReconciliationDraft } from "./code-doc-reconciliation.ts";
 export { currentSessionToProvenancePayload, defaultRuntimeSessionEnvCandidates, makeEnvironmentCurrentSessionProbe, makeHumanFallbackSessionProbe } from "./current-session-probe.ts";
 export { bindCreateProvenance } from "./provenance-binding.ts";
+export { generateFactIdV1 } from "./fact-write-service.ts";
 export { makeDecisionWriteService } from "./decision-write-service.ts";
 export { makeExecutionReservationReconciler, makeExecutionSagaService } from "./execution-saga-service.ts";
 export { makeCoordinatedExecutionAuthoredStore } from "./coordinated-execution-authored-store.ts";

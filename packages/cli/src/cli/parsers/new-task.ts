@@ -1,4 +1,4 @@
-import { slugifyTaskTitle } from "../../../../kernel/src/index.ts";
+import { generateTaskId, slugifyTaskTitle } from "../../../../kernel/src/index.ts";
 import type { CommandDescriptorIdentity } from "../command-spec/types.ts";
 import { cliError, CliErrorCode } from "../error-codes.ts";
 import type { CommandJsonInput } from "../json-input.ts";
@@ -92,7 +92,7 @@ export function parseNewTaskArgs(
       json,
       action: {
         kind: "new-task",
-        taskId: manualId,
+        taskId: manualId ?? generateTaskId(),
         title,
         parent,
         slug: explicitSlug ?? slugifyTaskTitle(title),

@@ -83,8 +83,8 @@ export function makeLocalVersionControlSystem(): VersionControlSystem {
     createBranch: (repoRoot, branch) => {
       runGit(repoRoot, "branch", branch);
     },
-    mergeNoFf: (repoRoot, branch, message) => {
-      runGit(repoRoot, "merge", "--no-ff", branch, "-m", message);
+    mergeNoFf: (repoRoot, branch, message, author) => {
+      runGitAs(repoRoot, author, "merge", "--no-ff", branch, "-m", message);
     },
     conflictedFiles: (repoRoot) => runGit(repoRoot, "diff", "--name-only", "--diff-filter=U", "-z")
       .split("\0")

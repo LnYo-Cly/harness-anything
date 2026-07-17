@@ -8,6 +8,7 @@ import type {
 } from "../../application/src/index.ts";
 import type { makeLocalAuthorityAttributionEventV2Log } from "../../kernel/src/index.ts";
 import { recoverPendingProductionEvents } from "../src/daemon/production-authority-lifecycle.ts";
+import type { createGitCanonicalPublicationInspector } from "../src/daemon/authority-publication-evidence.ts";
 
 test("restart recovery publishes one missing event for a committed effect without reapplying it", async () => {
   const record: AuthorityStoredOperationRecord = {
@@ -30,7 +31,13 @@ test("restart recovery publishes one missing event for a committed effect withou
       semanticMutationSetDigest: "c".repeat(64),
       mutationRegistryVersion: 1,
       actorAxesBindingDigest: "d".repeat(64),
-      canonicalMutationSet: { registryVersion: 1, mutations: [] }
+      canonicalMutationSet: {
+        registryVersion: 1,
+        mutations: [{
+          entity: { registryVersion: 1, entityKind: "task", canonicalRef: "task/task_RECOVERY" },
+          action: { registryVersion: 1, action: "append" }
+        }]
+      }
     },
     recordedProtocol: {
       kind: "semantic-mutation-envelope/v2",
@@ -50,6 +57,20 @@ test("restart recovery publishes one missing event for a committed effect withou
     list: async () => [durable],
     put: async (next) => { durable = next; }
   };
+  let change: import("../../application/src/index.ts").ReplicaChangeRecord | undefined;
+  const replicaChangeLog: import("../../application/src/index.ts").ReplicaChangeLog = {
+    append: async (next) => { change = next; },
+    latest: async () => change,
+    getByOperation: async () => change,
+    changesAfter: async () => change ? [change] : []
+  };
+  const publicationInspector = {
+    currentHead: async () => "b".repeat(40),
+    inspectPublishedHead: async () => ({ commitSha: "b".repeat(40), parentCommits: ["a".repeat(40), "c".repeat(40)] }),
+    inspectPublication: async () => publicationEvidence(),
+    findPublication: async () => publicationEvidence(),
+    findPublicationForOperation: async () => publicationEvidence()
+  } as ReturnType<typeof createGitCanonicalPublicationInspector>;
   const eventLog = {
     read: () => eventPresent
       ? { workspaceId: record.workspaceId, opId: record.opId }
@@ -73,10 +94,10 @@ test("restart recovery publishes one missing event for a committed effect withou
   };
 
   await recoverPendingProductionEvents({
-    workspaceId: record.workspaceId, operationRegistry, eventLog, recover
+    workspaceId: record.workspaceId, operationRegistry, replicaChangeLog, eventLog, publicationInspector, recover
   });
   await recoverPendingProductionEvents({
-    workspaceId: record.workspaceId, operationRegistry, eventLog, recover
+    workspaceId: record.workspaceId, operationRegistry, replicaChangeLog, eventLog, publicationInspector, recover
   });
 
   assert.equal(publicationCount, 1);
@@ -84,3 +105,18 @@ test("restart recovery publishes one missing event for a committed effect withou
   assert.equal(durable.state, "COMMITTED");
   assert.deepEqual(durable.receipt, receipt);
 });
+
+function publicationEvidence() {
+  return {
+    commitSha: "b".repeat(40),
+    previousCommit: null,
+    parentCommits: ["a".repeat(40), "c".repeat(40)],
+    pipelineGeneratedPaths: [],
+    contentAddressedPaths: [],
+    physicalChanges: [{
+      path: "tasks/task_RECOVERY/progress.md",
+      beforeDigest: null,
+      afterDigest: "1".repeat(64)
+    }]
+  };
+}

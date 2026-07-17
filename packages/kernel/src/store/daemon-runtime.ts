@@ -91,6 +91,7 @@ export interface HarnessDaemonRuntime {
   readonly createAttributedCoordinator: (input: {
     readonly attribution: WriteAttribution;
     readonly sessionId: string;
+    readonly commitAuthor?: InteractiveWriteRequest["commitAuthor"];
   }) => WriteCoordinator;
   readonly assertWriteFenceHeld: () => Promise<void>;
   readonly admissionBudget: DaemonAdmissionBudget;

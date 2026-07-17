@@ -32,6 +32,20 @@ export function finalizeDryRunResult(action: Action, result: CliResult): CliResu
   } : candidate;
 }
 
+/** Daemon dry-runs stop before canonical ingress, so they cannot enqueue or commit. */
+export function dryRunResult(action: Action): CliResult {
+  return finalizeDryRunResult(action, {
+    ok: true,
+    command: action.kind,
+    ...(dryRunTaskId(action) ? { taskId: dryRunTaskId(action) } : {}),
+    ...(action.kind === "progress-append" ? { path: "progress.md" } : {})
+  });
+}
+
+function dryRunTaskId(action: Action): string | undefined {
+  return "taskId" in action && typeof action.taskId === "string" ? action.taskId : undefined;
+}
+
 export function dryRunPreviewContractViolation(action: Action, result: CliResult): string | undefined {
   if (!result.ok || !isDryRunAction(action)) return undefined;
   const preview = reportRecord(result.report).preview;

@@ -57,6 +57,10 @@ test("ledger materializer dry-runs and merges pending session branches", () => {
     assert.equal(readGitFile(rootDir, "tasks/task-2/note.md"), "materialized write\n");
     assert.equal(merged.attributionEventsProjected, 1);
     assert.equal(readAttributionProjection(rootDir)[0]?.opId, "op-materialize");
+    assert.equal(
+      git(rootDir, "show", "-s", "--format=%an <%ae>", "HEAD"),
+      "Harness Anything Materializer <materializer@harness-anything.local>"
+    );
   });
 });
 

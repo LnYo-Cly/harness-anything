@@ -51,6 +51,7 @@ import {
   type DurableAuthorityBindingRuntimeV2
 } from "./authority-production-state.ts";
 import { createGitCanonicalPublicationInspector } from "./authority-publication-evidence.ts";
+import { assertPublicationMatchesMutationSet } from "./authority-publication-evidence.ts";
 import { createAuthorityProductionScanner } from "./authority-production-scanner.ts";
 import { createProductionCompoundReceiptComposition } from "./compound-receipt-composition.ts";
 import { withProductionRecoveryV2 } from "./authority-attribution-event-v2-production-recovery.ts";
@@ -122,10 +123,29 @@ export function createProductionAuthorityLifecycle(input: {
           observe: async (request) => {
             const inspect = publicationObservers.get(repo.repoId);
             if (!inspect) throw new Error("AUTHORITY_PRODUCTION_PUBLICATION_OBSERVER_UNAVAILABLE");
-            const evidence = await inspect(request.previousCommit);
+            const changes = await state.replicaChangeLog.changesAfter(request.workspaceId, 0);
+            const expectedOpIds = changes
+              .filter((change) => change.commitSha === request.commitSha)
+              .sort((left, right) => left.revision - right.revision)
+              .map((change) => change.opId);
+            if (!expectedOpIds.includes(request.opId)) {
+              throw new Error(`AUTHORITY_PRODUCTION_PUBLICATION_OPERATION_MISSING:opId=${request.opId};commitSha=${request.commitSha}`);
+            }
+            const evidence = await inspect(request.previousCommit, expectedOpIds, request.commitSha);
             if (evidence.commitSha !== request.commitSha || evidence.previousCommit !== request.previousCommit) {
               throw new Error("AUTHORITY_PRODUCTION_PUBLICATION_OBSERVATION_MISMATCH");
             }
+            const mutationSets = await Promise.all(expectedOpIds.map(async (opId) => {
+              const record = await state.operationRegistry.get(request.workspaceId, opId);
+              if (!record?.authorityIntegrity) {
+                throw new Error(`AUTHORITY_PRODUCTION_PUBLICATION_INTEGRITY_MISSING:opId=${opId}`);
+              }
+              return record.authorityIntegrity.canonicalMutationSet;
+            }));
+            assertPublicationMatchesMutationSet(evidence, {
+              registryVersion: 1,
+              mutations: mutationSets.flatMap((mutationSet) => mutationSet.mutations)
+            });
             return { ...evidence, recordedAt: new Date().toISOString() };
           }
         }
@@ -153,14 +173,17 @@ export function createProductionAuthorityLifecycle(input: {
         rootDir: repo.canonicalRoot,
         ...(input.layoutOverrides ? { layoutOverrides: input.layoutOverrides } : {})
       }).authoredRoot;
-      publicationObservers.set(repo.repoId, async (previousCommit) => {
-        const inspector = createGitCanonicalPublicationInspector(authoredRoot);
-        return inspector.inspectPublication(previousCommit);
+      const publicationInspector = createGitCanonicalPublicationInspector(authoredRoot);
+      publicationObservers.set(repo.repoId, async (previousCommit, expectedOpIds, expectedCommitSha) => {
+        const inspector = publicationInspector;
+        return inspector.inspectPublication(previousCommit, expectedOpIds, expectedCommitSha);
       });
       await recoverPendingProductionEvents({
         workspaceId: config.workspaceId,
         operationRegistry: state.operationRegistry,
+        replicaChangeLog: state.replicaChangeLog,
         eventLog,
+        publicationInspector,
         recover: committedEventPublisher.recoverCommittedReceipt
       });
       return {
@@ -212,17 +235,67 @@ export function createProductionAuthorityLifecycle(input: {
 export async function recoverPendingProductionEvents(input: {
   readonly workspaceId: string;
   readonly operationRegistry: import("../../../application/src/index.ts").AuthorityOperationRegistry;
+  readonly replicaChangeLog: import("../../../application/src/index.ts").ReplicaChangeLog;
   readonly eventLog: ReturnType<typeof makeLocalAuthorityAttributionEventV2Log>;
+  readonly publicationInspector: ReturnType<typeof createGitCanonicalPublicationInspector>;
   readonly recover: (record: import("../../../application/src/index.ts").AuthorityStoredOperationRecord) => Promise<import("../../../application/src/index.ts").AuthorityCommittedReceipt>;
 }): Promise<void> {
   const records = await input.operationRegistry.list(input.workspaceId);
-  for (const record of records) {
+  const pending = records.filter((record) => {
     if ((record.state !== "INDEXED" && record.state !== "INDETERMINATE")
       || record.recordedProtocol?.kind !== "semantic-mutation-envelope/v2"
-      || !record.commitSha || !record.authorityIntegrity || !record.canonicalRequestEnvelope
-      || input.eventLog.read(record.workspaceId, record.opId)) continue;
-    const receipt = await input.recover(record);
-    await input.operationRegistry.put({ ...record, state: "COMMITTED", receipt, commitSha: receipt.commitSha });
+      || !record.authorityIntegrity || !record.canonicalRequestEnvelope) return false;
+    return true;
+  });
+  let remaining = [...pending];
+  while (remaining.length > 0) {
+    let progressed = false;
+    const deferred: typeof remaining = [];
+    for (const record of remaining) {
+      try {
+        const evidence = await input.publicationInspector.findPublicationForOperation(record.opId);
+        if (record.commitSha && record.commitSha !== evidence.commitSha) {
+          throw new Error("AUTHORITY_V2_RECOVERY_COMMIT_MISMATCH");
+        }
+        assertPublicationMatchesMutationSet(evidence, record.authorityIntegrity!.canonicalMutationSet);
+        let change = await input.replicaChangeLog.getByOperation(record.workspaceId, record.opId);
+        if (!change) {
+          const latest = await input.replicaChangeLog.latest(record.workspaceId);
+          if ((latest?.commitSha ?? null) !== evidence.previousCommit) {
+            deferred.push(record);
+            continue;
+          }
+          change = {
+            schema: "replica-change/v1",
+            workspaceId: record.workspaceId,
+            revision: (latest?.revision ?? 0) + 1,
+            opId: record.opId,
+            semanticDigest: record.semanticDigest,
+            commitSha: evidence.commitSha,
+            previousCommit: evidence.previousCommit,
+            changedAt: new Date().toISOString(),
+            authorityIntegrity: record.authorityIntegrity
+          };
+          await input.replicaChangeLog.append(change);
+        }
+        if (change.commitSha !== evidence.commitSha
+          || change.previousCommit !== evidence.previousCommit
+          || change.semanticDigest !== record.semanticDigest
+          || change.authorityIntegrity?.semanticMutationSetDigest !== record.authorityIntegrity!.semanticMutationSetDigest) {
+          throw new Error("AUTHORITY_V2_RECOVERY_CHANGE_MISMATCH");
+        }
+        const indexed = { ...record, state: "INDEXED" as const, commitSha: evidence.commitSha };
+        await input.operationRegistry.put(indexed);
+        const receipt = await input.recover(indexed);
+        await input.operationRegistry.put({ ...indexed, state: "COMMITTED", receipt, commitSha: receipt.commitSha });
+        progressed = true;
+      } catch {
+        // Fail closed: unverifiable historical effects remain indeterminate.
+        deferred.push(record);
+      }
+    }
+    if (!progressed) return;
+    remaining = deferred;
   }
 }
 

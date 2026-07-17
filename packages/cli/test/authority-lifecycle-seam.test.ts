@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { Effect } from "effect";
+import { sha256Text } from "../../kernel/src/index.ts";
 import type { AuthorityOperationReceipt } from "../../application/src/index.ts";
 import {
   channelDigest32,
@@ -240,9 +241,11 @@ test("restart-durable-recovery restores operation, replica, binding and namespac
 test("held-lock attributed factory gives one exact coordinator to a same-attribution microbatch", () => {
   let created = 0;
   let pending = 0;
+  let commitAuthor: { readonly name: string; readonly email: string } | undefined;
   const runtime: AuthorityLifecycleRuntime = {
-    createAttributedCoordinator: () => {
+    createAttributedCoordinator: (input) => {
       created += 1;
+      commitAuthor = input.commitAuthor;
       return {
         enqueue: (op) => Effect.sync(() => {
           pending += 1;
@@ -252,6 +255,9 @@ test("held-lock attributed factory gives one exact coordinator to a same-attribu
         recover: Effect.succeed({ replayedOps: 0 })
       };
     },
+    enqueueMaterializerBatch: async ({ sessionId }) => ({
+      branches: [{ branch: `sessions/${sessionId}`, commitCount: 1, status: "merged" as const }]
+    }),
     assertWriteFenceHeld: async () => undefined
   };
   const factory = makeHeldLockAttributedCoordinatorFactory(runtime);
@@ -264,7 +270,49 @@ test("held-lock attributed factory gives one exact coordinator to a same-attribu
   const second = factory.create({ attribution, sessionId: "session-test" });
   assert.equal(first, second);
   assert.equal(created, 1);
+  assert.deepEqual(commitAuthor, {
+    name: "Harness Anything Authority",
+    email: "authority@harness-anything.local"
+  });
 });
+
+test("held-lock attributed factory preserves materializer error name and message", async () => {
+  const runtime: AuthorityLifecycleRuntime = {
+    createAttributedCoordinator: () => ({
+      enqueue: (op) => Effect.succeed({ opId: op.opId, entityId: op.entityId, accepted: true as const }),
+      flush: (reason) => Effect.succeed({ reason, opCount: 1, committed: true }),
+      recover: Effect.succeed({ replayedOps: 0 })
+    }),
+    enqueueMaterializerBatch: async () => { throw new Error("materializer unavailable"); },
+    assertWriteFenceHeld: async () => undefined
+  };
+  const coordinator = makeHeldLockAttributedCoordinatorFactory(runtime).create({
+    attribution: {
+      actor: { principal: { kind: "person", personId: "person_test" }, executor: null },
+      principalSource: { kind: "daemon-authenticated", providerId: "test", credentialFingerprint: "sha256:test" },
+      executorSource: "none"
+    },
+    sessionId: "session-test"
+  });
+
+  const result = await runEffect(Effect.either(coordinator.flush("explicit")));
+
+  assert.equal(result._tag, "Left");
+  if (result._tag === "Left") {
+    assert.deepEqual(result.left, {
+      _tag: "JournalUnavailable",
+      cause: { name: "Error", message: "materializer unavailable" }
+    });
+  }
+});
+
+function runEffect<A, E>(effect: Effect.Effect<A, E>): Promise<A> {
+  return new Promise((resolve, reject) => {
+    Effect.runCallback(effect, {
+      onExit: (exit) => exit._tag === "Success" ? resolve(exit.value) : reject(new Error(String(exit.cause)))
+    });
+  });
+}
 
 test("publication-tree-mismatch uses real Git trees and rejects paths outside the canonical mutation target", async () => {
   await withRoots(async ({ alphaRoot }) => {
@@ -274,12 +322,18 @@ test("publication-tree-mismatch uses real Git trees and rejects paths outside th
     git(alphaRoot, "add", ".");
     git(alphaRoot, "commit", "-q", "-m", "seed");
     const before = git(alphaRoot, "rev-parse", "HEAD");
+    const trunk = git(alphaRoot, "branch", "--show-current");
+    git(alphaRoot, "checkout", "-q", "-b", "sessions/session-test");
     writeFileSync(path.join(alphaRoot, "tasks", "task_T", "INDEX.md"), "after\n");
+    mkdirSync(path.join(alphaRoot, "attribution-events"), { recursive: true });
+    writeFileSync(path.join(alphaRoot, "attribution-events", `${sha256Text("op-test")}.jsonl`), "{}\n");
     git(alphaRoot, "add", ".");
-    git(alphaRoot, "commit", "-q", "-m", "update task");
+    git(alphaRoot, "commit", "-q", "-m", "test write [op-test]");
+    git(alphaRoot, "checkout", "-q", trunk);
+    git(alphaRoot, "merge", "-q", "--no-ff", "sessions/session-test", "-m", "materializer: merge session session-test");
 
     const inspector = createGitCanonicalPublicationInspector(alphaRoot);
-    const evidence = await inspector.inspectPublication(before);
+    const evidence = await inspector.inspectPublication(before, ["op-test"]);
     const mutationSet = {
       registryVersion: 1,
       mutations: [{
@@ -288,7 +342,10 @@ test("publication-tree-mismatch uses real Git trees and rejects paths outside th
       }]
     } as const;
     assertPublicationMatchesMutationSet(evidence, mutationSet);
-    assert.deepEqual(evidence.physicalChanges.map((change) => change.path), ["tasks/task_T/INDEX.md"]);
+    assert.deepEqual(evidence.physicalChanges.map((change) => change.path), [
+      "tasks/task_T/INDEX.md",
+      `attribution-events/${sha256Text("op-test")}.jsonl`
+    ]);
     assert.match(evidence.physicalChanges[0]!.beforeDigest ?? "", /^[a-f0-9]{64}$/u);
     assert.match(evidence.physicalChanges[0]!.afterDigest ?? "", /^[a-f0-9]{64}$/u);
 
@@ -301,6 +358,14 @@ test("publication-tree-mismatch uses real Git trees and rejects paths outside th
       }]
     };
     assert.throws(() => assertPublicationMatchesMutationSet(mismatched, mutationSet), /AUTHORITY_PUBLICATION_TREE_MISMATCH/u);
+
+    writeFileSync(path.join(alphaRoot, "outside.txt"), "unowned\n");
+    git(alphaRoot, "add", ".");
+    git(alphaRoot, "commit", "-q", "-m", "external canonical write");
+    await assert.rejects(
+      inspector.inspectPublication(evidence.commitSha, ["op-external"]),
+      /AUTHORITY_CANONICAL_PUBLICATION_NON_LINEAR;expectedPreviousHead=.*;expectedOpIds=op-external;head=.*;actualParents=/u
+    );
   });
 });
 
@@ -313,14 +378,20 @@ test("production composition reads publication evidence from the repo's real aut
     git(authoredRoot, "add", ".");
     git(authoredRoot, "commit", "-q", "-m", "seed authored tree");
     const before = git(authoredRoot, "rev-parse", "HEAD");
+    const trunk = git(authoredRoot, "branch", "--show-current");
+    git(authoredRoot, "checkout", "-q", "-b", "sessions/session-test");
     writeFileSync(path.join(authoredRoot, "tasks", "task_T", "INDEX.md"), "after\n");
+    mkdirSync(path.join(authoredRoot, "attribution-events"), { recursive: true });
+    writeFileSync(path.join(authoredRoot, "attribution-events", `${sha256Text("op-test")}.jsonl`), "{}\n");
     git(authoredRoot, "add", ".");
-    git(authoredRoot, "commit", "-q", "-m", "publish authored tree");
+    git(authoredRoot, "commit", "-q", "-m", "test write [op-test]");
+    git(authoredRoot, "checkout", "-q", trunk);
+    git(authoredRoot, "merge", "-q", "--no-ff", "sessions/session-test", "-m", "materializer: merge session session-test");
     let observed: ReadonlyArray<string> = [];
     const hooks: AuthorityRepoLifecycleHooks = {
       ...hooksFixture([]),
       start: async ({ repo, inspectPublication }) => {
-        observed = (await inspectPublication(before)).physicalChanges.map((change) => change.path);
+        observed = (await inspectPublication(before, ["op-test"])).physicalChanges.map((change) => change.path);
         return componentFixture(repo.repoId);
       }
     };
@@ -331,7 +402,10 @@ test("production composition reads publication evidence from the repo's real aut
     });
     const result = await controller.startRepo({ repoId: "alpha", canonicalRoot: alphaRoot }, runtimeFixture());
     assert.equal(result.ok, true, result.ok ? "" : result.error);
-    assert.deepEqual(observed, ["tasks/task_T/INDEX.md"]);
+    assert.deepEqual(observed, [
+      "tasks/task_T/INDEX.md",
+      `attribution-events/${sha256Text("op-test")}.jsonl`
+    ]);
     await controller.stopAll("daemon-shutdown");
   });
 });
@@ -493,6 +567,9 @@ function runtimeFixture(): AuthorityLifecycleRuntime {
       enqueue: (op) => Effect.succeed({ opId: op.opId, entityId: op.entityId, accepted: true as const }),
       flush: (reason) => Effect.succeed({ reason, opCount: 1, committed: true }),
       recover: Effect.succeed({ replayedOps: 0 })
+    }),
+    enqueueMaterializerBatch: async ({ sessionId }) => ({
+      branches: [{ branch: `sessions/${sessionId}`, commitCount: 1, status: "merged" as const }]
     }),
     assertWriteFenceHeld: async () => undefined
   };
