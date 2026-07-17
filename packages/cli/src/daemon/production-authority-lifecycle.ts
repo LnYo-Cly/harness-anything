@@ -4,16 +4,24 @@ import {
   actorAxesBindingDigestV2,
   actorAxesBindingTokenDigestV2,
   canonicalPayloadDigestV2,
+  consentTypedCommandsV2,
   createAuthorityCutoverEntityRegistryQualification,
   createAuthorityCutoverControlService,
   createDurableAuthorityCommittedEventPublisherV2,
   encodeSemanticMutationEnvelopeV2,
   encodeTaskDecisionModuleCommandPayloadV2,
+  factRelationTypedCommandsV2,
   issueActorAxesBindingV2,
+  makeCompositeAuthoritySemanticCompilerV2,
+  makeConsentSemanticCompilerV2,
+  makeFactRelationSemanticCompilerV2,
+  makeSessionExecutionReviewSemanticCompilerV2,
   makeTaskDecisionModuleSemanticCompilerV2,
   semanticMutationSetDigestV2,
   semanticRequestDigestV2,
   semanticMutationEnvelopeV2Schema,
+  sessionExecutionReviewTypedCommandsV2,
+  taskDecisionModuleTypedCommandsV2,
   type ActorAxesBindingRuntimeV2,
   type AuthorityCutoverControlService,
   type AuthoritySubmissionService,
@@ -69,7 +77,9 @@ interface RepoProductionMaterial {
   readonly configurationDigest: string;
 }
 
-const productionAuthorityV2EntityKinds = ["task", "decision", "module"] as const;
+const productionAuthorityV2EntityKinds = [
+  "task", "decision", "module", "fact", "relation", "session", "execution", "review", "consent"
+] as const;
 
 export function createProductionAuthorityLifecycle(input: {
   readonly manifestPath: string;
@@ -302,6 +312,10 @@ function createConnectionAuthorityService(
   context: AuthorityConnectionContext
 ): AuthoritySubmissionService {
   const publicationInspector = createGitCanonicalPublicationInspector(material.authoredRoot);
+  const semanticState = {
+    readEntityBase: async () => null,
+    readHostedDocument: async () => null
+  };
   return createAuthoritySubmissionService({
     workspaceId: material.config.workspaceId,
     coordinatorFactory: input.attributedCoordinatorFactory,
@@ -317,12 +331,28 @@ function createConnectionAuthorityService(
       entityRegistrations: productionAuthorityV2EntityKinds.map((kind) =>
         entityRegistry[kind] as unknown as EntityRegistration<string, typeof kind>
       ),
-      semanticCompiler: makeTaskDecisionModuleSemanticCompilerV2({
-        state: {
-          readEntityBase: async () => null,
-          readHostedDocument: async () => null
-        }
-      }),
+      semanticCompiler: makeCompositeAuthoritySemanticCompilerV2([{
+        commandNames: taskDecisionModuleTypedCommandsV2,
+        compiler: makeTaskDecisionModuleSemanticCompilerV2({ state: semanticState })
+      }, {
+        commandNames: factRelationTypedCommandsV2.filter((command) => command.startsWith("fact.")),
+        compiler: makeFactRelationSemanticCompilerV2({ state: semanticState })
+      }, {
+        commandNames: factRelationTypedCommandsV2.filter((command) => command.startsWith("relation.")),
+        compiler: makeFactRelationSemanticCompilerV2({ state: semanticState })
+      }, {
+        commandNames: sessionExecutionReviewTypedCommandsV2.filter((command) => command.startsWith("session.")),
+        compiler: makeSessionExecutionReviewSemanticCompilerV2({ state: semanticState })
+      }, {
+        commandNames: sessionExecutionReviewTypedCommandsV2.filter((command) => command.startsWith("execution.")),
+        compiler: makeSessionExecutionReviewSemanticCompilerV2({ state: semanticState })
+      }, {
+        commandNames: sessionExecutionReviewTypedCommandsV2.filter((command) => command.startsWith("review.")),
+        compiler: makeSessionExecutionReviewSemanticCompilerV2({ state: semanticState })
+      }, {
+        commandNames: consentTypedCommandsV2,
+        compiler: makeConsentSemanticCompilerV2({ state: semanticState })
+      }]),
       operationNamespaceVerifier: input.namespaceVerifier,
       committedEventPublisher: input.committedEventPublisher
     }
