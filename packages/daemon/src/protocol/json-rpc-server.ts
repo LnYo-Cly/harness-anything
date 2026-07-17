@@ -1,7 +1,5 @@
 // @slice-activation PLT-Daemon W2 protocol core exported for W3 transport adapters.
 import {
-  decodeDaemonStatusRequestV2,
-  decodeDaemonStatusResultV2,
   isTaskHolderError,
   taskHolderPrincipalFromActor,
   type CommandFailureReceipt,
@@ -23,6 +21,7 @@ import { failureReceipt, serviceResultReceipt, successReceipt } from "./receipt-
 import { isJsonObject, type JsonObject, type JsonRpcId, type JsonRpcRequest, type JsonRpcResponse, type JsonValue } from "./json-rpc-types.ts";
 import { readTaskHolderExecutor } from "./task-holder-payload.ts";
 import { appendDaemonLogOutcome, callDaemonLogList, isRepoDiagnosticMethod } from "./daemon-log-dispatch.ts";
+import { callDaemonStatusService } from "./daemon-status-validation.ts";
 import { resolveServicesForRepo } from "./repo-service-resolution.ts";
 import { appendJsonRpcCommandEvent, appendJsonRpcWriteEventIfNeeded } from "./runtime-event-dispatch.ts";
 import { commandRootMismatch, validateForcedCommandRoot } from "./forced-command-root.ts";
@@ -347,19 +346,7 @@ async function callServiceMethod(
   const services = repo ? resolveServicesForRepo(contract.method, repo, options) : options.services;
   if (!services) return failureReceipt(contract.method, "repo_service_unavailable", `Repo service host is not configured for ${repo?.repoId ?? "unknown"}.`);
   if (contract.method === "repo.daemon.status") {
-    if (!services.DaemonStatusService) {
-      return failureReceipt(contract.method, "daemon_status_service_unavailable", "Daemon status service is not configured.");
-    }
-    try {
-      decodeDaemonStatusRequestV2(params);
-      const status = decodeDaemonStatusResultV2(await services.DaemonStatusService.getStatus(repo ? { repo } : undefined));
-      return successReceipt(contract.method, "read daemon status", status as unknown as JsonObject);
-    } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "invalid_daemon_status_request") {
-        return failureReceipt(contract.method, "daemon_status_request_invalid", "Daemon status request is outside daemon-status-request/v2.");
-      }
-      return failureReceipt(contract.method, "daemon_status_result_invalid", "Daemon status service returned data outside daemon-status/v2.");
-    }
+    return callDaemonStatusService(contract.method, params, services.DaemonStatusService, repo);
   }
   if (contract.method === "repo.daemon.logs.list") {
     return callDaemonLogList(services.DaemonLogService, payload, repo);
