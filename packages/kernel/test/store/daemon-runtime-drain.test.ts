@@ -1,0 +1,108 @@
+// harness-test-tier: integration
+import assert from "node:assert/strict";
+import path from "node:path";
+import test from "node:test";
+import type { ProjectionSourceFenceFactory } from "../../src/ports/projection-source-fence.ts";
+import { rebuildTaskProjection } from "../../src/projection/sqlite-task-projection.ts";
+import { createDaemonRuntime } from "../../../adapters/local/src/index.ts";
+import { docWrite, withTempStoreAsync } from "./helpers.ts";
+import {
+  commitAuthoredFixture,
+  daemonAttribution,
+  git,
+  initAuthoredGit,
+  stableProjectionFence,
+  writeExecutionEvidenceFixture
+} from "./helpers/daemon-runtime.ts";
+
+const drainTestAttribution = daemonAttribution("person_test", "test", "credential-test");
+
+const drainProjectionSourceFenceFactory: ProjectionSourceFenceFactory = ({ rootDir }) => {
+  const fence = stableProjectionFence(`test-${path.basename(rootDir)}`, git(rootDir, "rev-parse", "HEAD"), []);
+  return { capture: () => fence };
+};
+
+test("daemon stop drains an in-flight evidence read before it resolves", async () => {
+  await withTempStoreAsync(async (rootDir) => {
+    writeExecutionEvidenceFixture(rootDir, "Shutdown drain");
+    initAuthoredGit(rootDir);
+    commitAuthoredFixture(rootDir);
+    rebuildTaskProjection({ rootDir });
+    let captureStarted!: () => void;
+    let releaseCapture!: () => void;
+    const captureStartedPromise = new Promise<void>((resolve) => {
+      captureStarted = resolve;
+    });
+    const releaseCapturePromise = new Promise<void>((resolve) => {
+      releaseCapture = resolve;
+    });
+    const runtime = createDaemonRuntime({
+      rootDir,
+      materializerPollMs: false,
+      projectionSourceFenceFactory: () => ({
+        capture: async () => {
+          captureStarted();
+          await releaseCapturePromise;
+          return {
+            kind: "stable",
+            identity: "sha256:shutdown-drain",
+            headOid: "shutdown-drain",
+            dirty: false,
+            changedPaths: []
+          };
+        }
+      })
+    });
+    await runtime.start();
+
+    const settled: string[] = [];
+    const read = runtime.queryExecutionEvidencePage({ limit: 1 }).then(
+      () => { settled.push("read"); },
+      () => { settled.push("read"); }
+    );
+    await captureStartedPromise;
+    const stop = runtime.stop().then(() => {
+      settled.push("stop");
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(settled, []);
+    releaseCapture();
+    await Promise.all([read, stop]);
+    assert.deepEqual(settled, ["read", "stop"]);
+  });
+});
+
+test("daemon stop bounds a hung queued write and retains its lock with durable operation tuples", async () => {
+  await withTempStoreAsync(async (rootDir) => {
+    writeExecutionEvidenceFixture(rootDir, "Bounded shutdown");
+    initAuthoredGit(rootDir);
+    commitAuthoredFixture(rootDir);
+    rebuildTaskProjection({ rootDir });
+    const runtime = createDaemonRuntime({
+      rootDir,
+      materializerPollMs: false,
+      interactiveMicroBatchMs: 0,
+      projectionSourceFenceFactory: drainProjectionSourceFenceFactory
+    });
+    await runtime.start();
+    void runtime.enqueueBackgroundBatch({ source: "killpoint-hung", run: () => new Promise<never>(() => undefined) });
+    void runtime.enqueueInteractiveWrite({
+      commandId: "recover-after-killpoint",
+      attribution: drainTestAttribution,
+      ops: [docWrite("op-recover-after-killpoint", "task-recover", "note.md", "recover")]
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    await assert.rejects(
+      runtime.stop({ drainTimeoutMs: 25 }),
+      (error: unknown) => error instanceof Error
+        && error.name === "DaemonDrainTimeoutError"
+        && error.message.includes("killpoint-hung")
+        && error.message.includes("recover-after-killpoint")
+        && error.message.includes("op-recover-after-killpoint")
+    );
+    assert.equal(runtime.status().started, false);
+    assert.ok(runtime.status().lockPath, "timeout must retain the write fence instead of releasing the lock");
+  });
+});
