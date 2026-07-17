@@ -86,12 +86,26 @@ test("daemon stop bounds a hung queued write and retains its lock with durable o
       projectionSourceFenceFactory: drainProjectionSourceFenceFactory
     });
     await runtime.start();
-    void runtime.enqueueBackgroundBatch({ source: "killpoint-hung", run: () => new Promise<never>(() => undefined) });
+    let hungBatchStarted!: () => void;
+    const hungBatchStartedPromise = new Promise<void>((resolve) => {
+      hungBatchStarted = resolve;
+    });
+    void runtime.enqueueBackgroundBatch({
+      source: "killpoint-hung",
+      run: () => {
+        hungBatchStarted();
+        return new Promise<never>(() => undefined);
+      }
+    });
+    // The hung batch must occupy the drain loop before the interactive write
+    // is queued; otherwise the queue commits the write first and the timeout
+    // enumeration cannot include its operation tuple.
+    await hungBatchStartedPromise;
     void runtime.enqueueInteractiveWrite({
       commandId: "recover-after-killpoint",
       attribution: drainTestAttribution,
       ops: [docWrite("op-recover-after-killpoint", "task-recover", "note.md", "recover")]
-    });
+    }).catch(() => undefined);
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     await assert.rejects(

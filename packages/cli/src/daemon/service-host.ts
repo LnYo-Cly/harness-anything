@@ -26,6 +26,7 @@ import {
   makeMarkdownArtifactStore,
   readDaemonRegistry,
 } from "../../../kernel/src/index.ts";
+import { cliError, CliErrorCode } from "../cli/error-codes.ts";
 import { loadDaemonIdentity } from "../commands/daemon/productization.ts";
 import { makeDaemonGuiControllerOptions } from "../commands/extensions/gui-controller-options.ts";
 import {
@@ -127,10 +128,10 @@ export async function createDaemonServiceHost(
         activeControl = {
           ...activeControl,
           phase: "failed",
-          failure: {
-            code: "daemon_queue_drain_timeout",
-            hint: `Daemon ${activeControl.kind} drain exceeded its deadline. Run \`ha daemon status --json\`, inspect the reported queue operation tuples, resolve or recover them, then retry the control request.`
-          }
+          failure: cliError(
+            CliErrorCode.DaemonQueueDrainTimeout,
+            `Daemon ${activeControl.kind} requires the write queue to drain within the deadline, but in-flight operations failed to settle in time. Run \`ha daemon status --json\`, inspect the reported queue operation tuples, resolve or recover them, then retry the control request.`
+          ) as NonNullable<DaemonActiveControlStatus["failure"]>
         };
         return;
       }
