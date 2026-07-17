@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import type { DaemonQueueDrainTarget } from "../daemon/drain-timeout.ts";
 import type { WriteError } from "../domain/index.ts";
 import type { FlushReport, WriteOp } from "../ports/write-coordinator.ts";
 import type { WriteAttribution } from "../schemas/actor-attribution.ts";
@@ -40,9 +41,7 @@ export interface DaemonQueueSnapshot {
   readonly running: boolean;
 }
 
-export type DaemonQueueDrainTarget =
-  | { readonly kind: "interactive"; readonly commandId: string; readonly opIds: ReadonlyArray<string> }
-  | { readonly kind: "background"; readonly source: string };
+export type { DaemonQueueDrainTarget } from "../daemon/drain-timeout.ts";
 
 type InteractiveQueueItem = InteractiveWriteAttribution & {
   readonly kind: "interactive";
