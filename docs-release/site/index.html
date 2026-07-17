@@ -703,7 +703,7 @@
     <span class="k">--rejected</span> "Client-only fix" <span class="k">--why-not</span> "Races with cookie set"
 <span class="ok">ok</span> command="decision propose" path=harness/decisions/decision-dec_mr6f3b4z/decision.md
 
-<span class="c">$</span> ha decision accept dec_mr6f3b4z <span class="k">--arbiter</span> human:you
+<span class="c">$</span> ha decision accept dec_mr6f3b4z
 <span class="ok">ok</span> command="decision accept" path=harness/decisions/decision-dec_mr6f3b4z/decision.md</pre>
           </figure>
           <p>
@@ -764,8 +764,8 @@
             </table>
           </div>
           <p>
-            <span lang="en">The always-current reference is the tool itself: <code>ha --help</code> and <code>ha capabilities</code> list every operation, its input schema, and examples.</span>
-            <span lang="zh">永远最新的参考是工具本身：<code>ha --help</code> 和 <code>ha capabilities</code> 会列出每个操作、它的输入 schema 和例子。</span>
+            <span lang="en">The always-current reference is the tool itself: <code>ha --help</code> lists command families, <code>ha &lt;kind&gt; --help</code> lists that family's operations, and <code>ha capabilities --kind &lt;kind&gt;</code> provides their input schemas and examples.</span>
+            <span lang="zh">永远最新的参考是工具本身：<code>ha --help</code> 列出命令族，<code>ha &lt;kind&gt; --help</code> 列出该命令族的操作，<code>ha capabilities --kind &lt;kind&gt;</code> 则提供这些操作的输入 schema 和例子。</span>
           </p>
         </section>
 

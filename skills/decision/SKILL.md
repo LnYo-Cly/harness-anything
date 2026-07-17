@@ -53,12 +53,12 @@ harness-anything decision propose --title "..." --question "..." --chosen "..." 
 Use only CLI state operations:
 
 ```bash
-npx ha decision accept <decision-id> --arbiter human:<id> --json
-npx ha decision reject <decision-id> --arbiter human:<id> --json
-npx ha decision defer <decision-id> --arbiter human:<id> --json
-npx ha decision supersede <decision-id> --arbiter human:<id> --json
+npx ha decision accept <decision-id> --json
+npx ha decision reject <decision-id> --json
+npx ha decision defer <decision-id> --json
+npx ha decision supersede <decision-id> --json
 npx ha decision amend <decision-id> --title "Updated title" --json
-npx ha decision retire <decision-id> --arbiter human:<id> --json
+npx ha decision retire <decision-id> --json
 ```
 
 ## Guardrails
