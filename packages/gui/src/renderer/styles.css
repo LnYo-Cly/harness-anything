@@ -640,3 +640,28 @@ html[data-theme="light"] .ee-chip-archival.ee-chip-active {
     transform: translateX(-50%) translateY(0);
   }
 }
+
+/* ── Relation edge flow (dogfood: direction animation, restrained) ── */
+/* Low-contrast slow dash motion; only applied when .ha-rel-edge--flow is present
+   (focus/hover/adjacent by default). prefers-reduced-motion fully disables. */
+.ha-rel-edge {
+  transition: stroke 0.15s ease, stroke-width 0.15s ease, opacity 0.15s ease;
+}
+.ha-rel-edge-flow {
+  animation: ha-rel-flow 2.8s linear infinite;
+  opacity: 0.45;
+}
+@keyframes ha-rel-flow {
+  from {
+    stroke-dashoffset: 28;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ha-rel-edge-flow {
+    animation: none;
+    opacity: 0;
+  }
+}

@@ -1,12 +1,28 @@
 import { useState } from "react";
-import { Funnel, SquaresFour, Graph, Bandaids, CaretDown, CaretRight } from "@phosphor-icons/react";
+import {
+  Funnel,
+  SquaresFour,
+  Graph,
+  Bandaids,
+  CaretDown,
+  CaretRight,
+  WaveSine,
+  GitBranch,
+} from "@phosphor-icons/react";
 import {
   AXIS_COLOR_VAR,
   AXIS_LABEL,
   AXIS_SUBLABEL,
   AXIS_ORDER,
+  KIND_LABEL,
   type SemanticAxis,
 } from "../graph/constants";
+import {
+  RELATION_KIND_ORDER,
+  kindsByAxis,
+  type FlowAnimMode,
+} from "../graph/relationVisual";
+import type { RelationKind } from "../model/types";
 import { t } from "../i18n/index.tsx";
 
 export type EntityType = "decision" | "task" | "fact";
@@ -22,6 +38,8 @@ export interface GraphFilters {
   modules: Set<string>;
   types: Set<EntityType>;
   axes: AxisFilterState;
+  /** 关系类型多选;默认全开,会话内保持。 */
+  kinds: Set<RelationKind>;
 }
 
 interface Props {
@@ -34,9 +52,21 @@ interface Props {
    * 那里 types 才真正收窄邻居/成员。默认 true(向后兼容)。
    */
   showEntityTypes?: boolean;
+  /** 边方向流动动画模式 + 切换(工具栏全局开关兜底)。 */
+  flowMode: FlowAnimMode;
+  onFlowModeChange: (mode: FlowAnimMode) => void;
 }
 
-export function GraphFilterPanel({ filters, setFilters, availableModules, showEntityTypes = true }: Props) {
+const FLOW_MODES: ReadonlyArray<FlowAnimMode> = ["focus", "all", "off"];
+
+export function GraphFilterPanel({
+  filters,
+  setFilters,
+  availableModules,
+  showEntityTypes = true,
+  flowMode,
+  onFlowModeChange,
+}: Props) {
   const toggleModule = (mod: string) => {
     setFilters((prev) => {
       const next = new Set(prev.modules);
@@ -46,11 +76,11 @@ export function GraphFilterPanel({ filters, setFilters, availableModules, showEn
     });
   };
 
-  const toggleType = (t: EntityType) => {
+  const toggleType = (entityType: EntityType) => {
     setFilters((prev) => {
       const next = new Set(prev.types);
-      if (next.has(t)) next.delete(t);
-      else next.add(t);
+      if (next.has(entityType)) next.delete(entityType);
+      else next.add(entityType);
       return { ...prev, types: next };
     });
   };
@@ -62,43 +92,79 @@ export function GraphFilterPanel({ filters, setFilters, availableModules, showEn
     }));
   };
 
-  // 默认收起:这个面板是覆盖在画布上的浮层,常驻展开会永久吃掉左上角 ——
-  // 聚光灯模式下压住焦点卡片,领地模式下压住第一个领地块。收起态是一颗 pill,
-  // 上面标出「已收窄」的筛选数,状态一眼可见,画布还给内容。
+  const toggleKind = (kind: RelationKind) => {
+    setFilters((prev) => {
+      const next = new Set(prev.kinds);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
+      return { ...prev, kinds: next };
+    });
+  };
+
+  const setAllKinds = (on: boolean) => {
+    setFilters((prev) => ({
+      ...prev,
+      kinds: on ? new Set(RELATION_KIND_ORDER) : new Set(),
+    }));
+  };
+
+  // 默认收起:这个面板是覆盖在画布上的浮层,常驻展开会永久吃掉左上角。
   const [open, setOpen] = useState(false);
-  // D7 item2:types 只在 showEntityTypes 时计入「已收窄」徽标 —— 单种类领地下 types
-  // 由 skel 独占,filter.types 恒为 `{skel}`,把它算进 narrowed 会谎报「1 个收窄」。
+  const kindOff = RELATION_KIND_ORDER.length - filters.kinds.size;
   const narrowed =
     AXIS_ORDER.filter((a) => !filters.axes[a]).length +
     (showEntityTypes ? Math.max(0, 3 - filters.types.size) : 0) +
-    Math.max(0, availableModules.length - filters.modules.size);
+    Math.max(0, availableModules.length - filters.modules.size) +
+    Math.max(0, kindOff);
+
+  const byAxis = kindsByAxis();
+  const cycleFlow = () => {
+    const i = FLOW_MODES.indexOf(flowMode);
+    onFlowModeChange(FLOW_MODES[(i + 1) % FLOW_MODES.length]);
+  };
+  const flowLabel =
+    flowMode === "off"
+      ? t("components.graphFilterPanel.flowOff")
+      : flowMode === "all"
+        ? t("components.graphFilterPanel.flowAll")
+        : t("components.graphFilterPanel.flowFocus");
 
   return (
     <div
       className={`flex flex-col rounded-lg border border-border bg-surface shadow-sm pointer-events-auto ${open ? "gap-3 w-[300px]" : ""}`}
     >
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        title={open ? t("components.graphFilterPanel.collapseFilterPanel") : t("components.graphFilterPanel.expandFilterPanel")}
-        className={`flex items-center gap-2 px-3 py-2 text-left hover:bg-surface-raised rounded-lg ${open ? "border-b border-border rounded-b-none" : ""}`}
-      >
-        {open ? (
-          <CaretDown weight="bold" className="text-text-faint text-[10px]" />
-        ) : (
-          <CaretRight weight="bold" className="text-text-faint text-[10px]" />
-        )}
-        <Funnel weight="duotone" className="text-text-muted" />
-        <span className="font-mono text-xs font-semibold text-text">{t("components.graphFilterPanel.filters")}</span>
-        {!open && narrowed > 0 && (
-          <span className="rounded-full bg-accent px-1.5 py-0.5 font-mono text-[10px] text-accent-fg">
-            {narrowed}
-          </span>
-        )}
-      </button>
+      <div className={`flex items-center ${open ? "border-b border-border" : ""}`}>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          title={open ? t("components.graphFilterPanel.collapseFilterPanel") : t("components.graphFilterPanel.expandFilterPanel")}
+          className={`flex flex-1 items-center gap-2 px-3 py-2 text-left hover:bg-surface-raised ${open ? "rounded-t-lg" : "rounded-l-lg"}`}
+        >
+          {open ? (
+            <CaretDown weight="bold" className="text-text-faint text-[10px]" />
+          ) : (
+            <CaretRight weight="bold" className="text-text-faint text-[10px]" />
+          )}
+          <Funnel weight="duotone" className="text-text-muted" />
+          <span className="font-mono text-xs font-semibold text-text">{t("components.graphFilterPanel.filters")}</span>
+          {!open && narrowed > 0 && (
+            <span className="rounded-full bg-accent px-1.5 py-0.5 font-mono text-[10px] text-accent-fg">
+              {narrowed}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={cycleFlow}
+          title={t("components.graphFilterPanel.flowToggleHint")}
+          className={`flex items-center gap-1 border-l border-border px-2.5 py-2 text-[10px] font-mono text-text-muted hover:bg-surface-raised hover:text-text ${open ? "rounded-tr-lg" : "rounded-r-lg"}`}
+        >
+          <WaveSine weight="bold" className="text-[12px]" />
+          <span>{flowLabel}</span>
+        </button>
+      </div>
 
-      {/* D4:nowheel + max-h + overflow-y-auto。此面板浮在画布上(ReactFlow Panel),滚轮原本会被
-          d3-zoom 吞掉缩放画布;加 nowheel 让滚轮滚动面板内容,max-h 防止模块多时撑出视口。*/}
+      {/* D4:nowheel + max-h + overflow-y-auto。此面板浮在画布上(ReactFlow Panel)。*/}
       <div className={`nowheel px-3 pb-3 flex-col gap-4 ${open ? "flex max-h-[60vh] overflow-y-auto" : "hidden"}`}>
         {/* Semantic Axis Filter */}
         <div className="flex flex-col gap-2">
@@ -136,7 +202,71 @@ export function GraphFilterPanel({ filters, setFilters, availableModules, showEn
               );
             })}
             <div className="text-[9.5px] text-text-faint mt-0.5 leading-snug">
-              {t("components.graphFilterPanel.assocRelatesTurnedOffByDefaultReduce")}</div>
+              {t("components.graphFilterPanel.assocRelatesTurnedOffByDefaultReduce")}
+            </div>
+          </div>
+        </div>
+
+        {/* Relation kind multi-select */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-1.5 text-[11px] text-text-muted font-mono uppercase tracking-wide">
+            <GitBranch weight="bold" />
+            <span>{t("components.graphFilterPanel.relationTypes")}</span>
+            <span className="ml-auto flex gap-1 normal-case tracking-normal">
+              <button
+                type="button"
+                onClick={() => setAllKinds(true)}
+                className="rounded px-1 py-0.5 text-[9px] text-text-faint hover:bg-surface-raised hover:text-text"
+              >
+                {t("components.graphFilterPanel.kindsAll")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setAllKinds(false)}
+                className="rounded px-1 py-0.5 text-[9px] text-text-faint hover:bg-surface-raised hover:text-text"
+              >
+                {t("components.graphFilterPanel.kindsNone")}
+              </button>
+            </span>
+          </div>
+          <div className="flex flex-col gap-2">
+            {AXIS_ORDER.map((axis) => {
+              const kinds = byAxis[axis];
+              if (kinds.length === 0) return null;
+              return (
+                <div key={axis} className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="inline-block h-1.5 w-1.5 rounded-full"
+                      style={{ backgroundColor: AXIS_COLOR_VAR[axis] }}
+                    />
+                    <span className="font-mono text-[9px] text-text-faint uppercase">
+                      {AXIS_LABEL[axis]}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {kinds.map((kind) => {
+                      const active = filters.kinds.has(kind);
+                      return (
+                        <button
+                          key={kind}
+                          type="button"
+                          onClick={() => toggleKind(kind)}
+                          title={kind}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                            active
+                              ? "bg-surface-raised text-text border border-border"
+                              : "bg-surface text-text-faint border border-border/40 opacity-50"
+                          }`}
+                        >
+                          {KIND_LABEL[kind] ?? kind}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -174,19 +304,19 @@ export function GraphFilterPanel({ filters, setFilters, availableModules, showEn
               <span>{t("components.graphFilterPanel.entityTypes")}</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {(["decision", "task", "fact"] as const).map((t) => {
-                const active = filters.types.has(t);
+              {(["decision", "task", "fact"] as const).map((entityType) => {
+                const active = filters.types.has(entityType);
                 return (
                   <button
-                    key={t}
-                    onClick={() => toggleType(t)}
+                    key={entityType}
+                    onClick={() => toggleType(entityType)}
                     className={`px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${
                       active
                         ? "bg-stale/10 text-stale border border-stale/30"
                         : "bg-surface-raised text-text-muted border border-border hover:bg-border/50"
                     }`}
                   >
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                    {entityType.charAt(0).toUpperCase() + entityType.slice(1)}
                   </button>
                 );
               })}

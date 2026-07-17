@@ -15,6 +15,7 @@ import type {
   RelationEdge,
   DecisionRow,
   FactRef,
+  RelationKind,
 } from "../model/types";
 import type {
   RelationCoverageRow,
@@ -23,17 +24,7 @@ import type {
 import { GraphDrawer } from "../graph/GraphDrawer";
 import { type GraphFilterInput } from "../graph/graphLayout";
 import { useEgoCanvas } from "../graph/useEgoCanvas";
-
-import { TaskNode } from "../graph/nodes/TaskNode";
-import { DecisionNode } from "../graph/nodes/DecisionNode";
-import { DecisionFocusNode } from "../graph/nodes/DecisionFocusNode";
-import { FactNode } from "../graph/nodes/FactNode";
-import { EgoNode } from "../graph/nodes/EgoNode";
-import { ModuleGroupNode } from "../graph/nodes/ModuleGroupNode";
-import { LaneBackgroundNode } from "../graph/nodes/LaneBackgroundNode";
-import { TerritoryZoneNode } from "../graph/nodes/TerritoryZoneNode";
-import { TerritoryChipNode, territoryChipColor } from "../graph/nodes/TerritoryChipNode";
-import { InteractiveEdge } from "../graph/edges/InteractiveEdge";
+import { territoryChipColor } from "../graph/nodes/TerritoryChipNode";
 import { useTerritoryView, type ViewMode } from "../graph/useTerritoryView";
 import { TerritorySkelToggle } from "../components/TerritoryModeBar";
 import {
@@ -52,34 +43,18 @@ import {
   useContainerWidth,
   useNodeSizeOverrides,
 } from "./graphViewHooks";
+import {
+  defaultKindFilter,
+  edgePassesKindFilter,
+  type FlowAnimMode,
+} from "../graph/relationVisual";
+import {
+  graphNodeTypes,
+  graphEdgeTypes,
+  MINIMAP_AXIS,
+  defaultAxes,
+} from "./graphViewTypes";
 import { t } from "../i18n/index.tsx";
-
-const nodeTypes = {
-  task: TaskNode,
-  decision: DecisionNode,
-  decisionFocus: DecisionFocusNode,
-  fact: FactNode,
-  ego: EgoNode,
-  moduleGroup: ModuleGroupNode,
-  laneBackground: LaneBackgroundNode,
-  territoryZone: TerritoryZoneNode,
-  territoryChip: TerritoryChipNode,
-};
-
-const edgeTypes = {
-  interactive: InteractiveEdge,
-};
-
-const MINIMAP_AXIS: Record<string, string> = {
-  task: "var(--color-axis-execution)",
-  decision: "var(--color-axis-authority)",
-  fact: "var(--color-axis-evidence)",
-};
-
-function defaultAxes() {
-  // relates (assoc) 默认关 — dec_01KXA7811SVVT8P66HNDFZQ7DF CH4。
-  return { authority: true, evidence: true, execution: true, assoc: false };
-}
 
 function GraphViewInner({
   tasks,
@@ -136,9 +111,7 @@ function GraphViewInner({
     [tasks],
   );
 
-  // 三原语统一索引,供左栏 FocusSwitcher typeahead 复用(App.tsx 为 Recent 也建一份;
-  // 此处就地建是因为 entityIndex 无法穿越 ViewSwitch/EntityWorkspace 这两个非本维度文件
-  // 下传,而 GraphView 已直接持有 tasks/decisions/facts)。权重排序,与 Cmd+K 同口径。
+  // 三原语统一索引,供左栏 FocusSwitcher typeahead 复用。
   const entityIndex = useMemo(
     () => buildEntityIndex({ tasks, decisions: decisions ?? [], facts: facts ?? [] }),
     [tasks, decisions, facts],
@@ -148,7 +121,10 @@ function GraphViewInner({
     modules: new Set(tasks.map((t) => t.module)),
     types: new Set(["decision", "task", "fact"] as const),
     axes: defaultAxes(),
+    kinds: defaultKindFilter(),
   }));
+  // 流动动画全局开关:focus(默认,仅选中/悬停/邻接) / all / off;会话内保持。
+  const [flowMode, setFlowMode] = useState<FlowAnimMode>("focus");
 
   useEffect(() => {
     setFilters((current) => {
@@ -163,8 +139,7 @@ function GraphViewInner({
     });
   }, [availableModules]);
 
-  // 无限画布 ego 状态机(焦点 / 累积可见集 / 已展开卡片 / 焦点历史 / 换焦点即居中 /
-  // 单击单跳高亮 selectId+oneHopHighlight)。
+  // 无限画布 ego 状态机。
   const {
     focusId,
     shown,
@@ -191,8 +166,7 @@ function GraphViewInner({
     onFocusChange: onFocusEntityChange,
   });
 
-  // L1 领地总览状态机(骨架轴 + zone 折叠态)。viewMode/spotlight 由 EntityWorkspace
-  // 经 props 受控下传(它把 territory/spotlight 与演化史 fuse 成一条 3 态选择条)。
+  // L1 领地总览状态机。
   const {
     skel,
     expandedZones,
@@ -201,8 +175,7 @@ function GraphViewInner({
     toggleZone,
   } = useTerritoryView(openFocus, onViewModeChange);
 
-  // D7 item2:单种类领地(task/decision/fact)下,类型由 skel 独占 —— 强制 types={skel};
-  // 聚光灯 / 全域(unified)下用 filter.types 真收窄邻居。需在 useTerritoryView 之后(消费 skel)。
+  // D7 item2:单种类领地下 types 由 skel 独占。
   const layoutInputFilters: GraphFilterInput = useMemo(
     () => ({
       modules: filters.modules,
@@ -215,8 +188,6 @@ function GraphViewInner({
     [filters, viewMode, skel],
   );
 
-  // 布局调度(异步 + AbortController)外置到 useGraphLayout;GraphView 只消费结果。
-  // 传 containerWidth(D3 领地列数)和 sizeOverrides(D4 卡片尺寸)过布局链。
   const { nodes, edges, cycleWarning, error, resolvedFocusId } = useGraphLayout({
     tasks,
     relations,
@@ -236,22 +207,13 @@ function GraphViewInner({
     sizeOverrides,
   });
 
-  // 「换焦点即居中」:布局后的 nodes + resolvedFocusId 驱动 setCenter。
-  // 从 useEgoCanvas 抽出来放这儿,因为此 hook 在 useGraphLayout 之后调用,能拿到真实节点盒子。
   useCenterOnFocus(nodes, resolvedFocusId);
 
-  // 单击:
-  //   territoryChip / territoryZone / unified ego → 既有领地行为(不变)。
-  //   聚光灯 ego:
-  //     - 始终写入 selectNode(单跳高亮/灰化);再点同节点 = 取消。
-  //     - 未展开 chip 另 expandNode(就地展开+长邻居),已展开卡片只高亮不收起。
-  // 双击 = 设焦点(onNodeDoubleClick),与本单击 select 正交。
   const onNodeClick = useCallback(
     (_evt: any, node: any) => {
       if (node.type === "territoryChip") {
         const d = node.data ?? {};
         if (d.entity === "fold") {
-          // fold chip:领地 fold → toggleZone;全域 fold(无 zoneId)→ 仅提示,不跳。
           if (d.zoneId) toggleZone(d.zoneId);
           return;
         }
@@ -263,13 +225,11 @@ function GraphViewInner({
         return;
       }
       if (node.type !== "ego") return;
-      // 全域总览:点任一节点 → 进聚光灯深入(ego 状态机在这里不适用,整图无焦点)。
       if (viewMode === "territory" && skel === "unified") {
         const navRef = node.data?.navRef;
         if (navRef) enterSpotlight(navRef);
         return;
       }
-      // 聚光灯:单击 = select 高亮单跳邻居(与 expand 叠加,不互斥)。
       if (viewMode === "spotlight") {
         selectNode(node.id);
       }
@@ -279,8 +239,6 @@ function GraphViewInner({
     [expandNode, toggleZone, enterSpotlight, viewMode, skel, selectNode],
   );
 
-  // 双击 = 设为画布中心(openFocus:重排前后各 2 跳,推历史)。
-  // 仅聚光灯有意义;领地/全域(territory viewMode)下 ego 状态机不适用,忽略。
   const onNodeDoubleClick = useCallback(
     (_evt: any, node: any) => {
       if (viewMode === "territory") return;
@@ -300,11 +258,9 @@ function GraphViewInner({
 
   const onPaneClick = useCallback(() => {
     setDrawerState((prev) => ({ ...prev, selectedId: null, focusEdgeId: null }));
-    // 点空白取消单击单跳高亮。
     clearSelect();
   }, [clearSelect]);
 
-  // Esc = 关抽屉 + 取消单击单跳高亮(不退焦点;焦点有显式「退出聚焦」按钮)。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
@@ -316,8 +272,6 @@ function GraphViewInner({
     return () => window.removeEventListener("keydown", onKey);
   }, [clearSelect]);
 
-  // 抽屉状态(节点选中 / 边选中)+ 派生数据 + 回调,外置到 useGraphDrawer。
-  // onEdgeClick / onPaneClick / Esc 通过 setDrawerState 原子更新两个 id(避免竞态)。
   const [drawerState, setDrawerState] = useState<{ selectedId: string | null; focusEdgeId: string | null }>(
     { selectedId: null, focusEdgeId: null },
   );
@@ -340,14 +294,12 @@ function GraphViewInner({
     setFocusEdgeId,
   });
 
-  // 面包屑节点:用户没显式设焦点时,fallback 到布局器挑的默认焦点(resolvedFocusId)。
   const focusNode = focusId ? nodes.find((n) => n.id === focusId) : null;
   const breadcrumbNode =
     focusNode ?? (resolvedFocusId ? nodes.find((n) => n.id === resolvedFocusId) ?? null : null);
   const selectedNode = drawer.selectedId ? nodes.find((n) => n.id === drawer.selectedId) : null;
   const focusEdge = drawer.focusEdgeId ? edges.find((e) => e.id === drawer.focusEdgeId) : null;
 
-  // Node/edge count for header (exclude backgrounds).
   const visibleNodeCount = useMemo(
     () =>
       nodes.filter(
@@ -359,9 +311,6 @@ function GraphViewInner({
     [nodes],
   );
 
-  // 注入卡片交互回调(收起 / 设为中心 / 详情跳转 / 拖拽 resize)+ id 到 ego 节点 data。
-  // 聚光灯单击高亮:oneHopHighlight 非 null 时,不在集合内的节点 dimmed=true(降透明度)。
-  // territory 节点注入 onOpen(chip → 聚光灯)+ onFold(zone 折叠)。
   const displayNodes = useMemo(
     () =>
       nodes.map((n) => {
@@ -403,25 +352,40 @@ function GraphViewInner({
     ],
   );
 
-  // 边:两端都在高亮集合 → 保持醒目;否则淡化(opacity 0.18)。
-  // 无选中(oneHopHighlight=null)时全部保持原样。
+  // 边后处理:kind 筛选 + 单跳高亮 + flowMode 注入。
   const displayEdges = useMemo(() => {
-    if (oneHopHighlight === null) return edges;
-    return edges.map((e) => {
+    const kindFiltered = edges.filter((e) => {
+      const kind = (e.data as { kind?: RelationKind } | undefined)?.kind;
+      if (!kind) return true;
+      return edgePassesKindFilter({ kind }, filters.kinds);
+    });
+    return kindFiltered.map((e) => {
+      const baseData = (e.data as Record<string, unknown> | undefined) ?? {};
+      if (oneHopHighlight === null) {
+        return {
+          ...e,
+          data: { ...baseData, flowMode, adjacent: false },
+        };
+      }
       const keep =
         oneHopHighlight.has(e.source) && oneHopHighlight.has(e.target);
-      if (keep) return e;
+      if (keep) {
+        return {
+          ...e,
+          data: { ...baseData, flowMode, adjacent: true },
+        };
+      }
       return {
         ...e,
         style: {
           ...(e.style ?? {}),
           opacity: 0.18,
         },
+        data: { ...baseData, flowMode, adjacent: false },
       };
     });
-  }, [edges, oneHopHighlight]);
+  }, [edges, oneHopHighlight, filters.kinds, flowMode]);
 
-  // Switcher 入口:点选 = 设为画布中心(openFocus 重排 ±2)。
   const switchFocusFromList = useCallback(
     (nodeId: string) => {
       openFocus(nodeId);
@@ -430,7 +394,6 @@ function GraphViewInner({
     [openFocus],
   );
 
-  // 面包屑数据:显示当前焦点(显式 or 布局默认)。
   const breadcrumb = useMemo(() => {
     if (!breadcrumbNode) return null;
     const kindRaw =
@@ -504,8 +467,8 @@ function GraphViewInner({
         <ReactFlow
           nodes={displayNodes}
           edges={displayEdges}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
+          nodeTypes={graphNodeTypes}
+          edgeTypes={graphEdgeTypes}
           onNodeClick={onNodeClick}
           onNodeDoubleClick={onNodeDoubleClick}
           onEdgeClick={onEdgeClick}
@@ -547,11 +510,12 @@ function GraphViewInner({
               setFilters={setFilters}
               availableModules={availableModules}
               showEntityTypes={viewMode === "spotlight" || skel === "unified"}
+              flowMode={flowMode}
+              onFlowModeChange={setFlowMode}
             />
           </Panel>
         </ReactFlow>
 
-        {/* 节点详情已就地进卡片;抽屉仅保留「边详情」(点关系边)这一路。 */}
         {(selectedNode || focusEdge) && (
           <GraphDrawer
             focusNode={selectedNode ? drawer.drawerNodesMap.get(drawer.selectedId) : undefined}

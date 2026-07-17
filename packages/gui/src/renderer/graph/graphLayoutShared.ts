@@ -4,7 +4,7 @@ import { AXIS_COLOR_VAR, axisForKind, type SemanticAxis } from "./constants";
 import type { AxisFilter } from "./graphLayoutTypes";
 import type { Edge } from "@xyflow/react";
 import { MarkerType as RFMarkerType, Position } from "@xyflow/react";
-
+import { visualForKind, type RelationMarker } from "./relationVisual";
 interface CycleWarning {
   nodes: Set<string>;
   edges: Set<string>;
@@ -98,16 +98,16 @@ interface BuildEdgeInput {
   isLoop?: boolean;
 }
 
+function rfMarkerType(marker: RelationMarker): RFMarkerType {
+  // React Flow 只原生提供 Arrow / ArrowClosed;diamond 用 ArrowClosed 兜底,
+  // InteractiveEdge 对 diamond 另画自定义 marker。
+  if (marker === "arrow") return RFMarkerType.Arrow;
+  return RFMarkerType.ArrowClosed;
+}
+
 export function buildEdge(input: BuildEdgeInput): Edge {
   const color = AXIS_COLOR_VAR[input.axis];
-  const dasharray =
-    input.axis === "assoc"
-      ? "4 3"
-      : input.axis === "evidence"
-        ? undefined
-        : input.edge.kind === "supersedes" || input.edge.kind === "refines"
-          ? "6 3"
-          : undefined;
+  const visual = visualForKind(input.edge.kind);
   void input.sourcePosition;
   void input.targetPosition;
   return {
@@ -121,14 +121,18 @@ export function buildEdge(input: BuildEdgeInput): Edge {
     // 边现在会带 targetClaimId,需要拼对后缀。
     targetHandle: input.targetClaimId ? `claim-${input.targetClaimId}-in` : undefined,
     type: "interactive",
-    data: { ...input.edge, axis: input.axis },
+    data: {
+      ...input.edge,
+      axis: input.axis,
+      visual,
+    },
     animated: false,
     style: {
       stroke: color,
-      strokeWidth: input.isLoop ? 2.5 : 1.6,
-      strokeDasharray: dasharray,
+      strokeWidth: input.isLoop ? Math.max(visual.strokeWidth, 2.5) : visual.strokeWidth,
+      strokeDasharray: visual.dasharray,
     },
-    markerEnd: { type: RFMarkerType.ArrowClosed, color },
+    markerEnd: { type: rfMarkerType(visual.marker), color },
   };
 }
 

@@ -19,5 +19,6 @@ export const guiVitestManifest = [
   "packages/gui/test/commandPalette-render.vitest.ts",
   "packages/gui/test/decision-approval.vitest.ts",
   "packages/gui/test/daemon-status.vitest.ts",
-  "packages/gui/test/daemon-log.vitest.ts"
+  "packages/gui/test/daemon-log.vitest.ts",
+  "packages/gui/test/relation-visual.vitest.ts"
 ];
