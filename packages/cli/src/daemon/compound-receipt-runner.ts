@@ -16,15 +16,15 @@ export async function runCompoundReceiptExitCommand(argv: ReadonlyArray<string>)
   const waiterId = required(argv, "--waiter-id");
   const resultToken = required(argv, "--result-token");
   if (!stateDirectory || !workspaceId || !viewId || !opId || !waiterId || !resultToken) {
-    return emit(renderCompoundCliExit({ kind: "USAGE_ERROR" }), argv.includes("--json"));
+    return emitCompoundExit(renderCompoundCliExit({ kind: "USAGE_ERROR" }), argv.includes("--json"));
   }
   try {
     const receipt = await createCompoundReceiptServiceV2({
       store: createDurableCompoundReceiptStoreV2({ directory: stateDirectory })
     }).getWaiter({ workspaceId, viewId, opId, waiterId, resultToken });
-    return emit(renderCompoundCliExit(receipt ? { kind: "RECEIPT", receipt } : { kind: "INTERNAL_ERROR" }), argv.includes("--json"));
+    return emitCompoundExit(renderCompoundCliExit(receipt ? { kind: "RECEIPT", receipt } : { kind: "INTERNAL_ERROR" }), argv.includes("--json"));
   } catch {
-    return emit(renderCompoundCliExit({ kind: "INTERNAL_ERROR" }), argv.includes("--json"));
+    return emitCompoundExit(renderCompoundCliExit({ kind: "INTERNAL_ERROR" }), argv.includes("--json"));
   }
 }
 
@@ -33,7 +33,7 @@ function required(argv: ReadonlyArray<string>, name: string): string | undefined
   return value && !value.startsWith("--") ? value : undefined;
 }
 
-function emit(output: ReturnType<typeof renderCompoundCliExit>, json: boolean): number {
+function emitCompoundExit(output: ReturnType<typeof renderCompoundCliExit>, json: boolean): number {
   if (json) console.log(JSON.stringify(output.json));
   else console.error(output.stderr);
   return output.exitCode;
