@@ -43,6 +43,10 @@ export function makeLocalControllerService(options: LocalControllerServiceOption
   });
 
   return {
+    getAgentRuntimes: () => options.agentRuntimeInventoryReader?.() ?? Promise.resolve({
+      ok: false,
+      error: { code: "agent_runtime_unavailable", hint: "Missing required agent runtime discovery service. Run `ha daemon restart`, then retry." }
+    }),
     getCatalogSnapshot: () => options.catalogSnapshotReader?.() ?? ({
       ok: false,
       error: { code: "catalog_unavailable", hint: "Catalog snapshot reader is not configured." }

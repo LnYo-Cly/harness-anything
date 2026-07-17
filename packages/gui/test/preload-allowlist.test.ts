@@ -14,6 +14,7 @@ import {
 test("preload exposes only the approved API methods", () => {
   assert.equal(HARNESS_PRELOAD_API, "harness");
   assert.deepEqual(preloadAllowlist, [
+    "getAgentRuntimes",
     "getDaemonLogs",
     "getDaemonStatus",
     "restartDaemon",
@@ -58,6 +59,7 @@ test("preload exposes only the approved API methods", () => {
 
 test("preload capabilities distinguish shipped methods from deferred placeholders", () => {
   assert.deepEqual(shippedPreloadMethods, [
+    "getAgentRuntimes",
     "getDaemonLogs",
     "getDaemonStatus",
     "restartDaemon",

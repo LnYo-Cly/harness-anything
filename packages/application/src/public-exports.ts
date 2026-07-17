@@ -272,6 +272,27 @@ export type {
   RuntimeEventLedgerServiceOptions
 } from "./runtime-event-ledger-service.ts";
 export { makeLocalControllerService } from "./local-controller-service.ts";
+export type {
+  LocalControllerProgressWriteResult,
+  LocalControllerProjectionQueries,
+  LocalControllerServiceOptions,
+  LocalControllerStatusWriteResult,
+  LocalControllerTaskTreeStatusResult,
+  LocalControllerTaskWriter
+} from "./local-controller-runtime-options.ts";
+export {
+  discoverRuntimeInstallations,
+  makeAgentRuntimeService,
+  projectAgentRuntimeInventory
+} from "./agent-runtime-service.ts";
+export type {
+  AgentRuntimeDiscoveryProbe,
+  AgentRuntimeService,
+  AgentRuntimeServiceOptions,
+  RuntimeExecutableCandidate,
+  RuntimeExecutableVerification,
+  RuntimeInstallationAssessment
+} from "./agent-runtime-service.ts";
 export {
   readPeripheralDocumentPayload,
   readAppendProgressPayload,

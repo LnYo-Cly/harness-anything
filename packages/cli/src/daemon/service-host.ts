@@ -59,6 +59,7 @@ import type {
   AuthorityRepoComponent,
   AuthorityRepoLifecycleController
 } from "./authority-lifecycle.ts";
+import { createLocalAgentRuntimeInventoryReader } from "./agent-runtime-host-discovery.ts";
 
 type HarnessDaemonRuntime = ReturnType<CliCompositionAdapterProvider["createDaemonRuntime"]>;
 type MultiRepoHarnessDaemonRuntime = ReturnType<CliCompositionAdapterProvider["createMultiRepoDaemonRuntime"]>;
@@ -422,7 +423,8 @@ function createRepoServiceBinding(
           ...(payload.cursor ? { cursor: payload.cursor } : {})
         })
       })
-    }
+    },
+    agentRuntimeInventoryReader: createLocalAgentRuntimeInventoryReader()
   });
   const cliCommandService = createCliCommandService(runtime, {
     ...commandOptions,

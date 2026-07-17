@@ -21,7 +21,7 @@ type ShippedGuiBridgeRoute = Extract<(typeof apiRouteContracts)[number], { reado
 type ShippedGuiBridgeMethod = ShippedGuiBridgeRoute["guiBridgeMethod"];
 export type TerminalGuiBridgeMethod = (typeof terminalGuiBridgeContracts)[number]["guiBridgeMethod"];
 type LocalControllerGuiMethod =
-  | "getCatalogSnapshot" | "getTasks" | "getTaskDetail" | "getTaskDocument"
+  | "getAgentRuntimes" | "getCatalogSnapshot" | "getTasks" | "getTaskDetail" | "getTaskDocument"
   | "getPeripheralDocuments" | "getPeripheralDocument" | "getRelationGraph"
   | "getTriadicProjection" | "getDecisions" | "getDecisionDetail" | "proposeDecision"
   | "acceptDecision" | "rejectDecision" | "deferDecision" | "getTaskFacts" | "getFacts"
@@ -33,6 +33,7 @@ type DaemonControlGuiServiceMethod = "requestControl";
 type TerminalGuiServiceMethod = (typeof terminalGuiBridgeContracts)[number]["serviceMethod"];
 
 interface GuiBridgeServiceProxy {
+  readonly getAgentRuntimes: () => Promise<unknown> | unknown;
   readonly getStatus: () => Promise<unknown> | unknown;
   readonly list: (payload: unknown) => Promise<unknown> | unknown;
   readonly requestControl: (payload: unknown) => Promise<unknown> | unknown;
@@ -84,6 +85,10 @@ export interface GuiBridgeHandlerImplementation {
 }
 
 export const guiBridgeHandlerImplementations = {
+  getAgentRuntimes: {
+    serviceMethod: "getAgentRuntimes",
+    invoke: ({ service }) => service.getAgentRuntimes()
+  },
   getDaemonLogs: {
     serviceMethod: "list",
     invoke: ({ service, payload }) => service.list(payload)
@@ -260,6 +265,7 @@ export async function dispatchGuiServiceMethod(
 
 function createDaemonServiceProxy(request: GuiDaemonRequester): GuiBridgeServiceProxy {
   return {
+    getAgentRuntimes: () => invokeDaemonGuiRoute(request, "getAgentRuntimes", undefined),
     list: (payload) => invokeDaemonGuiRoute(request, "getDaemonLogs", payload),
     getStatus: async () => projectDaemonStatusResult(await invokeDaemonGuiRoute(request, "getDaemonStatus", undefined)),
     requestControl: (payload) => invokeDaemonGuiRoute(request, "restartDaemon", payload),
@@ -356,4 +362,3 @@ function unwrapDaemonReceipt(receipt: JsonObject): unknown {
   }
   return { ok: true };
 }
-

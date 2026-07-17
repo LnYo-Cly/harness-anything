@@ -72,6 +72,7 @@ export const apiSchemaContracts = [
   { id: "daemon-log-page/v1", owner: "application", typeName: "DaemonLogPageV1" },
   { id: "gui.empty/v1", owner: "gui", typeName: "EmptyGuiPayload" },
   { id: "application.append-task-progress-payload/v1", owner: "application", typeName: "AppendTaskProgressPayload" },
+  { id: "application.agent-runtime-inventory-result/v1", owner: "application", typeName: "AgentRuntimeInventoryResult" },
   { id: "application.catalog-snapshot-result/v1", owner: "application", typeName: "CatalogSnapshotResult" },
   { id: "application.decision-detail-result/v1", owner: "application", typeName: "DecisionDetailResult" },
   { id: "application.decision-id-payload/v1", owner: "application", typeName: "DecisionIdPayload" },
@@ -115,6 +116,19 @@ export const apiSchemaContracts = [
 ] as const satisfies ReadonlyArray<ApiSchemaContract>;
 
 export const apiRouteContracts = [
+  {
+    id: "agent-runtimes.inventory",
+    method: "GET",
+    path: "/api/agent-runtimes",
+    inputSchemaId: "gui.empty/v1",
+    outputSchemaId: "application.agent-runtime-inventory-result/v1",
+    errorSchemaId: "application.local-controller-error/v1",
+    service: "LocalControllerService",
+    serviceMethod: "getAgentRuntimes",
+    auth: "local-session-token",
+    guiBridgeMethod: "getAgentRuntimes",
+    commandClass: "repo-read"
+  },
   {
     id: "daemon.logs.list",
     method: "GET",

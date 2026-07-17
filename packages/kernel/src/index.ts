@@ -115,6 +115,7 @@ export {
 } from "./projection/sqlite-attribution-projection.ts";
 export type { EntityAttributionProjection } from "./projection/types.ts";
 export * from "./schemas/registry.ts";
+export * from "./schemas/agent-runtime.ts";
 export * from "./schemas/common.ts";
 export type {
   LogicalArtifactV1,
