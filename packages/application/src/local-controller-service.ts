@@ -47,6 +47,12 @@ export function makeLocalControllerService(options: LocalControllerServiceOption
       ok: false,
       error: { code: "agent_runtime_unavailable", hint: "Missing required agent runtime discovery service. Run `ha daemon restart`, then retry." }
     }),
+    profiles: () => options.agentRuntimeControl?.profiles() ?? runtimeControlUnavailable(),
+    spawn: (payload) => options.agentRuntimeControl?.spawn(payload) ?? runtimeControlUnavailable(),
+    attach: (payload) => options.agentRuntimeControl?.attach(payload) ?? runtimeControlUnavailable(),
+    status: (payload) => options.agentRuntimeControl?.status(payload) ?? runtimeControlUnavailable(),
+    events: (payload) => options.agentRuntimeControl?.events(payload) ?? runtimeControlUnavailable(),
+    result: (payload) => options.agentRuntimeControl?.result(payload) ?? runtimeControlUnavailable(),
     getCatalogSnapshot: () => options.catalogSnapshotReader?.() ?? ({
       ok: false,
       error: { code: "catalog_unavailable", hint: "Catalog snapshot reader is not configured." }
@@ -213,6 +219,13 @@ export function makeLocalControllerService(options: LocalControllerServiceOption
       }
     })
   };
+}
+
+function runtimeControlUnavailable() {
+  return Promise.resolve({
+    ok: false as const,
+    error: { code: "agent_runtime_control_unavailable", hint: "Agent runtime control is unavailable. Run `ha daemon restart`." }
+  });
 }
 
 function listTaskDocuments(artifactStore: Pick<ArtifactStore, "readTaskPackage">, taskId: string): Effect.Effect<ReadonlyArray<TaskDocumentDescriptor>> {

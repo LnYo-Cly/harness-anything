@@ -293,6 +293,33 @@ export type {
   RuntimeExecutableVerification,
   RuntimeInstallationAssessment
 } from "./agent-runtime-service.ts";
+export { makeRuntimeAdapter, RuntimeAdapterUnsupportedError } from "./agent-runtime-adapter.ts";
+export { combineRuntimeLeaseObservation, runtimeLeaseObservationMatrix } from "./agent-runtime-liveness.ts";
+export type {
+  RuntimeAdapter,
+  RuntimeAdapterEvent,
+  RuntimeAdapterTransport,
+  RuntimeCapabilityMatrix,
+  RuntimeSpawnInput,
+  RuntimeSpawnResult
+} from "./agent-runtime-adapter.ts";
+export type {
+  AgentRuntimeControlFailure,
+  AgentRuntimeControlPayload,
+  AgentRuntimeControlResult,
+  AgentRuntimeControlService,
+  AgentRuntimeEventProjection,
+  AgentRuntimeEventsPayload,
+  AgentRuntimeEventsResult,
+  AgentRuntimeProfilesResult,
+  AgentRuntimeResultResult,
+  AgentRuntimeSessionIdPayload,
+  AgentRuntimeSessionResult,
+  AgentRuntimeSessionStatus,
+  AgentRuntimeSpawnPayload,
+  AgentRuntimeStatusResult,
+  RuntimeAuthenticationProfileProjection
+} from "./agent-runtime-control.ts";
 export {
   readPeripheralDocumentPayload,
   readAppendProgressPayload,

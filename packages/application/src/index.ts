@@ -521,6 +521,16 @@ export interface AgentRuntimeInventoryProjection {
   readonly sessions: ReadonlyArray<AgentRuntimeSessionProjection>;
 }
 export type AgentRuntimeInventoryResult = AgentRuntimeInventoryProjection | LocalControllerFailure;
+export type AgentRuntimeControlPayload = import("./agent-runtime-control.ts").AgentRuntimeControlPayload;
+export type AgentRuntimeControlResult = import("./agent-runtime-control.ts").AgentRuntimeControlResult;
+export type AgentRuntimeSpawnPayload = import("./agent-runtime-control.ts").AgentRuntimeSpawnPayload;
+export type AgentRuntimeSessionIdPayload = import("./agent-runtime-control.ts").AgentRuntimeSessionIdPayload;
+export type AgentRuntimeEventsPayload = import("./agent-runtime-control.ts").AgentRuntimeEventsPayload;
+export type AgentRuntimeProfilesResult = import("./agent-runtime-control.ts").AgentRuntimeProfilesResult;
+export type AgentRuntimeSessionResult = import("./agent-runtime-control.ts").AgentRuntimeSessionResult;
+export type AgentRuntimeStatusResult = import("./agent-runtime-control.ts").AgentRuntimeStatusResult;
+export type AgentRuntimeEventsResult = import("./agent-runtime-control.ts").AgentRuntimeEventsResult;
+export type AgentRuntimeResultResult = import("./agent-runtime-control.ts").AgentRuntimeResultResult;
 
 export interface ShellPanelPolicy {
   readonly displayOnly: true;
@@ -535,6 +545,12 @@ export type OpenShellResult = OpenShellSuccess | LocalControllerFailure;
 
 export interface LocalControllerService {
   readonly getAgentRuntimes: () => Promise<AgentRuntimeInventoryResult>;
+  readonly profiles: () => Promise<AgentRuntimeProfilesResult | import("./agent-runtime-control.ts").AgentRuntimeControlFailure>;
+  readonly spawn: (payload: AgentRuntimeSpawnPayload) => Promise<AgentRuntimeSessionResult | import("./agent-runtime-control.ts").AgentRuntimeControlFailure>;
+  readonly attach: (payload: AgentRuntimeSessionIdPayload) => Promise<AgentRuntimeSessionResult | import("./agent-runtime-control.ts").AgentRuntimeControlFailure>;
+  readonly status: (payload?: Partial<AgentRuntimeSessionIdPayload>) => Promise<AgentRuntimeStatusResult | import("./agent-runtime-control.ts").AgentRuntimeControlFailure>;
+  readonly events: (payload: AgentRuntimeEventsPayload) => Promise<AgentRuntimeEventsResult | import("./agent-runtime-control.ts").AgentRuntimeControlFailure>;
+  readonly result: (payload: AgentRuntimeSessionIdPayload) => Promise<AgentRuntimeResultResult | import("./agent-runtime-control.ts").AgentRuntimeControlFailure>;
   readonly getCatalogSnapshot: () => CatalogSnapshotResult;
   readonly getTasks: () => TaskListResult;
   readonly getTaskDetail: (payload: TaskIdPayload) => Promise<TaskDetailResult>;

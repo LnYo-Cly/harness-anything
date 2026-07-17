@@ -5,6 +5,7 @@ import type {
   HarnessLayoutOverrides,
   WriteError
 } from "../../kernel/src/index.ts";
+import type { AgentRuntimeControlService } from "./agent-runtime-control.ts";
 import type {
   AppendTaskProgressPayload,
   CatalogSnapshotResult,
@@ -25,6 +26,7 @@ export interface LocalControllerServiceOptions {
   readonly decisionMutationPort?: LocalControllerDecisionMutationPort;
   readonly projectionQueries?: LocalControllerProjectionQueries;
   readonly agentRuntimeInventoryReader?: () => Promise<import("./index.ts").AgentRuntimeInventoryResult>;
+  readonly agentRuntimeControl?: AgentRuntimeControlService;
 }
 export interface LocalControllerProjectionQueries {
   readonly getExecutionEvidencePage: (

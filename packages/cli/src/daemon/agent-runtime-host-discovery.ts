@@ -35,9 +35,13 @@ export function createLocalAgentRuntimeDiscoveryProbe(
 }
 
 export function createLocalAgentRuntimeInventoryReader(): () => Promise<AgentRuntimeInventoryProjection> {
+  return createLocalAgentRuntimeService().inventoryProjection;
+}
+
+export function createLocalAgentRuntimeService(options: LocalAgentRuntimeDiscoveryOptions = {}) {
   return makeAgentRuntimeService({
-    discovery: createLocalAgentRuntimeDiscoveryProbe()
-  }).inventoryProjection;
+    discovery: createLocalAgentRuntimeDiscoveryProbe(options)
+  });
 }
 
 async function findOnPath(kind: RuntimeKind, pathValue: string | undefined): Promise<RuntimeExecutableCandidate | undefined> {

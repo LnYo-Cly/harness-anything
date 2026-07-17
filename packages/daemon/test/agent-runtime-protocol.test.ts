@@ -44,3 +44,34 @@ test("agent runtime inventory route is contract-derived and returns the safe app
   assert.equal(receipt.details.data.schema, "agent-runtime-inventory-projection/v1");
   assert.equal(receipt.details.data.rebuildable, true);
 });
+
+test("agent runtime spawn route dispatches only through the daemon-owned control service", async () => {
+  const calls: unknown[] = [];
+  const controller = {
+    ...emptyLocalController(),
+    spawn: async (payload: unknown) => {
+      calls.push(payload);
+      return { ok: false as const, error: { code: "runtime_spawn_fixture", hint: "fixture rejection" } };
+    }
+  };
+  const server = makeServer({
+    services: {
+      LocalControllerService: controller,
+      TerminalSessionService: createInMemoryTerminalSessionService()
+    }
+  });
+  await server.handle({ jsonrpc: "2.0", id: "hello", method: "protocol.hello", params: { protocolVersion: 1 } });
+  const response = resultReceipt(await server.handle({
+    jsonrpc: "2.0",
+    id: "spawn",
+    method: "repo.agent-runtimes.spawn",
+    params: {
+      repo: { repoId: "canonical" },
+      payload: { kindId: "codex", prompt: "inspect", cwd: "/tmp/canonical", authenticationProfileKind: "chatgpt-account" }
+    }
+  }));
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error?.code, "runtime_spawn_fixture");
+  assert.equal(calls.length, 1);
+});
