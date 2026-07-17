@@ -398,11 +398,47 @@ test("connection-so-peercred-valid preserves the honest Linux source in the live
   }
 });
 
-test("Linux SO_PEERCRED remains typed unavailable when no Node adapter exists", async () => {
+test("connection-so-peercred-valid observes the same accepted Linux socket", {
+  skip: process.platform !== "linux" ? "Linux SO_PEERCRED fixture" : false
+}, async (t) => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "ha-linux-peer-evidence-"));
+  const socketPath = path.join(directory, "daemon.sock");
+  const adapter = createNodeSocketAcceptedConnectionEvidenceAdapter({ platform: "linux" });
+  const observed = new Promise<Awaited<ReturnType<typeof adapter.observeAcceptedConnection>>>((resolve, reject) => {
+    const server = net.createServer((socket) => {
+      void adapter.observeAcceptedConnection({
+        socket,
+        connectionId: "linux-connection",
+        connectionGeneration: connectionGeneration("linux-generation"),
+        daemonInstanceId: "linux-daemon"
+      }).then(resolve, reject).finally(() => {
+        socket.end();
+        server.close();
+      });
+    });
+    t.after(() => server.close());
+    server.listen(socketPath, () => net.createConnection(socketPath));
+  });
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+
+  const evidence = await observed;
+  assert.equal(evidence.peerCredential.available, true);
+  if (evidence.peerCredential.available) {
+    assert.equal(evidence.peerCredential.value.platform, "linux");
+    assert.equal(evidence.peerCredential.value.source, "SO_PEERCRED");
+    assert.equal(evidence.peerCredential.value.uid, process.getuid?.());
+    assert.equal(evidence.peerCredential.value.gid, process.getgid?.());
+    assert.ok(Number.isSafeInteger(evidence.peerCredential.value.pid));
+  }
+  assert.equal(evidence.channelBinding.digest.byteLength, 32);
+});
+
+test("Linux SO_PEERCRED remains typed unavailable when its OS helper is unavailable", async () => {
   const socket = new net.Socket();
   const adapter = createNodeSocketAcceptedConnectionEvidenceAdapter({
     platform: "linux",
     transportKind: "unix-socket",
+    linuxPythonPath: "/missing/python3",
     serverRandom: () => Buffer.alloc(32, 0x49)
   });
   const evidence = await adapter.observeAcceptedConnection({

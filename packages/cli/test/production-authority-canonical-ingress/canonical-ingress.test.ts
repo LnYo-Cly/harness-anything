@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { sign } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -17,6 +17,7 @@ import {
   createTaskPackagePath,
   executionDeclaration,
   moduleEntityId,
+  sha256Text,
   taskEntityId
 } from "../../../kernel/src/index.ts";
 import { defaultCliAdapterProvider } from "../../src/composition/adapter-registry.ts";
@@ -27,7 +28,94 @@ import { parseRecordArgs } from "../../src/cli/parsers/record.ts";
 import { parseNewTaskArgs } from "../../src/cli/parsers/new-task.ts";
 import { createCliCommandService } from "../../src/daemon/command-service.ts";
 import { authorityNamespaceProofBytes } from "../../src/daemon/authority-production-state.ts";
+import { createGitCanonicalPublicationInspector } from "../../src/daemon/authority-publication-evidence.ts";
 import { createProductionAuthorityLifecycle } from "../../src/daemon/production-authority-lifecycle.ts";
+import {
+  defaultDaemonUserRoot,
+  pollUntil,
+  runDaemonCommand,
+  runRawJsonMaybeFail,
+  stopDaemon
+} from "../helpers/daemon-cli.ts";
+
+test("production service route preserves progress dry-run and publishes a slugged task append", { timeout: 30_000 }, async () => {
+  const fixture = createFixture();
+  const userRoot = defaultDaemonUserRoot(fixture.root);
+  const env = {
+    HARNESS_ACTOR: "agent:codex",
+    HARNESS_DAEMON_MODE: "local",
+    HARNESS_DAEMON_USER_ROOT: userRoot,
+    HARNESS_DAEMON_IDLE_MS: "60000",
+    HARNESS_DAEMON_AUTOSTART_TIMEOUT_MS: "20000"
+  };
+  try {
+    for (const [repoId, canonicalRoot] of [
+      ["canonical", fixture.repoRoot],
+      ["auxiliary", fixture.auxiliaryRoot]
+    ] as const) {
+      const registered = runDaemonCommand(fixture.repoRoot, [
+        "daemon", "repo", "register", "--repo-id", repoId, "--canonical-root", canonicalRoot,
+        "--user-root", userRoot, "--no-link", "--json"
+      ], env);
+      assert.equal(registered.ok, true, JSON.stringify(registered));
+    }
+    try {
+      runDaemonCommand(fixture.repoRoot, [
+        "daemon", "start", "--service", "--authority-manifest", fixture.manifestPath, "--json"
+      ], env);
+    } catch {
+      // Production authority startup can outlive the command's fixed six-second reachability wait.
+      // Keep observing the same detached service instead of replacing it with an in-process fixture.
+    }
+    const status = await pollUntil(
+      () => runDaemonCommand(fixture.repoRoot, ["daemon", "status", "--user-root", userRoot, "--json"], env),
+      (status) => status.reachable === true,
+      (status, error) => JSON.stringify({ status, error: error instanceof Error ? error.message : String(error ?? "") }),
+      { timeoutMs: 20_000 }
+    );
+    assert.equal(status.repoCount, 2, JSON.stringify(status));
+
+    const dryRunHead = git(fixture.authoredRoot, "rev-parse", "HEAD");
+    const dryRun = runRawJsonMaybeFail(fixture.repoRoot, [
+      "task", "progress", "append", "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG4",
+      "--text", "service-route dry-run probe", "--dry-run"
+    ], env);
+    assert.equal(dryRun.status, 0, JSON.stringify(dryRun.receipt));
+    assert.equal(dryRun.receipt.ok, true, JSON.stringify(dryRun.receipt));
+    const dryRunHeadAfter = git(fixture.authoredRoot, "rev-parse", "HEAD");
+
+    const append = runRawJsonMaybeFail(fixture.repoRoot, [
+      "task", "progress", "append", "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG8",
+      "--text", "service-route slugged append"
+    ], env);
+    assert.equal(append.status, 0, JSON.stringify(append.receipt));
+    assert.equal(append.receipt.ok, true, JSON.stringify(append.receipt));
+    assert.match(
+      readFileSync(path.join(fixture.authoredRoot, "tasks/task_01KXQ4WTA7Q4XJ5GDDRS1YXNG8-production-route/progress.md"), "utf8"),
+      /service-route slugged append/u
+    );
+    const operation = latestAuthorityOperation(fixture.serviceRoot);
+    assert.equal(operation.state, "COMMITTED", JSON.stringify(operation));
+    assert.equal(operation.receipt?.tag, "COMMITTED", JSON.stringify(operation));
+    assert.equal(typeof operation.opId, "string", JSON.stringify(operation));
+    const publication = await createGitCanonicalPublicationInspector(fixture.authoredRoot)
+      .findPublicationForOperation(operation.opId!);
+    assert.equal(publication.commitSha, operation.commitSha);
+    assert.equal(publication.previousCommit, dryRunHead);
+    assert.equal(publication.parentCommits.length, 2);
+    assert.deepEqual(publication.physicalChanges.map((change) => change.path).sort(), [
+      `attribution-events/${sha256Text(operation.opId!)}.jsonl`,
+      "tasks/task_01KXQ4WTA7Q4XJ5GDDRS1YXNG8-production-route/progress.md"
+    ].sort());
+    assert.equal(publication.pipelineGeneratedPaths.length, 1);
+    assert.equal(publication.pipelineGeneratedPaths[0], publication.physicalChanges.find((change) => change.path.startsWith("attribution-events/"))?.path);
+    git(fixture.authoredRoot, "diff", "--quiet", publication.commitSha, publication.parentCommits[1]!);
+    assert.equal(dryRunHeadAfter, dryRunHead, "typed service dry-run must not create a commit");
+  } finally {
+    await stopDaemon(fixture.repoRoot, userRoot).catch(() => undefined);
+    if (process.env.KEEP_AUTHORITY_SERVICE_FIXTURE !== "1") rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
 
 test("production canonical ingress accepts and journals one write for every canonical kind", async () => {
   const fixture = createFixture();
@@ -71,7 +159,7 @@ test("production canonical ingress accepts and journals one write for every cano
       readonly authoredMarker: RegExp;
     }> = [{
       kind: "task",
-      action: { kind: "progress-append", taskId: "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG0", text: "nine-kind task ingress\n" },
+      action: { kind: "progress-append", taskId: "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG0", text: "nine-kind task ingress\n", dryRun: false },
       canonicalEntityId: taskEntityId("task_01KXQ4WTA7Q4XJ5GDDRS1YXNG0"),
       authoredPath: "tasks/task_01KXQ4WTA7Q4XJ5GDDRS1YXNG0/progress.md",
       authoredMarker: /nine-kind task ingress/u
@@ -305,7 +393,7 @@ test("production canonical ingress accepts and journals one write for every cano
       command: {
         rootDir: fixture.repoRoot,
         json: true,
-        action: { kind: "progress-append", taskId: "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG0", text: "entity mismatch evidence" }
+        action: { kind: "progress-append", taskId: "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG0", text: "entity mismatch evidence", dryRun: false }
       },
       attribution: daemonActorAttribution(actor, { kind: "agent", id: "codex" }),
       currentSession: { runtime: "codex", sessionId: "session-mismatch", source: "manual", detectedAt: "2026-07-17T00:00:00.000Z" },
@@ -319,9 +407,11 @@ test("production canonical ingress accepts and journals one write for every cano
 });
 
 function createFixture() {
-  const root = mkdtempSync(path.join(tmpdir(), "ha-production-canonical-ingress-"));
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ha-production-canonical-ingress-")));
   const repoRoot = path.join(root, "repo");
   const authoredRoot = path.join(repoRoot, "harness");
+  const auxiliaryRoot = path.join(root, "auxiliary");
+  const auxiliaryAuthoredRoot = path.join(auxiliaryRoot, "harness");
   const serviceRoot = path.join(root, "service-state");
   const keyStateDirectory = path.join(serviceRoot, "keys/canonical");
   mkdirSync(path.join(authoredRoot, "tasks/task_01KXQ4WTA7Q4XJ5GDDRS1YXNG0"), { recursive: true });
@@ -331,6 +421,8 @@ function createFixture() {
   writeFileSync(path.join(authoredRoot, "tasks/task_01KXQ4WTA7Q4XJ5GDDRS1YXNG0/closeout.md"), "# Closeout\n\nProduction fixture qualified.\n");
   mkdirSync(path.join(authoredRoot, "tasks/task_01KXQ4WTA7Q4XJ5GDDRS1YXNG4"), { recursive: true });
   writeFileSync(path.join(authoredRoot, "tasks/task_01KXQ4WTA7Q4XJ5GDDRS1YXNG4/INDEX.md"), taskIndexBody("task_01KXQ4WTA7Q4XJ5GDDRS1YXNG4"));
+  mkdirSync(path.join(authoredRoot, "tasks/task_01KXQ4WTA7Q4XJ5GDDRS1YXNG8-production-route"), { recursive: true });
+  writeFileSync(path.join(authoredRoot, "tasks/task_01KXQ4WTA7Q4XJ5GDDRS1YXNG8-production-route/INDEX.md"), taskIndexBody("task_01KXQ4WTA7Q4XJ5GDDRS1YXNG8"));
   const actor = {
     personId: "person_alice",
     displayName: "Alice",
@@ -425,7 +517,36 @@ function createFixture() {
   git(authoredRoot, "init", "-q");
   git(authoredRoot, "add", ".");
   git(authoredRoot, "commit", "-q", "-m", "seed canonical ingress fixture");
-  return { root, repoRoot, authoredRoot, serviceRoot, manifestPath, actor, transcriptPath, publicHead };
+  mkdirSync(auxiliaryAuthoredRoot, { recursive: true });
+  writeFileSync(path.join(auxiliaryAuthoredRoot, "harness.yaml"), "schema: harness-anything/v1\nproject: auxiliary-ingress\n");
+  git(auxiliaryAuthoredRoot, "init", "-q");
+  git(auxiliaryAuthoredRoot, "add", ".");
+  git(auxiliaryAuthoredRoot, "commit", "-q", "-m", "seed auxiliary ingress fixture");
+  return { root, repoRoot, authoredRoot, auxiliaryRoot, serviceRoot, manifestPath, actor, transcriptPath, publicHead };
+}
+
+function latestAuthorityOperation(serviceRoot: string): {
+  readonly state?: string;
+  readonly opId?: string;
+  readonly commitSha?: string;
+  readonly receipt?: { readonly tag?: string };
+} {
+  const operationPath = path.join(
+    serviceRoot,
+    "authority",
+    Buffer.from("canonical", "utf8").toString("base64url"),
+    "operations.jsonl"
+  );
+  const rows = readFileSync(operationPath, "utf8").trim().split("\n")
+    .map((line) => JSON.parse(line) as { readonly table?: string; readonly value?: Record<string, unknown> })
+    .filter((row) => row.table === "operation" && row.value);
+  assert.ok(rows.length > 0, "service route must persist an authority operation");
+  return rows.at(-1)!.value as {
+    readonly state?: string;
+    readonly opId?: string;
+    readonly commitSha?: string;
+    readonly receipt?: { readonly tag?: string };
+  };
 }
 
 function taskIndexBody(taskId: string): string {
