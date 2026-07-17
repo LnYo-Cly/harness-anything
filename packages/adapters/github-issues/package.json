@@ -1,6 +1,6 @@
 {
   "name": "@harness-anything/adapter-github-issues",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Read-only GitHub Issues snapshot and repository list adapter.",
   "private": true,
   "license": "AGPL-3.0-or-later",

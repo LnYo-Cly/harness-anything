@@ -94,7 +94,7 @@ async function withFixtureRepo(fn) {
 function writeValidRuntimeReleaseFixture(root, options = {}) {
   const packageJson = {
     name: "harness-anything",
-    version: "0.0.0",
+    version: "0.1.0",
     private: true,
     engines: { node: ">=24" },
     scripts: {
@@ -121,7 +121,7 @@ function writeValidRuntimeReleaseFixture(root, options = {}) {
   ]) {
     const packageJson = packagePath === "packages/cli/package.json"
       ? { name: "@harness-anything/cli", version: "0.1.0", publishConfig: { access: "public" } }
-      : { name: packagePath, version: "0.0.0", private: true };
+      : { name: packagePath, version: "0.1.0", private: true };
     writeJson(root, packagePath, packageJson);
   }
 

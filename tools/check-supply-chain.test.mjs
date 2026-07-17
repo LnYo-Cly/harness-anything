@@ -229,7 +229,7 @@ async function withFixtureRepo(fn) {
 function writeValidSupplyChainFixture(root, options = {}) {
   const packageJson = {
     name: "harness-anything",
-    version: "0.0.0",
+    version: "0.1.0",
     private: true,
     license: "AGPL-3.0-or-later",
     scripts: {
@@ -252,7 +252,7 @@ function writeValidSupplyChainFixture(root, options = {}) {
     "packages/adapters/github-issues/package.json",
     "packages/adapters/linear/package.json"
   ]) {
-    workspacePackages[packagePath] = { name: packagePath, version: "0.0.0", private: true, license: "AGPL-3.0-or-later" };
+    workspacePackages[packagePath] = { name: packagePath, version: "0.1.0", private: true, license: "AGPL-3.0-or-later" };
   }
   workspacePackages["packages/cli/package.json"] = {
     ...workspacePackages["packages/cli/package.json"],
@@ -272,13 +272,13 @@ function writeValidSupplyChainFixture(root, options = {}) {
 
   const lock = {
     name: "harness-anything",
-    version: "0.0.0",
+    version: "0.1.0",
     lockfileVersion: 3,
     requires: true,
     packages: {
       "": {
         name: "harness-anything",
-        version: "0.0.0",
+        version: "0.1.0",
         license: "AGPL-3.0-or-later"
       },
       "node_modules/electron": {
@@ -392,7 +392,7 @@ function validSbom() {
       },
       {
         name: "gui",
-        purl: "pkg:npm/%40harness-anything/gui@0.0.0",
+        purl: "pkg:npm/%40harness-anything/gui@0.1.0",
         licenses: [{ license: { id: "AGPL-3.0-or-later" } }]
       }
     ]
