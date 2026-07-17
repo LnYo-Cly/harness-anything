@@ -1,9 +1,19 @@
 import { t } from "../i18n/index.tsx";
+import {
+  AXIS_COLOR_VAR,
+  KIND_LABEL,
+} from "../graph/constants";
+import {
+  legendSampleKinds,
+  visualForKind,
+} from "../graph/relationVisual";
+
 /**
  * GraphView 顶部图例 + 状态栏(dec_01KXA7811SVVT8P66HNDFZQ7DF)。
  *
  * 从 GraphView.tsx 抽出来,让 GraphView 主文件回到 600 行内的复杂度门。
  * 纯展示 + 把交互提示话术随焦点状态切换。
+ * 关系类型视觉词表样例行:色(轴)+线型,与 relationVisual 一致。
  */
 
 interface Props {
@@ -68,7 +78,34 @@ export function GraphLegend({
           </span>
         )}
       </div>
-      {/* Row B: muted single-line interaction hint */}
+      {/* Row B: relation visual vocabulary samples (color + dash) */}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-text-faint">{t("views.graphLegend.relations")}</span>
+        {legendSampleKinds().map(({ kind, axis }) => {
+          const visual = visualForKind(kind);
+          const color = AXIS_COLOR_VAR[axis];
+          return (
+            <span key={kind} className="inline-flex items-center gap-1" title={kind}>
+              <svg width="22" height="8" aria-hidden className="shrink-0">
+                <line
+                  x1="1"
+                  y1="4"
+                  x2="21"
+                  y2="4"
+                  stroke={color}
+                  strokeWidth={visual.strokeWidth}
+                  strokeDasharray={visual.dasharray}
+                  strokeLinecap="round"
+                />
+              </svg>
+              <span className="font-mono text-[10px] text-text-muted">
+                {KIND_LABEL[kind] ?? kind}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+      {/* Row C: muted single-line interaction hint */}
       <div className="min-w-0">
         <span className="block truncate text-text-faint" title={hint}>
           {hint}
