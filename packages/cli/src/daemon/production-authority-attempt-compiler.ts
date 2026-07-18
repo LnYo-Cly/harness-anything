@@ -49,6 +49,7 @@ import { defaultCliAdapterProvider } from "../composition/adapter-registry.ts";
 import { buildAuthorityPresetTaskCreateWrites, shouldUsePresetAwareNewTask } from "../commands/preset-task.ts";
 import { readProjectHarnessSettings, shouldUseSettingsPresetAwareNewTask } from "../commands/settings.ts";
 import { provenanceSessionAttemptIntent } from "./production-authority-provenance-session-intent.ts";
+import { taskClaimAttemptIntent } from "./production-authority-task-claim-intent.ts";
 
 type KeyMaterial = ReturnType<typeof openAuthorityProductionKeyMaterial>;
 
@@ -212,6 +213,13 @@ export function createProductionCanonicalAttemptCompiler(input: {
       currentSession,
       operation.entityId,
       decisionTransitionAttemptIntent(command, operation, input.authoredRoot)
+    ),
+    compileTaskClaim: async ({ command, attribution, currentSession, operation }) => compileIntent(
+      command,
+      attribution,
+      currentSession,
+      operation.entityId,
+      taskClaimAttemptIntent(command, attribution, currentSession, operation)
     )
   };
 }
@@ -445,19 +453,6 @@ async function canonicalAttemptIntent(
     };
     const entity = ref("session", `session/${action.sessionId}`);
     return canonicalIntent("session.export", encodeSessionExecutionReviewCommandPayloadV2(payload), [{ entity, action: "export" }], [entity], [`sessions/${action.sessionId}.md`, `objects/sha256/${digest.slice(0, 2)}/${digest.slice(2)}`], `entity/session/${action.sessionId}`);
-  }
-  if (action.kind === "task-claim" && action.executionId) {
-    const executionId = action.executionId;
-    const payload: SessionExecutionReviewCommandPayloadV2 = {
-      schema: "execution.claim/v1", taskId: action.taskId,
-      execution: {
-        schema: "execution/v2", execution_id: executionId, task_ref: `task/${action.taskId}`, state: "active",
-        primary_actor: executionActor, claimed_at: currentSession.detectedAt, submitted_at: null, closed_at: null,
-        session_bindings: [], outputs: [], submission: null
-      }
-    };
-    const entity = ref("execution", `execution/${action.taskId}/${executionId}`);
-    return canonicalIntent("execution.claim", encodeSessionExecutionReviewCommandPayloadV2(payload), [{ entity, action: "claim" }], [entity], [`tasks/${action.taskId}/executions/${executionId}.md`], `execution/${executionId}`);
   }
   if (action.kind === "task-review-execution" && !action.consentId && action.verdict !== "approved") {
     const reviewId = canonicalEntityId.replace(/^(?:entity\/)?review\//u, "");

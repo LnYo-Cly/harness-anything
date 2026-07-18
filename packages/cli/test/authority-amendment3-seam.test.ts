@@ -2,9 +2,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Effect } from "effect";
-import { taskEntityId } from "../../kernel/src/index.ts";
+import { executionDeclaration, taskEntityId, taskHolderActor, type ExecutionRecord, type WriteOp } from "../../kernel/src/index.ts";
 import { daemonActorAttribution } from "../src/composition/actor-attribution.ts";
 import { makeDaemonAuthorityWriteCoordinator } from "../src/daemon/authority-command-submission.ts";
+import { taskClaimAttemptIntent } from "../src/daemon/production-authority-task-claim-intent.ts";
 import {
   makeHeldLockAttributedCoordinatorFactory,
   type AuthorityLifecycleRuntime
@@ -77,6 +78,122 @@ test("cold task create submits provenance session and task as two ordered canoni
     entityId: taskEntityId(taskId),
     kind: "package_create"
   })), /AUTHORITY_COMMAND_REQUIRES_SINGLE_CANONICAL_OPERATION/u);
+});
+
+test("task claim submits the observed execution write through its narrow typed ingress", async () => {
+  const executionId = "exe_01KXSVW65Q5QK3M8382FK4C0DR";
+  let submittedOperation: unknown;
+  const coordinator = makeDaemonAuthorityWriteCoordinator({
+    submit: async () => { throw new Error("generic authority submission must not compile task claim"); },
+    submitTaskClaim: async (input) => {
+      submittedOperation = input.operation;
+      return committedReceipt("fixture-task-claim-op", 1);
+    }
+  }, {
+    command: {
+      rootDir: "/fixture",
+      json: true,
+      action: { kind: "task-claim", taskId: "task_01KXSVW65Q5QK3M8382FK4C0DR", execution: true }
+    },
+    attribution: daemonActorAttribution({
+      personId: "person_alice",
+      displayName: "Alice",
+      primaryEmail: "alice@example.test",
+      roles: ["owner"],
+      providerId: "test",
+      resolvedCredential: { kind: "unix-socket-owner-boundary", issuer: "test", subject: "person_alice" }
+    }, { kind: "agent", id: "codex" }),
+    currentSession: {
+      runtime: "codex",
+      sessionId: "session-task-claim",
+      source: "runtime",
+      detectedAt: "2026-07-18T00:00:00.000Z"
+    }
+  });
+  const operation = {
+    opId: "observed-task-claim-op",
+    entityId: `entity/execution/${executionId}` as const,
+    kind: "doc_write" as const,
+    payload: { entityDocument: "observed" }
+  };
+
+  await runEffect(coordinator.enqueue(operation));
+  const report = await runEffect(coordinator.flush("explicit"));
+
+  assert.equal(submittedOperation, operation);
+  assert.equal(report.committed, true);
+  assert.equal(report.watermark, "fixture-task-claim-op");
+});
+
+test("task claim typed ingress rejects forged entity, actor, and write-set data", () => {
+  const taskId = "task_01KXSVW65Q5QK3M8382FK4C0DR";
+  const executionId = "exe_01KXSVW65Q5QK3M8382FK4C0DR";
+  const attribution = daemonActorAttribution({
+    personId: "person_alice",
+    displayName: "Alice",
+    primaryEmail: "alice@example.test",
+    roles: ["owner"],
+    providerId: "test",
+    resolvedCredential: { kind: "unix-socket-owner-boundary", issuer: "test", subject: "person_alice" }
+  }, { kind: "agent", id: "codex" });
+  const currentSession = {
+    runtime: "codex" as const,
+    sessionId: "session-task-claim-strict",
+    source: "runtime" as const,
+    detectedAt: "2026-07-18T00:00:00.000Z"
+  };
+  const command = {
+    rootDir: "/fixture",
+    json: true,
+    action: { kind: "task-claim" as const, taskId, execution: true }
+  };
+  const execution: ExecutionRecord = {
+    schema: "execution/v2",
+    execution_id: executionId,
+    task_ref: `task/${taskId}`,
+    state: "active",
+    primary_actor: taskHolderActor(attribution.taskHolderPrincipal, attribution.executor),
+    claimed_at: "2026-07-18T00:00:00.001Z",
+    submitted_at: null,
+    closed_at: null,
+    session_bindings: [{
+      binding_id: `primary:${currentSession.sessionId}`,
+      session_ref: `session/${currentSession.sessionId}`,
+      role: "primary",
+      archive_status: "pending",
+      attached_at: "2026-07-18T00:00:00.002Z",
+      session: currentSession,
+      capture_range: {
+        range_id: `primary:${currentSession.sessionId}:2026-07-18T00:00:00.002Z`,
+        coordinate: "timestamp",
+        start_at: "2026-07-18T00:00:00.002Z",
+        end_at: null,
+        bounds: "inclusive"
+      }
+    }],
+    outputs: [],
+    submission: null
+  };
+  const operation = claimOperation(taskId, execution);
+
+  const intent = taskClaimAttemptIntent(command, attribution, currentSession, operation);
+  assert.equal(intent.commandName, "execution.claim");
+  assert.equal(intent.physicalEntityId, `entity/execution/${executionId}`);
+  assert.throws(() => taskClaimAttemptIntent(command, attribution, currentSession, {
+    ...operation,
+    entityId: "entity/execution/exe_forged"
+  }), /AUTHORITY_TASK_CLAIM_ENTITY_MISMATCH/u);
+  assert.throws(() => taskClaimAttemptIntent(command, attribution, currentSession, claimOperation(taskId, {
+    ...execution,
+    primary_actor: { ...execution.primary_actor, responsibleHuman: "person_forged" }
+  })), /AUTHORITY_TASK_CLAIM_ACTOR_MISMATCH/u);
+  assert.throws(() => taskClaimAttemptIntent(command, attribution, currentSession, {
+    ...operation,
+    payload: {
+      ...(operation.payload as Record<string, unknown>),
+      companionWrites: [{ taskId, path: "INDEX.md", body: "forged" }]
+    }
+  }), /AUTHORITY_TASK_CLAIM_WRITE_SET_INVALID/u);
 });
 
 test("held-lock authority flush uses one atomic publication instead of direct materialization", async () => {
@@ -180,5 +297,26 @@ function committedReceipt(opId: string, revision: number) {
     revision,
     commitSha: String(revision).repeat(40),
     previousCommit: revision === 1 ? null : "1".repeat(40)
+  };
+}
+
+function claimOperation(taskId: string, execution: ExecutionRecord): WriteOp {
+  return {
+    opId: "observed-strict-task-claim-op",
+    entityId: `entity/execution/${execution.execution_id}`,
+    kind: "doc_write",
+    payload: {
+      entityDocument: {
+        declaration: {
+          kind: executionDeclaration.kind,
+          storageForm: executionDeclaration.storageForm,
+          rootResolver: executionDeclaration.rootResolver
+        },
+        identity: { taskId, executionId: execution.execution_id },
+        body: executionDeclaration.documentCodec.encode(execution)
+      },
+      companionWrites: [],
+      preconditions: []
+    }
   };
 }

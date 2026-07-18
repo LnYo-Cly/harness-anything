@@ -41,6 +41,7 @@ import {
   latestAuthorityOperation,
   writeColdCodexSessionLog
 } from "./fixture.ts";
+import { verifyD22ClaimChain } from "./d22-claim-chain.ts";
 
 test("production service route preserves progress dry-run and publishes canonical task writes", { timeout: 120_000 }, async () => {
   const fixture = createFixture();
@@ -118,6 +119,18 @@ test("production service route preserves progress dry-run and publishes canonica
     assert.match(readFileSync(path.join(
       fixture.authoredRoot, `decisions/decision-${decisionId}/decision.md`
     ), "utf8"), /^state: active$/mu);
+
+    const initialLeaseSessionId = "service-initial-task-leases";
+    writeColdCodexSessionLog(fixture.repoRoot, initialLeaseSessionId);
+    const initialLeaseEnv = { ...env, CODEX_THREAD_ID: initialLeaseSessionId };
+    const initialTaskClaim = runRawJsonMaybeFail(fixture.repoRoot, [
+      "task", "claim", "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG4"
+    ], initialLeaseEnv);
+    assert.equal(initialTaskClaim.status, 0, JSON.stringify(initialTaskClaim.receipt));
+    const initialSluggedClaim = runRawJsonMaybeFail(fixture.repoRoot, [
+      "task", "claim", "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG8", "--execution-id", "exe_01KXQ4WTA7Q4XJ5GDDRS1YXNG7"
+    ], initialLeaseEnv);
+    assert.equal(initialSluggedClaim.status, 0, JSON.stringify(initialSluggedClaim.receipt));
 
     const dryRunHead = git(fixture.authoredRoot, "rev-parse", "HEAD");
     const dryRun = runRawJsonMaybeFail(fixture.repoRoot, [
@@ -261,6 +274,13 @@ test("production service route preserves progress dry-run and publishes canonica
     assert.equal(existsSync(path.join(fixture.authoredRoot, `sessions/${bareSessionId}.md`)), true);
     assert.equal(authorityOperationRecords(fixture.serviceRoot).length, beforeColdBare + 2, "cold bare create must commit session.export then task.create");
 
+    await verifyD22ClaimChain({
+      fixture,
+      env,
+      taskId: String(createDetails.taskId),
+      packagePath: createPackagePath
+    });
+
     const beforeHotBare = authorityOperationRecords(fixture.serviceRoot).length;
     const hotCreated = runRawJsonMaybeFail(fixture.repoRoot, [
       "task", "create", "--title", "Service route hot-session task create"
@@ -318,7 +338,7 @@ test("production service route preserves progress dry-run and publishes canonica
   }
 });
 
-test("production canonical ingress accepts and journals one write for every canonical kind", async () => {
+test("production generic canonical ingress accepts and journals one write for every directly compiled kind", async () => {
   const fixture = createFixture();
   const daemon = defaultCliAdapterProvider().createMultiRepoDaemonRuntime({
     repos: [{ repoId: "canonical", rootDir: fixture.repoRoot }],
@@ -406,12 +426,6 @@ test("production canonical ingress accepts and journals one write for every cano
       authoredPath: "sessions/session-ingress.md",
       authoredMarker: /session-ingress/u
     }, {
-      kind: "execution",
-      action: { kind: "task-claim", taskId: "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG4", execution: true, executionId: "exe_01KXQ4WTA7Q4XJ5GDDRS1YXNG1" },
-      canonicalEntityId: "execution/exe_01KXQ4WTA7Q4XJ5GDDRS1YXNG1" as EntityId,
-      authoredPath: "tasks/task_01KXQ4WTA7Q4XJ5GDDRS1YXNG4/executions/exe_01KXQ4WTA7Q4XJ5GDDRS1YXNG1.md",
-      authoredMarker: /exe_01KXQ4WTA7Q4XJ5GDDRS1YXNG1/u
-    }, {
       kind: "review",
       action: {
         kind: "task-review-execution", taskId: "task_01KXQ4WTA7Q4XJ5GDDRS1YXNG0", executionId: "exe_01KXQ4WTA7Q4XJ5GDDRS1YXNG5",
@@ -484,7 +498,7 @@ test("production canonical ingress accepts and journals one write for every cano
       authoredMarker: /status: done/u
     }];
     const coveredKinds = new Set(cases.map((fixtureCase) => fixtureCase.kind));
-    assert.equal(["consent", "decision", "execution", "fact", "module", "relation", "review", "session", "task"]
+    assert.equal(["consent", "decision", "fact", "module", "relation", "review", "session", "task"]
       .every((kind) => coveredKinds.has(kind)), true);
     for (const [index, fixtureCase] of cases.entries()) {
       const sessionId = `real-cli-session-${index + 1}`;
