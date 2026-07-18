@@ -112,6 +112,7 @@ export interface FlushReport {
 export interface RecoveryReport {
   readonly replayedOps: number;
   readonly recoveredWatermark?: string;
+  readonly deferredOps?: number;
 }
 
 export interface WriteCoordinator {

@@ -5,6 +5,7 @@ import type { WriteError } from "../domain/index.ts";
 import type { FlushReport, WriteOp } from "../ports/write-coordinator.ts";
 import type { WriteAttribution } from "../schemas/actor-attribution.ts";
 import type { GitCommitAuthor, OperationalActor } from "./write-journal-types.ts";
+import { singleWriteIntegrityDomain, type WriteIntegrityDomain } from "./write-integrity-domain.ts";
 import type { makeJournaledWriteCoordinator } from "./write-journal-coordinator.ts";
 
 export type DaemonWritePriority = "interactive" | "normal" | "background" | "maintenance";
@@ -51,7 +52,7 @@ type InteractiveQueueItem = InteractiveWriteAttribution & {
   readonly ops: ReadonlyArray<WriteOp>;
   readonly commitAuthor?: GitCommitAuthor;
   readonly sessionId?: string;
-  readonly integrityDomain: "authority" | "legacy";
+  readonly integrityDomain: WriteIntegrityDomain;
   readonly enqueuedAt: number;
   started: boolean;
   timeout?: ReturnType<typeof setTimeout>;
@@ -106,7 +107,7 @@ export class DaemonWriteQueue {
     coordinatorFor: (batch: InteractiveCoordinatorBatch) => JournaledWriteCoordinator
   ): Promise<InteractiveWriteReceipt> {
     if (this.closed) return Promise.reject({ _tag: "JournalUnavailable", cause: new Error("daemon write queue is closed") } satisfies WriteError);
-    const integrityDomain = requestIntegrityDomain(request.ops);
+    const integrityDomain = singleWriteIntegrityDomain(request.ops);
     if (!integrityDomain) {
       return Promise.reject({
         _tag: "WriteRejected",
@@ -349,12 +350,6 @@ function sameAttribution(left: InteractiveQueueItem, right: InteractiveQueueItem
     && authorKey(left.commitAuthor) === authorKey(right.commitAuthor)
     && sessionKey(left.sessionId) === sessionKey(right.sessionId)
     && left.integrityDomain === right.integrityDomain;
-}
-
-function requestIntegrityDomain(ops: ReadonlyArray<WriteOp>): "authority" | "legacy" | undefined {
-  const authorityCount = ops.filter((op) => op.authorityIntegrity !== undefined).length;
-  if (authorityCount === 0) return "legacy";
-  return authorityCount === ops.length ? "authority" : undefined;
 }
 
 function attributionKey(input: InteractiveWriteAttribution): string {

@@ -49,6 +49,8 @@ import {
 } from "./write-journal-operations.ts";
 import { reconcileDurableFlush, shouldWaitForForeignCommitter } from "./write-journal-receipt.ts";
 import { semanticCommitMessage } from "./write-journal-authority-trailer.ts";
+import { recoverJournalIntegrityDomains } from "./write-journal-domain-recovery.ts";
+import { recordsForWriteIntegrityDomain, singleWriteIntegrityDomain } from "./write-integrity-domain.ts";
 import { memoizePublicationVcs } from "./write-journal-publication-vcs.ts";
 import type { ApplyMarkerRecord, DeleteAuditRecord, GitCommitAuthor, JournaledWriteCoordinatorOptions, JournalRecoveryOptions, LockConflictRetryOptions, LockTakeoverRecord, OperationalActor, OperationalJournaledWriteCoordinatorOptions, ReadableJournalRecord, WriteWatermark } from "./write-journal-types.ts";
 export type {
@@ -106,21 +108,37 @@ function makeJournaledWriteCoordinatorInternal(
   const flushOnce = (reason: FlushReason): Effect.Effect<FlushReport, WriteError> => Effect.try({
     try: () => withRepoLocks(rootDir, runtimeContext, journalPath, operationalActor, lockTtlMs, pending.map((op) => op.entityId), () => {
       const state = readDurableState(journalPath, watermarkPath, rootDir);
+      const requestedDomain = singleWriteIntegrityDomain(pending);
       pending.splice(0, pending.length);
-      const pendingRecords = uniquePendingRecords(state.records, state.applied);
+      const pendingRecords = recordsForWriteIntegrityDomain(
+        uniquePendingRecords(state.records, state.applied),
+        requestedDomain
+      );
       return flushRecords(reason, rootDir, runtimeContext, journalPath, watermarkPath, state.watermark, pendingRecords, state.fileApplied, sessionId, commitAuthor, versionControlSystem, attributionEventStore);
     }, { heldGlobalLock }),
     catch: (cause): WriteError => toJournalError(cause)
   });
   const recoverOnce: Effect.Effect<RecoveryReport, WriteError> = Effect.try({
     try: (): RecoveryReport => withRepoLocks(rootDir, runtimeContext, journalPath, operationalActor, lockTtlMs, [], () => {
-      const state = readDurableState(journalPath, watermarkPath, rootDir);
-      const pendingRecords = uniquePendingRecords(state.records, state.applied);
-      const report = flushRecords("recovery", rootDir, runtimeContext, journalPath, watermarkPath, state.watermark, pendingRecords, state.fileApplied, sessionId, commitAuthor, versionControlSystem, attributionEventStore);
-      return {
-        replayedOps: report.opCount,
-        recoveredWatermark: report.watermark
-      };
+      return recoverJournalIntegrityDomains({
+        rootDir,
+        journalPath,
+        watermarkPath,
+        flushDomain: (state, records) => flushRecords(
+          "recovery",
+          rootDir,
+          runtimeContext,
+          journalPath,
+          watermarkPath,
+          state.watermark,
+          records,
+          state.fileApplied,
+          sessionId,
+          commitAuthor,
+          versionControlSystem,
+          attributionEventStore
+        )
+      });
     }, { heldGlobalLock }),
     catch: (cause): WriteError => toJournalError(cause)
   });
