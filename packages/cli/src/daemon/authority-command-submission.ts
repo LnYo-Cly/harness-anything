@@ -44,6 +44,12 @@ export interface DaemonAuthorityAttemptCompilerV2 {
     readonly currentSession: CurrentSessionRef;
     readonly operation: WriteOp;
   }) => Promise<AuthorizedOperationAttemptV2>;
+  readonly compileTaskClaim?: (input: {
+    readonly command: ParsedCommand;
+    readonly attribution: CliActorAttribution;
+    readonly currentSession: CurrentSessionRef;
+    readonly operation: WriteOp;
+  }) => Promise<AuthorizedOperationAttemptV2>;
 }
 
 export interface DaemonAuthorityCommandSubmissionV2 {
@@ -60,6 +66,12 @@ export interface DaemonAuthorityCommandSubmissionV2 {
     readonly operation: WriteOp;
   }) => Promise<AuthorityOperationReceipt>;
   readonly submitDecisionTransition?: (input: {
+    readonly command: ParsedCommand;
+    readonly attribution: CliActorAttribution;
+    readonly currentSession: CurrentSessionRef;
+    readonly operation: WriteOp;
+  }) => Promise<AuthorityOperationReceipt>;
+  readonly submitTaskClaim?: (input: {
     readonly command: ParsedCommand;
     readonly attribution: CliActorAttribution;
     readonly currentSession: CurrentSessionRef;
@@ -89,6 +101,10 @@ export function createDaemonAuthorityCommandSubmissionV2(options: {
     ...(options.attemptCompiler.compileDecisionTransition ? {
       submitDecisionTransition: async (input: Parameters<NonNullable<DaemonAuthorityAttemptCompilerV2["compileDecisionTransition"]>>[0]) =>
         submitAttempt(await options.attemptCompiler.compileDecisionTransition!(input))
+    } : {}),
+    ...(options.attemptCompiler.compileTaskClaim ? {
+      submitTaskClaim: async (input: Parameters<NonNullable<DaemonAuthorityAttemptCompilerV2["compileTaskClaim"]>>[0]) =>
+        submitAttempt(await options.attemptCompiler.compileTaskClaim!(input))
     } : {})
   };
 }
@@ -174,10 +190,16 @@ export function makeDaemonAuthorityWriteCoordinator(
         if (decisionTransition && !submission.submitDecisionTransition) {
           throw authorityWriteRejected("AUTHORITY_DECISION_TRANSITION_SUBMISSION_UNAVAILABLE");
         }
+        const taskClaim = input.command.action.kind === "task-claim";
+        if (taskClaim && !submission.submitTaskClaim) {
+          throw authorityWriteRejected("AUTHORITY_TASK_CLAIM_SUBMISSION_UNAVAILABLE");
+        }
         settled ??= provenanceSession
           ? submission.submitProvenanceSession!({ ...input, operation: pending })
           : decisionTransition
             ? submission.submitDecisionTransition!({ ...input, operation: pending })
+          : taskClaim
+            ? submission.submitTaskClaim!({ ...input, operation: pending })
           : submission.submit({
             ...input,
             canonicalEntityId: commandMainEntityId(input.command) ?? pending.entityId

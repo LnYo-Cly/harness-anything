@@ -9,6 +9,8 @@ import { openLocalAuthorityKeyStore } from "../../../daemon/src/index.ts";
 import { executionDeclaration, type ExecutionRecord } from "../../../kernel/src/index.ts";
 import { authorityNamespaceProofBytes } from "../../src/daemon/authority-production-state.ts";
 
+export type ProductionCanonicalIngressFixture = ReturnType<typeof createFixture>;
+
 export function createFixture() {
   const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ha-production-canonical-ingress-")));
   const repoRoot = path.join(root, "repo");
@@ -122,6 +124,8 @@ export function enablePresetAwareTaskCreate(authoredRoot: string): void {
     "  defaultVertical: software/coding",
     "  defaultPreset: docs-task",
     "  locale: en-US",
+    "  tasks:",
+    "    leaseEnforcement: true",
     ""
   ].join("\n"));
   git(authoredRoot, "add", "harness.yaml");
