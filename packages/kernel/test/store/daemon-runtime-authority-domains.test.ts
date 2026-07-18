@@ -1,11 +1,12 @@
 // harness-test-tier: integration
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { Effect } from "effect";
 import { createDaemonRuntime } from "../../../adapters/local/src/index.ts";
 import { moduleEntityId } from "../../src/domain/index.ts";
+import { makeJournaledWriteCoordinator, makeOperationalJournaledWriteCoordinator } from "../../src/store/index.ts";
 import { docWrite, runEffect, withTempStoreAsync } from "./helpers.ts";
 import { daemonAttribution, git, initAuthoredGit } from "./helpers/daemon-runtime.ts";
 
@@ -58,6 +59,84 @@ test("daemon interactive queue keeps matching attribution in separate integrity 
     assert.equal(legacy.flush.opCount, 1);
     assert.equal(readFileSync(path.join(rootDir, "harness/tasks/task-domain-authority/note.md"), "utf8"), "authority domain\n");
     assert.match(readFileSync(path.join(rootDir, ".harness/generated/runtime-events/matching-attribution.jsonl"), "utf8"), /evt-matching-attribution/u);
+    await runtime.stop();
+  });
+});
+
+test("daemon upgrade attach replays a pre-domain journal in separate integrity batches", async () => {
+  await withTempStoreAsync(async (rootDir) => {
+    initAuthoredGit(rootDir);
+    const legacy = makeOperationalJournaledWriteCoordinator({
+      rootDir,
+      operationalActor: { scope: "operational", kind: "system", id: "legacy-runtime" },
+      autoMaterialize: false
+    });
+    const authority = makeJournaledWriteCoordinator({
+      rootDir,
+      attribution: testAttribution,
+      sessionId: "upgrade-authority",
+      autoMaterialize: false
+    });
+    Effect.runSync(legacy.enqueue(runtimeEventOp(
+      "runtime-event-pre-domain",
+      "pre-domain.jsonl",
+      "evt-pre-domain"
+    )));
+    Effect.runSync(authority.enqueue({
+      ...docWrite("op-authority-pre-domain", "task-authority-pre-domain", "note.md", "authority upgrade\n"),
+      authorityIntegrity: authorityIntegrity("77", "88", "99", "task-authority-pre-domain")
+    }));
+
+    const runtime = createDaemonRuntime({ rootDir, materializerPollMs: false });
+    const status = await runtime.start();
+
+    assert.equal(status.started, true);
+    assert.equal(status.lastRecovery?.replayedOps, 2);
+    assert.match(readFileSync(path.join(rootDir, ".harness/generated/runtime-events/pre-domain.jsonl"), "utf8"), /evt-pre-domain/u);
+    assert.equal(readFileSync(path.join(rootDir, "harness/tasks/task-authority-pre-domain/note.md"), "utf8"), "authority upgrade\n");
+    assert.match(git(rootDir, "log", "-2", "--format=%B"), /Harness-Authority-Batch:/u);
+    await runtime.stop();
+  });
+});
+
+test("daemon upgrade attach defers an unsafe domain without discarding a recoverable legacy domain", async () => {
+  await withTempStoreAsync(async (rootDir) => {
+    initAuthoredGit(rootDir);
+    const legacy = makeOperationalJournaledWriteCoordinator({
+      rootDir,
+      operationalActor: { scope: "operational", kind: "system", id: "legacy-runtime" },
+      autoMaterialize: false
+    });
+    const authority = makeJournaledWriteCoordinator({ rootDir, attribution: testAttribution, autoMaterialize: false });
+    Effect.runSync(legacy.enqueue(runtimeEventOp("runtime-event-safe-domain", "safe-domain.jsonl", "evt-safe-domain")));
+    Effect.runSync(authority.enqueue({
+      ...docWrite("op-unsafe-authority-domain", "task-unsafe-authority", "note.md", "must remain deferred\n"),
+      authorityIntegrity: authorityIntegrity("aa", "bb", "cc", "task-unsafe-authority")
+    }));
+    const journalPath = path.join(rootDir, ".harness/write-journal/writes.jsonl");
+    const oldLines = readFileSync(journalPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const unsafe = oldLines.find((record) => record.opId === "op-unsafe-authority-domain");
+    unsafe.payload.payloadHash = "sha256:unsafe-upgrade-record";
+    writeFileSync(journalPath, `${oldLines.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
+
+    const runtime = createDaemonRuntime({ rootDir, materializerPollMs: false });
+    const status = await runtime.start();
+
+    assert.equal(status.started, true);
+    assert.equal(status.lastRecovery?.replayedOps, 1);
+    assert.equal(status.lastRecovery?.deferredOps, 1);
+    assert.match(readFileSync(path.join(rootDir, ".harness/generated/runtime-events/safe-domain.jsonl"), "utf8"), /evt-safe-domain/u);
+    const retained = readFileSync(journalPath, "utf8");
+    assert.doesNotMatch(retained, /runtime-event-safe-domain/u);
+    assert.match(retained, /op-unsafe-authority-domain/u);
+    const liveLegacy = await runtime.enqueueInteractiveWrite({
+      commandId: "legacy-after-deferred-authority",
+      operationalActor: { scope: "operational", kind: "system", id: "daemon-runtime" },
+      ops: [runtimeEventOp("runtime-event-after-deferred", "after-deferred.jsonl", "evt-after-deferred")]
+    });
+    assert.equal(liveLegacy.flush.opCount, 1);
+    assert.match(readFileSync(path.join(rootDir, ".harness/generated/runtime-events/after-deferred.jsonl"), "utf8"), /evt-after-deferred/u);
+    assert.match(readFileSync(journalPath, "utf8"), /op-unsafe-authority-domain/u);
     await runtime.stop();
   });
 });
