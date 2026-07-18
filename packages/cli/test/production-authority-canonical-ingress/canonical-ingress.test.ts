@@ -38,7 +38,7 @@ import {
   stopDaemon
 } from "../helpers/daemon-cli.ts";
 
-test("production service route preserves progress dry-run and publishes a slugged task append", { timeout: 30_000 }, async () => {
+test("production service route preserves progress dry-run and publishes canonical task writes", { timeout: 60_000 }, async () => {
   const fixture = createFixture();
   const userRoot = defaultDaemonUserRoot(fixture.root);
   const env = {
@@ -111,6 +111,44 @@ test("production service route preserves progress dry-run and publishes a slugge
     assert.equal(publication.pipelineGeneratedPaths[0], publication.physicalChanges.find((change) => change.path.startsWith("attribution-events/"))?.path);
     git(fixture.authoredRoot, "diff", "--quiet", publication.commitSha, publication.parentCommits[1]!);
     assert.equal(dryRunHeadAfter, dryRunHead, "typed service dry-run must not create a commit");
+
+    const created = runRawJsonMaybeFail(fixture.repoRoot, [
+      "task", "create", "--title", "Service route task create"
+    ], { ...env, CODEX_THREAD_ID: "service-task-create-session" });
+    assert.equal(created.status, 0, JSON.stringify(created.receipt));
+    assert.equal(created.receipt.ok, true, JSON.stringify(created.receipt));
+    const createDetails = (created.receipt.details as { readonly data?: Record<string, unknown> } | undefined)?.data ?? {};
+    const createPackagePath = (created.receipt.paths as ReadonlyArray<{ readonly role?: string; readonly path?: string }> | undefined)
+      ?.find((entry) => entry.role === "package")?.path ?? "";
+    assert.match(String(createDetails.taskId ?? ""), /^task_[0-9A-HJKMNP-TV-Z]{26}$/u, JSON.stringify(created.receipt));
+    assert.equal(existsSync(path.join(fixture.repoRoot, createPackagePath, "INDEX.md")), true);
+    assert.equal(existsSync(path.join(fixture.repoRoot, createPackagePath, "task-contract.json")), true);
+    const createOperation = latestAuthorityOperation(fixture.serviceRoot);
+    assert.equal(createOperation.state, "COMMITTED", JSON.stringify(createOperation));
+    assert.equal(createOperation.receipt?.tag, "COMMITTED", JSON.stringify(createOperation));
+    assert.equal(typeof createOperation.opId, "string", JSON.stringify(createOperation));
+    const createPublication = await createGitCanonicalPublicationInspector(fixture.authoredRoot)
+      .findPublicationForOperation(createOperation.opId!);
+    assert.equal(createPublication.commitSha, createOperation.commitSha);
+    assert.equal(createPublication.physicalChanges.filter((change) => change.path.startsWith("attribution-events/")).length, 1);
+    assert.equal(authorityEventBodies(fixture.authoredRoot).filter((body) => body.includes(createOperation.opId!)).length, 1);
+
+    const presetCreated = runRawJsonMaybeFail(fixture.repoRoot, [
+      "task", "create", "--title", "Service route preset task", "--preset", "docs-task", "--locale", "en-US"
+    ], { ...env, CODEX_THREAD_ID: "service-preset-task-create-session" });
+    assert.equal(presetCreated.status, 0, JSON.stringify(presetCreated.receipt));
+    assert.equal(presetCreated.receipt.ok, true, JSON.stringify(presetCreated.receipt));
+    const presetDetails = (presetCreated.receipt.details as { readonly data?: Record<string, unknown> } | undefined)?.data ?? {};
+    const presetPackagePath = (presetCreated.receipt.paths as ReadonlyArray<{ readonly role?: string; readonly path?: string }> | undefined)
+      ?.find((entry) => entry.role === "package")?.path ?? "";
+    assert.match(String(presetDetails.taskId ?? ""), /^task_[0-9A-HJKMNP-TV-Z]{26}$/u, JSON.stringify(presetCreated.receipt));
+    assert.equal(existsSync(path.join(fixture.repoRoot, presetPackagePath, "INDEX.md")), true);
+    assert.equal(existsSync(path.join(fixture.repoRoot, presetPackagePath, "task-contract.json")), true);
+    assert.match(readFileSync(path.join(fixture.repoRoot, presetPackagePath, "INDEX.md"), "utf8"), /^preset: docs-task$/mu);
+    const presetOperation = latestAuthorityOperation(fixture.serviceRoot);
+    assert.equal(presetOperation.state, "COMMITTED", JSON.stringify(presetOperation));
+    assert.equal(presetOperation.receipt?.tag, "COMMITTED", JSON.stringify(presetOperation));
+    assert.equal(authorityEventBodies(fixture.authoredRoot).filter((body) => body.includes(presetOperation.opId!)).length, 1);
   } finally {
     await stopDaemon(fixture.repoRoot, userRoot).catch(() => undefined);
     if (process.env.KEEP_AUTHORITY_SERVICE_FIXTURE !== "1") rmSync(fixture.root, { recursive: true, force: true });
@@ -547,6 +585,14 @@ function latestAuthorityOperation(serviceRoot: string): {
     readonly commitSha?: string;
     readonly receipt?: { readonly tag?: string };
   };
+}
+
+function authorityEventBodies(authoredRoot: string): ReadonlyArray<string> {
+  const eventRoot = path.join(authoredRoot, "authority-attribution-events/v2");
+  if (!existsSync(eventRoot)) return [];
+  return execFileSync("find", [eventRoot, "-type", "f"], { encoding: "utf8" })
+    .trim().split("\n").filter(Boolean)
+    .map((eventPath) => readFileSync(eventPath, "utf8"));
 }
 
 function taskIndexBody(taskId: string): string {
