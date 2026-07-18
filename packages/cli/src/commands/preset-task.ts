@@ -14,6 +14,7 @@ import {
   type HarnessLayoutInput,
   type MaterializedTemplatePlan,
   type OperationalActor,
+  type ProvenancePayload,
   type WriteCoordinator,
   type WriteError
 } from "../../../kernel/src/index.ts";
@@ -311,6 +312,64 @@ export function materializePresetTaskScaffold(
       issues: materialized.issues
     }
   };
+}
+
+export function buildAuthorityPresetTaskCreateWrites(
+  rootInput: HarnessLayoutInput,
+  action: NewTaskAction,
+  settings: ProjectHarnessSettings,
+  createdAt: string,
+  provenance: ProvenancePayload
+): ReadonlyArray<{ readonly path: string; readonly body: string; readonly packageSlug?: string }> {
+  if (!action.taskId || action.fromLegacyId || action.moduleKey || action.registerModule) {
+    throw new Error("AUTHORITY_PRESET_TASK_CREATE_SHAPE_UNSUPPORTED");
+  }
+  const vertical = action.vertical ?? settings.defaultVertical ?? "software/coding";
+  const presetId = action.preset ?? (action.longRunning ? "long-running-task" : settings.defaultPreset ?? "standard-task");
+  const scaffold = materializePresetTaskScaffold(rootInput, {
+    command: "new-task",
+    vertical,
+    presetId,
+    profileId: action.profile ?? settings.defaultProfile,
+    locale: action.locale ?? settings.locale ?? "zh-CN"
+  }, settings);
+  if (!scaffold.ok) {
+    throw new Error(`AUTHORITY_PRESET_TASK_CREATE_INVALID:${scaffold.result.error?.code ?? "unknown"}`);
+  }
+  const catalog = bundledTemplateCatalog(vertical);
+  if (!catalog) throw new Error(`AUTHORITY_PRESET_TASK_CREATE_CATALOG_REQUIRED:${vertical}`);
+  const contractSnapshot = compileTaskContractSnapshot({
+    vertical,
+    preset: scaffold.preset.manifest,
+    profileId: scaffold.materialized.profile.id,
+    catalog,
+    documents: scaffold.materialized.documents,
+    capturedAt: createdAt,
+    capturedBy: "task-create"
+  });
+  const index = makeIndex({
+    taskId: action.taskId,
+    title: action.title,
+    parent: action.parent,
+    status: "planned",
+    bindingCreatedAt: createdAt,
+    workKind: action.workKind,
+    riskTier: action.riskTier,
+    urgency: action.urgency,
+    vertical,
+    preset: scaffold.preset.manifest.id,
+    profile: scaffold.materialized.profile.id,
+    provenance: [provenance]
+  }, stablePayloadHash);
+  return [
+    { path: "INDEX.md", body: renderIndex(index), packageSlug: action.slug },
+    { path: "task-contract.json", body: `${JSON.stringify(contractSnapshot, null, 2)}\n`, packageSlug: action.slug },
+    ...scaffold.materialized.documents.map((document) => ({
+      path: document.materializeAs,
+      body: renderTemplateBody(document.body, action.title),
+      packageSlug: action.slug
+    }))
+  ];
 }
 
 function renderModuleSelection(module: { readonly key: string; readonly title: string; readonly scopes: ReadonlyArray<string> }): string {

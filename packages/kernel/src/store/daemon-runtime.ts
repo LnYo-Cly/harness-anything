@@ -22,6 +22,7 @@ import {
   type InteractiveWriteRequest
 } from "./daemon-runtime-queue.ts";
 import { waitForDaemonQueueIdle } from "./daemon-drain.ts";
+import { makeDeferredAuthorityCoordinator } from "./daemon-runtime-authority-coordinator.ts";
 import { acquireDaemonGlobalLock, assertDaemonGlobalLockHeld, type DaemonGlobalLock } from "./write-journal-locks.ts";
 import { makeJournaledWriteCoordinator, makeOperationalJournaledWriteCoordinator, recoverJournaledWrites } from "./write-journal-coordinator.ts";
 import type { OperationalActor } from "./write-journal-types.ts";
@@ -428,27 +429,16 @@ class DaemonRepoRuntimeContext implements HarnessDaemonRuntime {
   createAttributedCoordinator(input: {
     readonly attribution: WriteAttribution;
     readonly sessionId: string;
+    readonly commitAuthor?: InteractiveWriteRequest["commitAuthor"];
   }): WriteCoordinator {
-    const started = this.requireAttached();
-    const coordinator = this.makeStartedCoordinator(started, input);
-    const projectionWrites: Array<ReturnType<DaemonProjectionGenerationManager["beginCanonicalWrite"]>> = [];
-    return {
-      enqueue: (op) => Effect.suspend(() => {
+    this.requireAttached();
+    return makeDeferredAuthorityCoordinator({
+      beginProjectionWrite: (op) => {
         const touchedPaths = writeOpTouchedPaths(this.runtimeContext, op);
-        const projectionWrite = this.projectionGeneration.beginCanonicalWrite(touchedPaths);
-        projectionWrites.push(projectionWrite);
-        return coordinator.enqueue(op);
-      }),
-      flush: (reason) => Effect.ensuring(
-        coordinator.flush(reason),
-        Effect.sync(() => {
-          for (const projectionWrite of projectionWrites.splice(0, projectionWrites.length)) {
-            projectionWrite.settle();
-          }
-        })
-      ),
-      recover: coordinator.recover
-    };
+        return this.projectionGeneration.beginCanonicalWrite(touchedPaths);
+      },
+      makeDurableCoordinator: () => this.makeStartedCoordinator(this.requireAttached(), input)
+    });
   }
 
   async assertWriteFenceHeld(): Promise<void> {

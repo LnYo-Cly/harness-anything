@@ -43,6 +43,8 @@ import {
 } from "./authority-production-state.ts";
 import { productionLifecycleAttemptIntent } from "./production-authority-lifecycle-intents.ts";
 import { defaultCliAdapterProvider } from "../composition/adapter-registry.ts";
+import { buildAuthorityPresetTaskCreateWrites, shouldUsePresetAwareNewTask } from "../commands/preset-task.ts";
+import { readProjectHarnessSettings, shouldUseSettingsPresetAwareNewTask } from "../commands/settings.ts";
 
 type KeyMaterial = ReturnType<typeof openAuthorityProductionKeyMaterial>;
 
@@ -201,23 +203,32 @@ async function canonicalAttemptIntent(
     responsibleHuman: actor.principal.personId
   };
   if (action.kind === "new-task" && action.taskId
-    && !action.fromLegacyId && !action.vertical && !action.preset && !action.profile
-    && !action.moduleKey && !action.registerModule) {
+    && !action.fromLegacyId && !action.moduleKey && !action.registerModule) {
     const provenance = {
       runtime: currentSession.runtime,
       sessionId: currentSession.sessionId,
       boundAt: currentSession.detectedAt
     };
-    const writes = defaultCliAdapterProvider().buildLocalTaskCreateWrites({
-      taskId: action.taskId,
-      title: action.title,
-      allowManualId: action.allowManualId,
-      slug: action.slug,
-      parent: action.parent,
-      workKind: action.workKind,
-      riskTier: action.riskTier,
-      urgency: action.urgency
-    }, currentSession.detectedAt, provenance);
+    const settingsResult = readProjectHarnessSettings({ rootDir: command.rootDir, layoutOverrides: command.layoutOverrides }, "new-task");
+    if (!settingsResult.ok) throw new Error(`AUTHORITY_TASK_CREATE_SETTINGS_INVALID:${settingsResult.result.error?.code ?? "unknown"}`);
+    const writes = shouldUsePresetAwareNewTask(action) || shouldUseSettingsPresetAwareNewTask(settingsResult.settings)
+      ? buildAuthorityPresetTaskCreateWrites(
+        { rootDir: command.rootDir, layoutOverrides: command.layoutOverrides },
+        action,
+        settingsResult.settings,
+        currentSession.detectedAt,
+        provenance
+      )
+      : defaultCliAdapterProvider().buildLocalTaskCreateWrites({
+        taskId: action.taskId,
+        title: action.title,
+        allowManualId: action.allowManualId,
+        slug: action.slug,
+        parent: action.parent,
+        workKind: action.workKind,
+        riskTier: action.riskTier,
+        urgency: action.urgency
+      }, currentSession.detectedAt, provenance);
     const indexBody = writes.find((write) => write.path === "INDEX.md")!.body;
     const entity = ref("task", `task/${action.taskId}`);
     const payload: TaskDecisionModuleCommandPayloadV2 = {

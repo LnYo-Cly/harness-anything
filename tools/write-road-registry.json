@@ -366,7 +366,7 @@
       ],
       "callsiteFiles": [
         "packages/cli/src/commands/core/coordinated-machine-write.ts",
-        "packages/kernel/src/store/daemon-runtime.ts",
+        "packages/kernel/src/store/daemon-runtime-authority-coordinator.ts",
         "packages/kernel/src/store/daemon-runtime-queue.ts",
         "packages/kernel/src/write-coordination/write-helpers.ts"
       ],
@@ -1653,12 +1653,16 @@
       "directWrites": [
         {
           "file": "packages/cli/src/daemon/authority-service-state.ts"
+        },
+        {
+          "file": "packages/cli/src/daemon/production-authority-recovery.ts"
         }
       ],
       "evidence": [
-        "packages/cli/src/daemon/authority-service-state.ts:167"
+        "packages/cli/src/daemon/authority-service-state.ts:167",
+        "packages/cli/src/daemon/production-authority-recovery.ts:199"
       ],
-      "freshness": "append-only-fsync-restart-replayed"
+      "freshness": "append-only-state-plus-fsync-atomic-recovery-watermark"
     },
     {
       "id": "daemon.socket-ownership.lock",

@@ -1,6 +1,7 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { promisify } from "node:util";
 import type { CanonicalPublicationInspector } from "../../../application/src/index.ts";
 import {
   encodeCanonicalCbor,
@@ -27,11 +28,91 @@ export interface GitCanonicalPublicationInspector extends CanonicalPublicationIn
   ) => Promise<CanonicalPublicationEvidence>;
   readonly findPublication: (expectedOpIds: ReadonlyArray<string>) => Promise<CanonicalPublicationEvidence>;
   readonly findPublicationForOperation: (opId: string) => Promise<CanonicalPublicationEvidence>;
+  readonly scanFirstParentOperationAnchors: (input: {
+    readonly exclusiveCommit?: string;
+    readonly interestedOpIds: ReadonlySet<string>;
+  }) => Promise<FirstParentOperationAnchorScan>;
+}
+
+export interface FirstParentOperationAnchor {
+  readonly commitSha: string;
+  readonly previousCommit: string;
+  readonly opIds: ReadonlyArray<string>;
+}
+
+export interface FirstParentOperationAnchorScan {
+  readonly headCommit: string | null;
+  readonly scannedCommitCount: number;
+  readonly anchors: ReadonlyArray<FirstParentOperationAnchor>;
+}
+
+export class AuthorityCanonicalPublicationNotFoundError extends Error {
+  readonly opId: string;
+
+  constructor(opId: string) {
+    super(`AUTHORITY_CANONICAL_PUBLICATION_NOT_FOUND:expectedOpId=${opId}`);
+    this.name = "AuthorityCanonicalPublicationNotFoundError";
+    this.opId = opId;
+  }
+}
+
+export class AuthorityRecoveryWatermarkInvalidError extends Error {
+  constructor(commitSha: string) {
+    super(`AUTHORITY_RECOVERY_WATERMARK_INVALID:commitSha=${commitSha}`);
+    this.name = "AuthorityRecoveryWatermarkInvalidError";
+  }
 }
 
 export function createGitCanonicalPublicationInspector(canonicalRoot: string): GitCanonicalPublicationInspector {
   const rootDir = path.resolve(canonicalRoot);
   const currentHead = async (): Promise<string | null> => gitOptional(rootDir, "rev-parse", "--verify", "HEAD");
+  const scanFirstParentOperationAnchors = async (input: {
+    readonly exclusiveCommit?: string;
+    readonly interestedOpIds: ReadonlySet<string>;
+  }): Promise<FirstParentOperationAnchorScan> => {
+    const headCommit = await currentHead();
+    if (!headCommit) return { headCommit: null, scannedCommitCount: 0, anchors: [] };
+    let commits: string[];
+    try {
+      commits = input.exclusiveCommit === headCommit
+        ? []
+        : (await publicationGitTextAsync(
+          rootDir,
+          "rev-list",
+          "--first-parent",
+          input.exclusiveCommit ? `${input.exclusiveCommit}..${headCommit}` : headCommit
+        )).split("\n").filter(Boolean);
+    } catch (error) {
+      if (input.exclusiveCommit) throw new AuthorityRecoveryWatermarkInvalidError(input.exclusiveCommit);
+      throw error;
+    }
+    const recoveryWatermark = input.exclusiveCommit;
+    if (recoveryWatermark && headCommit !== recoveryWatermark) {
+      const oldest = commits.at(-1);
+      const oldestParents = await (async () => {
+        try {
+          return oldest
+            ? (await publicationGitTextAsync(rootDir, "rev-list", "--parents", "-n", "1", oldest)).split(" ").slice(1)
+            : [];
+        } catch {
+          throw new AuthorityRecoveryWatermarkInvalidError(recoveryWatermark);
+        }
+      })();
+      if (!oldest || oldestParents[0] !== recoveryWatermark) {
+        throw new AuthorityRecoveryWatermarkInvalidError(recoveryWatermark);
+      }
+    }
+    const anchors: FirstParentOperationAnchor[] = [];
+    for (const commitSha of commits) {
+      const parents = (await publicationGitTextAsync(rootDir, "rev-list", "--parents", "-n", "1", commitSha)).split(" ").slice(1);
+      if (parents.length !== 2) continue;
+      const sessionSubject = await publicationGitTextAsync(rootDir, "show", "-s", "--format=%s", parents[1]!);
+      const opIds = commitSubjectOpIds(sessionSubject);
+      if (!opIds.some((opId) => input.interestedOpIds.has(opId))) continue;
+      anchors.push({ commitSha, previousCommit: parents[0]!, opIds });
+    }
+    return { headCommit, scannedCommitCount: commits.length, anchors };
+  };
   const inspectPublication = async (
     expectedPreviousHead: string | null,
     expectedOpIds: ReadonlyArray<string>,
@@ -118,6 +199,7 @@ export function createGitCanonicalPublicationInspector(canonicalRoot: string): G
       return { commitSha: evidence.commitSha, parentCommits: evidence.parentCommits };
     },
     inspectPublication,
+    scanFirstParentOperationAnchors,
     findPublication: async (expectedOpIds) => {
       const expectedSessionSubjectSuffix = `[${expectedOpIds.join(",")}]`;
       const firstParentCommits = publicationGitText(rootDir, "rev-list", "--first-parent", "HEAD")
@@ -151,6 +233,7 @@ export function createGitCanonicalPublicationInspector(canonicalRoot: string): G
         if (!opIds.includes(opId)) continue;
         matches.push(await inspectPublication(parents[0]!, opIds, commitSha));
       }
+      if (matches.length === 0) throw new AuthorityCanonicalPublicationNotFoundError(opId);
       if (matches.length !== 1) {
         throw new Error(
           `AUTHORITY_CANONICAL_PUBLICATION_NOT_UNIQUE:expectedOpId=${opId};matches=${matches.map((entry) => entry.commitSha).join(",") || "none"}`
@@ -290,6 +373,17 @@ function gitOptional(rootDir: string, ...args: ReadonlyArray<string>): string | 
 
 function publicationGitText(rootDir: string, ...args: ReadonlyArray<string>): string {
   return readAuthorityGitBytes(rootDir, ...args).toString("utf8").trim();
+}
+
+const execFileAsync = promisify(execFile);
+
+async function publicationGitTextAsync(rootDir: string, ...args: ReadonlyArray<string>): Promise<string> {
+  const { stdout } = await execFileAsync("git", ["-C", rootDir, ...args], {
+    encoding: "utf8",
+    windowsHide: true,
+    maxBuffer: 64 * 1024 * 1024
+  });
+  return stdout.trim();
 }
 
 function gitExitCode(rootDir: string, ...args: ReadonlyArray<string>): number {
