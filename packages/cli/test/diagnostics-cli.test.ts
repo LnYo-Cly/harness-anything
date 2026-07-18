@@ -26,12 +26,13 @@ test("diagnostics command-usage reports failed commands and unused evented surfa
     assert.equal(result.command, "diagnostics-command-usage");
     assert.equal(result.report.schema, "command-usage-diagnostics/v1");
     assert.equal(result.report.totalEvents, 4);
-    assert.equal(result.report.resultEvents, 3);
+    assert.equal(result.report.resultEvents, 4);
     assert.equal(result.report.sessions, 1);
     const statusSet = result.report.rows.find((row: Record<string, unknown>) => row.commandKind === "status-set");
+    assert.equal(statusSet.succeeded, 1);
     assert.equal(statusSet.failed, 2);
     assert.equal(statusSet.deprecated, 1);
-    assert.equal(statusSet.failureRate, 1);
+    assert.equal(statusSet.failureRate, 2 / 3);
     assert.deepEqual(statusSet.errorCodes, [
       { errorCode: "invalid_transition", count: 1 },
       { errorCode: "task_not_found", count: 1 }
@@ -67,14 +68,17 @@ function deprecatedRuntimeEvent(eventId: string, commandKind: string): Record<st
     schema: "runtime-event/v1",
     eventId,
     recordedAt: "2026-07-07T00:00:00.000Z",
-    kind: "tool",
+    kind: "result",
     session: { sessionId: "codex-session", runtime: "codex" },
     turn: null,
     step: null,
     tool: { toolName: commandKind, deprecated: true },
     approval: null,
     interrupt: null,
-    result: null,
+    result: {
+      status: "succeeded",
+      summary: `CLI command succeeded: ${commandKind}`
+    },
     cost: null
   };
 }

@@ -50,13 +50,12 @@ function runCommandUsageDiagnostics(rootDir: string, commandSpecs: Parameters<Co
           const event = JSON.parse(line) as Record<string, any>;
           const sessionId = typeof event.session?.sessionId === "string" ? event.session.sessionId : fileName.replace(/\.jsonl$/u, "");
           sessions.add(sessionId);
-          if (event.kind === "tool" && event.tool?.deprecated === true) {
-            const commandKind = eventCommandKind(event);
-            deprecatedStats.set(commandKind, (deprecatedStats.get(commandKind) ?? 0) + 1);
-          }
           if (event.kind !== "result" || !event.result) continue;
           resultEvents += 1;
           const commandKind = eventCommandKind(event);
+          if (event.tool?.deprecated === true) {
+            deprecatedStats.set(commandKind, (deprecatedStats.get(commandKind) ?? 0) + 1);
+          }
           const status: CountedStatus = event.result.status === "succeeded" || event.result.status === "failed" || event.result.status === "cancelled"
             ? event.result.status
             : "unknown";
@@ -88,12 +87,7 @@ function runCommandUsageDiagnostics(rootDir: string, commandSpecs: Parameters<Co
         .map(([errorCode, count]) => ({ errorCode, count }))
         .sort((left, right) => right.count - left.count || left.errorCode.localeCompare(right.errorCode))
     };
-  }).sort((left, right) => right.total - left.total || left.commandKind.localeCompare(right.commandKind));
-  for (const [commandKind, deprecated] of deprecatedStats) {
-    if (rows.some((row) => row.commandKind === commandKind)) continue;
-    rows.push({ commandKind, succeeded: 0, failed: 0, cancelled: 0, unknown: 0, total: 0, deprecated, failureRate: 0, errorCodes: [] });
-  }
-  rows.sort((left, right) => right.total - left.total || right.deprecated - left.deprecated || left.commandKind.localeCompare(right.commandKind));
+  }).sort((left, right) => right.total - left.total || right.deprecated - left.deprecated || left.commandKind.localeCompare(right.commandKind));
   const used = new Set(rows.map((row) => row.commandKind));
   const unusedEventedCommands = commandSpecs
     .filter((entry) => entry.kind !== "diagnostics-command-usage" && ["auto", "deferred"].includes(entry.eventPolicy.runtimeEvent) && !used.has(entry.kind))

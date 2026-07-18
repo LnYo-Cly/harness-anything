@@ -125,8 +125,28 @@ test("deprecated JSON commands preserve stdout bytes and emit one stderr warning
     assert.equal(deprecated.stderr.trimEnd().split("\n").length, 1);
     assert.match(deprecated.stderr, /Use 'ha git diff' instead/u);
     assert.match(deprecated.stderr, /Sunset stage 1\/3 \(30-day telemetry warning\)/u);
-    const events = readJsonl(path.join(rootDir, ".harness/generated/runtime-events/codex-deprecation-warning.jsonl"));
-    assert.equal(events.filter((event) => event.kind === "tool" && event.tool?.deprecated === true).length, 1);
+    // git-diff has runtimeEvent policy "none"; a deprecated invocation must not
+    // start emitting events the canonical grammar never emitted.
+    assert.equal(existsSync(path.join(rootDir, ".harness/generated/runtime-events/codex-deprecation-warning.jsonl")), false);
+  });
+});
+
+test("deprecated grammar tags the existing auto command event instead of adding one", () => {
+  withTempRoot((rootDir) => {
+    initGitRoot(rootDir);
+    const sessionId = "codex-deprecated-grammar-tag";
+    const taskId = "task_01KWY3Z4VEVP6FNT28ZFA809GW";
+    const result = runJson(rootDir, ["task", "status", "set", taskId, "done"], false, {
+      CODEX_SESSION_ID: sessionId,
+      CODEX_THREAD_ID: ""
+    });
+    const events = readJsonl(path.join(rootDir, ".harness/generated/runtime-events", `${sessionId}.jsonl`));
+
+    assert.equal(result.ok, false);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].kind, "result");
+    assert.equal(events[0].tool.toolName, "status-set");
+    assert.equal(events[0].tool.deprecated, true);
   });
 });
 
