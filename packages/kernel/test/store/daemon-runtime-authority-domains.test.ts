@@ -6,7 +6,7 @@ import test from "node:test";
 import { Effect } from "effect";
 import { createDaemonRuntime } from "../../../adapters/local/src/index.ts";
 import { moduleEntityId } from "../../src/domain/index.ts";
-import { docWrite, withTempStoreAsync } from "./helpers.ts";
+import { docWrite, runEffect, withTempStoreAsync } from "./helpers.ts";
 import { daemonAttribution, git, initAuthoredGit } from "./helpers/daemon-runtime.ts";
 
 const testAttribution = daemonAttribution("person_test", "test", "credential-test");
@@ -26,7 +26,7 @@ test("daemon serializes authority and runtime-event flush domains before either 
       operationalActor: { scope: "operational", kind: "system", id: "daemon-runtime" },
       ops: [runtimeEventOp("runtime-event-domain", "authority-domain.jsonl", "evt-domain")]
     });
-    const authorityReceipt = await Effect.runPromise(authority.flush("explicit"));
+    const authorityReceipt = await runEffect(authority.flush("explicit"));
 
     assert.equal(runtimeEventReceipt.flush.opCount, 1);
     assert.equal(authorityReceipt.opCount, 1);
