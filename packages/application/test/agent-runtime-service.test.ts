@@ -195,9 +195,14 @@ test("holder projection reads task-bound runtime executor and preserves human le
   const result = projectAgentHolders({
     holders: [
       { taskId: "task-runtime-only", holder: null, effectiveHolder: null, leaseExpiresAt: null, orphan: false },
+      { taskId: "task-execution-fallback", holder: null, effectiveHolder: null, leaseExpiresAt: null, orphan: false },
       humanHolder("task-human-runtime", "exec-human-runtime")
     ],
     executions: [
+      {
+        ...execution("task-execution-fallback", "exec-execution-fallback", "person-one", "agent-fallback"),
+        primaryActor: null
+      },
       {
         ...execution("task-human-runtime", "exec-human-runtime", "person-one", "agent-one"),
         primaryActor: { principal: { personId: "person-one" }, executor: null, responsibleHuman: "person-one" }
@@ -226,6 +231,7 @@ test("holder projection reads task-bound runtime executor and preserves human le
   });
 
   assert.equal(result.rows.find((row) => row.taskId === "task-runtime-only")?.executorAgentId, "runtime-session:runtime-only");
+  assert.equal(result.rows.find((row) => row.taskId === "task-execution-fallback")?.executorAgentId, "agent-fallback");
   assert.equal(result.rows.find((row) => row.taskId === "task-human-runtime")?.executorAgentId, null);
 });
 

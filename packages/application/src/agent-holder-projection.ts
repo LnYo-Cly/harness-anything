@@ -192,9 +192,13 @@ function executionActor(execution: ExecutionProjectionRow | undefined): {
   readonly principalPersonId: string | null;
   readonly executorAgentId: string | null;
 } {
-  if (!execution || !isRecord(execution.primaryActor)) return { principalPersonId: null, executorAgentId: null };
-  const principal = isRecord(execution.primaryActor.principal) ? execution.primaryActor.principal : undefined;
-  const executor = isRecord(execution.primaryActor.executor) ? execution.primaryActor.executor : undefined;
+  if (!execution) return { principalPersonId: null, executorAgentId: null };
+  const primaryActor = isRecord(execution.primaryActor) ? execution.primaryActor : undefined;
+  const principal = isRecord(primaryActor?.principal) ? primaryActor.principal : undefined;
+  const primaryExecutor = isRecord(primaryActor?.executor) ? primaryActor.executor : undefined;
+  const executor = primaryActor
+    ? primaryExecutor
+    : (isRecord(execution.executor) ? execution.executor : undefined);
   return {
     principalPersonId: typeof principal?.personId === "string" ? principal.personId : null,
     executorAgentId: typeof executor?.id === "string" ? executor.id : null
