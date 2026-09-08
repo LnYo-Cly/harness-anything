@@ -63,7 +63,11 @@ const RuntimeSessionSchema = Schema.Struct({
   clientBinding: Schema.optional(Schema.Struct({
     assertion: Schema.Literal("client-asserted"),
     taskId: Schema.optional(Schema.String),
-    executionId: Schema.optional(Schema.String)
+    executionId: Schema.optional(Schema.String),
+    executor: Schema.optional(Schema.Struct({
+      kind: Schema.Literal("agent"),
+      id: Schema.String
+    }))
   }))
 });
 

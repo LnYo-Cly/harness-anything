@@ -125,9 +125,14 @@ export function projectAgentHolders(input: {
       .map(projectRuntime);
     const leaseIdentity = holder?.holder?.holder;
     const executionIdentity = executionActor(execution);
+    const runtimeIdentity = runtimes.length > 0
+      ? runtimeActor(input.sessions.find((session) => runtimeMatches(session, key.taskId, executionId)))
+      : null;
     const principalPersonId = leaseIdentity?.principal.personId ?? executionIdentity.principalPersonId;
-    const executorAgentId = leaseIdentity?.executor?.id ?? executionIdentity.executorAgentId;
     const hasLease = Boolean(holder?.holder);
+    const executorAgentId = leaseIdentity?.executor?.id
+      ?? executionIdentity.executorAgentId
+      ?? (!hasLease ? runtimeIdentity?.executorAgentId ?? null : null);
     const leaseExpired = hasLease && (!holder?.effectiveHolder || Boolean(holder?.orphan));
     const sources = { lease: hasLease, execution: Boolean(execution), runtime: runtimes.length > 0 };
     return {
@@ -176,6 +181,11 @@ function projectRuntime(session: AgentRuntimeSessionStatus): AgentHolderRuntimeP
     attachable: session.attachable,
     association: "client-asserted"
   };
+}
+
+function runtimeActor(session: AgentRuntimeSessionStatus | undefined): { readonly executorAgentId: string | null } {
+  const executor = session?.clientBinding?.executor;
+  return { executorAgentId: executor?.kind === "agent" ? executor.id : null };
 }
 
 function executionActor(execution: ExecutionProjectionRow | undefined): {

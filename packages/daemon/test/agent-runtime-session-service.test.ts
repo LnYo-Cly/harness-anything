@@ -60,6 +60,14 @@ test("daemon owns process witness, early-binds provider session, and preserves i
   assert.equal(status.sessions[0]?.process.exitCode, 17);
   assert.equal(status.sessions[0]?.attachable, false);
   assert.equal(status.sessions[0]?.clientBinding?.assertion, "client-asserted");
+  assert.deepEqual(status.sessions[0]?.clientBinding?.executor, {
+    kind: "agent",
+    id: "runtime-session:runtime-session-1"
+  });
+  assert.deepEqual((saved.at(-1) as Array<{ clientBinding?: unknown }>)[0]?.clientBinding?.executor, {
+    kind: "agent",
+    id: "runtime-session:runtime-session-1"
+  });
   assert.ok(saved.length >= 4, "every witness transition and early provider binding is persisted");
 });
 
@@ -73,6 +81,12 @@ test("daemon restart preserves the provider pointer but downgrades an unrecovera
     capabilities: {
       discover: true, spawn: true, attach: false, resume: true,
       interactive: false, resize: false, events: true
+    },
+    clientBinding: {
+      assertion: "client-asserted" as const,
+      taskId: "task-restarted",
+      executionId: "exec-restarted",
+      executor: { kind: "agent" as const, id: "runtime-session:runtime-live-before-restart" }
     },
     resultState: "running" as const,
     events: []
@@ -89,6 +103,10 @@ test("daemon restart preserves the provider pointer but downgrades an unrecovera
   assert.equal(status.sessions[0]?.providerSessionId, "claude-provider-1");
   assert.equal(status.sessions[0]?.process.state, "unknown");
   assert.equal(status.sessions[0]?.attachable, false);
+  assert.deepEqual(status.sessions[0]?.clientBinding?.executor, {
+    kind: "agent",
+    id: "runtime-session:runtime-live-before-restart"
+  });
 });
 
 function sequenceClock(): () => string {

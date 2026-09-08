@@ -107,7 +107,8 @@ export function createAgentRuntimeSessionService(
           clientBinding: {
             assertion: "client-asserted" as const,
             ...(payload.taskId ? { taskId: payload.taskId } : {}),
-            ...(payload.executionId ? { executionId: payload.executionId } : {})
+            ...(payload.executionId ? { executionId: payload.executionId } : {}),
+            executor: { kind: "agent" as const, id: `runtime-session:${runtimeSessionId}` }
           }
         } : {}),
         resultState: "running",

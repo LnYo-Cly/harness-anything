@@ -49,6 +49,7 @@ export interface AgentRuntimeSessionStatus {
     readonly assertion: "client-asserted";
     readonly taskId?: string;
     readonly executionId?: string;
+    readonly executor?: { readonly kind: "agent"; readonly id: string };
   };
 }
 

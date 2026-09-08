@@ -23,7 +23,19 @@ test("agent runtime schema accepts independent four-state evidence", () => {
         attachable: { state: false, reason: "attach-channel-unavailable" }
       }
     }],
-    sessions: []
+    sessions: [{
+      runtimeSessionId: "runtime-session-1",
+      kindId: "codex",
+      installationId: "local:codex:path",
+      processWitness: { state: "unknown" },
+      attachable: { state: false, reason: "attach-channel-unavailable" },
+      clientBinding: {
+        assertion: "client-asserted",
+        taskId: "task-1",
+        executionId: "exec-1",
+        executor: { kind: "agent", id: "runtime-session:runtime-session-1" }
+      }
+    }]
   } as const;
   const decoded = Schema.decodeUnknownSync(AgentRuntimeInventorySchema)(fixture);
 

@@ -191,6 +191,44 @@ test("holder projection preserves lease, execution, runtime, orphan, and mismatc
   assert.equal(serialized.includes("client-asserted"), true);
 });
 
+test("holder projection reads task-bound runtime executor and preserves human lease attribution", () => {
+  const result = projectAgentHolders({
+    holders: [
+      { taskId: "task-runtime-only", holder: null, effectiveHolder: null, leaseExpiresAt: null, orphan: false },
+      humanHolder("task-human-runtime", "exec-human-runtime")
+    ],
+    executions: [
+      {
+        ...execution("task-human-runtime", "exec-human-runtime", "person-one", "agent-one"),
+        primaryActor: { principal: { personId: "person-one" }, executor: null, responsibleHuman: "person-one" }
+      }
+    ],
+    sessions: [
+      {
+        ...runtime("task-runtime-only", "exec-runtime-only", "runtime-only", "alive"),
+        clientBinding: {
+          assertion: "client-asserted",
+          taskId: "task-runtime-only",
+          executionId: "exec-runtime-only",
+          executor: { kind: "agent", id: "runtime-session:runtime-only" }
+        }
+      },
+      {
+        ...runtime("task-human-runtime", "exec-human-runtime", "runtime-human", "alive"),
+        clientBinding: {
+          assertion: "client-asserted",
+          taskId: "task-human-runtime",
+          executionId: "exec-human-runtime",
+          executor: { kind: "agent", id: "runtime-session:runtime-human" }
+        }
+      }
+    ]
+  });
+
+  assert.equal(result.rows.find((row) => row.taskId === "task-runtime-only")?.executorAgentId, "runtime-session:runtime-only");
+  assert.equal(result.rows.find((row) => row.taskId === "task-human-runtime")?.executorAgentId, null);
+});
+
 function holder(taskId: string, executionId: string, orphan: boolean): TaskHolderSnapshot {
   const principal = {
     principal: { personId: "person-one", credential: { kind: "secret", issuer: "test", subject: "must-not-leak" } },
@@ -216,6 +254,30 @@ function holder(taskId: string, executionId: string, orphan: boolean): TaskHolde
     effectiveHolder: orphan ? null : principal,
     leaseExpiresAt: orphan ? "2026-07-17T01:00:00.000Z" : "2026-07-19T00:00:00.000Z",
     orphan
+  };
+}
+
+function humanHolder(taskId: string, executionId: string): TaskHolderSnapshot {
+  const principal = { principal: { personId: "person-one" }, executor: null, responsibleHuman: "person-one" };
+  return {
+    taskId,
+    holder: {
+      schema: "task-holder/v2",
+      taskId,
+      executionId,
+      phase: "active",
+      holder: principal,
+      tokenHash: "must-not-leak",
+      acquiredVia: "claim",
+      acquiredAt: "2026-07-17T00:00:00.000Z",
+      leaseExpiresAt: "2026-07-19T00:00:00.000Z",
+      releasedAt: null,
+      updatedAt: "2026-07-17T00:00:00.000Z",
+      version: "v1"
+    },
+    effectiveHolder: principal,
+    leaseExpiresAt: "2026-07-19T00:00:00.000Z",
+    orphan: false
   };
 }
 
