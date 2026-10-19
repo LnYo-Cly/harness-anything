@@ -307,8 +307,15 @@ function freezeCompletionContract(
   cell: Pick<RepoCellOperationalContext, "cellCodedError" | "settings" | "projection">,
   snapshot: Snapshot,
 ): SubmissionV1["completionContract"] {
-  const frozenPreset = cell.projection.readPresetSnapshot(snapshot.task!.presetSnapshotDigest!)
-    .snapshot as import("@harness-anything/preset").PresetSnapshotV1;
+  const frozenPreset = cell.projection.readPresetSnapshot(snapshot.task!.presetSnapshotDigest!).snapshot as
+    | import("@harness-anything/preset").PresetSnapshotV1
+    | null;
+  // Tasks carried from old generations may name snapshot bytes the ledger never kept.
+  if (!frozenPreset)
+    throw cell.cellCodedError(
+      "invalid_submission",
+      `Preset snapshot ${snapshot.task!.presetSnapshotDigest} is unavailable. Run ha task release ${snapshot.task!.taskId}, then ha task contract migrate --task ${snapshot.task!.taskId} --to-preset ${snapshot.task!.metadata?.presetId ?? "standard-task"} --apply.`,
+    );
   const resolved = resolveCompletionContract(
     snapshot.task?.completionGateIds ?? [],
     cell.settings.readRepository(),

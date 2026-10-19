@@ -1,6 +1,7 @@
 import { isUtf8 } from "node:buffer";
 import {
   isDocEvent,
+  isMigrationImportEvent,
   isTaskBootstrapEvent,
   isTaskEvent,
   isTaskProgressEvent,
@@ -61,7 +62,12 @@ export function readSubmissionArtifact(
       : [];
   const blobSha256 = isTaskBootstrapEvent(event)
     ? event.payload.initialDocumentClaims.find((claim) => claim.path === artifact)?.sha256
-    : claims.find((claim) => claim.path === artifact)?.candidate?.sha256;
+    : // Artifacts carried from an old generation were accepted by their migration import.
+      isMigrationImportEvent(event)
+      ? "documentClaim" in event.payload.entity && event.payload.entity.documentClaim.path === artifact
+        ? event.payload.entity.documentClaim.sha256
+        : undefined
+      : claims.find((claim) => claim.path === artifact)?.candidate?.sha256;
   if (!blobSha256) return invalid("revision did not accept this path");
   const bytes = cell.store.readContentBlob(blobSha256);
   if (!bytes || sha256Bytes(bytes) !== blobSha256 || (expectedBlob !== undefined && expectedBlob !== blobSha256))

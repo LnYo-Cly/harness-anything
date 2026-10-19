@@ -261,6 +261,14 @@ export async function openDaemonHost(input: DaemonHostOpenInput): Promise<Daemon
   // awaits it, so a center still resuming reads as a slow startup instead of a broken repo (a
   // build-superseded successor's first attach lost exactly that race and latched its repo).
   let rbacResumed: Promise<void> = Promise.resolve();
+  // The daemon's own work (schedules, edge reads) runs as the local socket owner it serves.
+  const daemonSelfAuth = {
+    transportKind: "unix-socket" as const,
+    unixSocketOwnerBoundary: {
+      ownerUid: process.getuid?.() ?? 0,
+      source: "unix-socket-filesystem-owner-boundary" as const,
+    },
+  };
   const keycloakCenter: KeycloakCenterAuthority = async (rejectedAccessToken) => {
     await rbacResumed;
     return { ...(await oidc.center(rejectedAccessToken)), clientId: "harness-center" };
@@ -342,7 +350,7 @@ export async function openDaemonHost(input: DaemonHostOpenInput): Promise<Daemon
           openFleetEdgeRuntime({
             request,
             readBinding: async () => {
-              const binding = await hostBinding(request.workspaceRoot, { transportKind: "unix-socket" });
+              const binding = await hostBinding(request.workspaceRoot, daemonSelfAuth);
               return { ...binding, source: { kind: "node", nodeId: request.nodeId } };
             },
             daemonGeneration: Date.now() * 1000 + (process.pid % 1000),
@@ -375,8 +383,12 @@ export async function openDaemonHost(input: DaemonHostOpenInput): Promise<Daemon
             .schedule;
         if (!schedule || validateScheduleV1(schedule).length)
           throw hostCodedError("invalid_schedule", "Schedule execution requires its canonical creator identity.");
-        const current = await hostBinding(rootDir, { transportKind: "unix-socket" });
-        if (current.actor.principal.personId !== schedule.createdBy.principal.personId)
+        const current = await hostBinding(rootDir, daemonSelfAuth);
+        // Single-user local mode: the signed-out socket owner runs every schedule of its repositories.
+        if (
+          current.daemonSocketOwner !== true &&
+          current.actor.principal.personId !== schedule.createdBy.principal.personId
+        )
           throw hostCodedError("authentication_required", "The schedule creator must sign in on this device.");
         return daemonWriterBinding(repoId, current);
       },
