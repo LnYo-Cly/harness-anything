@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, rmdirSync } from "node:fs";
 import path from "node:path";
 import type { ScheduleV1 } from "@harness-anything/kernel";
 import { makeGitReadinessSource, runProcessExitAsync, runProcessTextAsync } from "./process-port.ts";
@@ -169,6 +169,13 @@ function firstCommitRef(rootDir: string, candidates: readonly (string | null)[])
  */
 export async function reclaimManagedWorktree(rootDir: string, worktree: ManagedWorktree): Promise<WorktreeReclaim> {
   if (!existsSync(worktree.cwd)) return { outcome: "absent" };
+  // Without its .git marker the directory is no worktree: git would run against the enclosing repository
+  // and report its changes as this worktree's. An empty one is a leftover and goes; anything else is kept.
+  if (!existsSync(path.join(worktree.cwd, ".git"))) {
+    if (readdirSync(worktree.cwd).length > 0) return { outcome: "retained", reason: "not a git worktree (no .git)" };
+    rmdirSync(worktree.cwd);
+    return { outcome: "removed", archiveTag: null, unmergedCommits: 0 };
+  }
   try {
     // What the setup adapters made is theirs to remove, not the work in the worktree.
     await cleanupWorktreeSetup(worktree.cwd);

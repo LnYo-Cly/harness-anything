@@ -41,13 +41,15 @@ test("cold writer open publishes committed cuts before a large projection batch 
     await store.drain();
     rmSync(path.join(rootDir, ".harness/cache"), { recursive: true, force: true });
     for (const cold of [true, false]) {
-      const cuts: number[] = [];
+      const cuts: number[] = [],
+        phases: string[] = [];
       const cell = await openRepoWriterCell(
         {
           repoId: workspaceId(repoId),
           rootDir: canonicalRoot(rootDir),
           ownerId: "writer-open-test",
           onOpenProgress(progress) {
+            phases.push(progress.phase);
             if (progress.phase === "catching-up") {
               assert.equal(progress.total, 513);
               assert.equal(progress.applied, progress.watermark);
@@ -64,6 +66,12 @@ test("cold writer open publishes committed cuts before a large projection batch 
           assert.ok(cuts.length > 3);
           assert.ok(cuts.every((watermark, index) => index === 0 || watermark > cuts[index - 1]!));
         } else assert.deepEqual(cuts, []);
+        // The ready watchdog only counts forward phases: a report that steps back leaves the rest of attach silent.
+        const order = ["opening", "recovering", "catching-up", "restoring-runtimes"];
+        assert.ok(
+          phases.every((phase, index) => index === 0 || order.indexOf(phase) >= order.indexOf(phases[index - 1]!)),
+          `attach phases regressed: ${phases.join(" -> ")}`,
+        );
       } finally {
         await cell.close();
       }

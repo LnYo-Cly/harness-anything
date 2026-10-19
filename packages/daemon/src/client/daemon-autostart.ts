@@ -5,6 +5,7 @@ import {
   daemonPidPath,
   daemonProcessAlive,
   daemonSocketProbe,
+  readDaemonPid,
   readDaemonSingletonLockPid,
 } from "../daemon-singleton.ts";
 import { daemonStdioLogPath, readDaemonLifecycleRecords } from "../lifecycle-log.ts";
@@ -137,7 +138,8 @@ export async function ensureLocalDaemonRunning(input: {
   readonly readyTimeoutMs?: number;
   readonly probeIntervalMs?: number;
   readonly probe?: (socketPath: string) => Promise<boolean>;
-  readonly spawnDetached?: (launch: DaemonLaunchSpec) => Promise<void>;
+  /** Resolves the spawned process id when known; a live child counts as start progress. */
+  readonly spawnDetached?: (launch: DaemonLaunchSpec) => Promise<number | undefined | void>;
   readonly onProgress?: (progress: DaemonStartProgress) => void;
   readonly extendTimeoutWhileProgressing?: boolean;
 }): Promise<DaemonAutostartResult> {
@@ -195,6 +197,7 @@ export async function ensureLocalDaemonRunning(input: {
   let launched: DaemonLaunchSpec | null = null,
     flight: Awaited<ReturnType<typeof acquireDaemonAutostartFlight>> | null = null,
     spawned = false,
+    spawnedPid: number | null = null,
     latestProgress: DaemonStartProgress | null = null,
     reported = "";
   try {
@@ -221,14 +224,16 @@ export async function ensureLocalDaemonRunning(input: {
     // noise and can make a GUI startup look like a writer-lock collision.
     if (flight.owner && !liveDaemonSingleton(launched)) {
       spawned = true;
-      await spawnDetached(launched);
+      spawnedPid = (await spawnDetached(launched)) ?? null;
     }
     const startedAt = Date.now(),
       quietDeadline = startedAt + readyTimeoutMs,
       progressDeadline = startedAt + readyTimeoutMs * (input.extendTimeoutWhileProgressing === false ? 1 : 6);
     for (;;) {
       if (await ready()) return { ok: true, hint: "daemon is reachable", attempts: spawned ? 1 : 0 };
-      const progress = readDaemonStartProgress(launched, Date.now() - startedAt);
+      const progress =
+        readDaemonStartProgress(launched, Date.now() - startedAt) ??
+        startingProcessProgress(launched, spawnedPid, Date.now() - startedAt);
       if (progress) {
         latestProgress = progress;
         const key = `${progress.fingerprint}:${Math.floor((Date.now() - startedAt) / 1_000)}`;
@@ -389,6 +394,29 @@ function daemonLaunchTarget(launch: DaemonLaunchSpec): { readonly userRoot: stri
     daemonId
     ? { userRoot: path.resolve(userRoot), daemonId }
     : null;
+}
+// A cold disk can keep a new daemon loading modules for tens of seconds before it writes its first
+// lifecycle record, while the newest process_start still belongs to a dead generation. The process
+// itself is the progress then: the child this caller spawned, or a live pid named by the singleton
+// lock or pid file. ponytail: liveness only, no pid-file mtime check; a reused pid at worst waits out
+// the progress deadline and reports daemon_starting.
+function startingProcessProgress(
+  launch: DaemonLaunchSpec,
+  spawnedPid: number | null,
+  waitedMs: number,
+): DaemonStartProgress | null {
+  const target = daemonLaunchTarget(launch);
+  if (!target) return null;
+  const pid = [
+    spawnedPid,
+    readDaemonSingletonLockPid(target.userRoot, target.daemonId),
+    readDaemonPid(target.userRoot, target.daemonId),
+  ].find((candidate) => candidate !== null && daemonProcessAlive(candidate));
+  if (pid === undefined || pid === null) return null;
+  return {
+    fingerprint: `process:${pid}`,
+    message: `daemon is starting; waited ${Math.floor(waitedMs / 1_000)}s (process ${pid} is alive, lifecycle log not written yet)`,
+  };
 }
 function liveDaemonSingleton(launch: DaemonLaunchSpec): boolean {
   const target = daemonLaunchTarget(launch);

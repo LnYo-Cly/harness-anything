@@ -54,7 +54,7 @@ export function startDetachedProcessChecked(
   env: NodeJS.ProcessEnv,
   outputPath?: string,
   cwd?: string,
-): Promise<void> {
+): Promise<number | undefined> {
   return new Promise((resolve, reject) => {
     const outputFd = outputPath ? openDaemonOutputFd(outputPath) : null;
     let child: ReturnType<typeof spawn>;
@@ -76,7 +76,7 @@ export function startDetachedProcessChecked(
       child.removeListener("error", onError);
       closeParentFd();
       child.unref();
-      resolve();
+      resolve(child.pid);
     };
     const onError = (error: Error) => {
       closeParentFd();

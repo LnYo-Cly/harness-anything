@@ -164,9 +164,11 @@ export async function initializeRepoCell(context: RepoCellCoreInput): Promise<Re
         errorCode: cellErrorCode(error),
       };
     }
+    // Catch-up and the structural probe are done. Reporting "opening" here read as a phase regression
+    // and never fed the writer's ready watchdog, leaving the rest of attach silent; the next phase does.
     context.input.onOpenProgress?.({
-      phase: "opening",
-      applied: null,
+      phase: "restoring-runtimes",
+      applied: 0,
       total: null,
       watermark: null,
     });

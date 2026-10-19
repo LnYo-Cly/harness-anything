@@ -1,5 +1,6 @@
 // harness-test-tier: fast
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -182,7 +183,7 @@ test("a GUI/CLI peer that already owns the daemon singleton is awaited, not resp
       readyTimeoutMs: 5,
     });
     assert.equal(result.ok, false);
-    assert.equal(result.code, "daemon_bind_timeout");
+    assert.equal(result.code, "daemon_starting", "a live singleton holder is still starting, not a bind timeout");
     assert.equal(result.attempts, 0);
     assert.equal(spawns, 0, "the existing singleton holder is the only writer candidate");
   } finally {
@@ -243,6 +244,37 @@ test("a live process with lifecycle attach progress reports starting instead of 
       progress.some((message) => /waited 0s \(repo 3\/5: repo-c\)/u.test(message)),
       true,
     );
+  } finally {
+    rmSync(userRoot, { recursive: true, force: true });
+  }
+});
+
+test("a live spawned child behind a dead generation's process_start reports starting, not bind timeout", async () => {
+  const userRoot = mkdtempSync(path.join(tmpdir(), "ha-autostart-cold-")),
+    deadPid = spawnSync(process.execPath, ["-e", ""]).pid!,
+    progress: string[] = [],
+    spec = (): DaemonLaunchSpec => ({
+      command: "node",
+      args: ["index.ts", "serve", "--user-root", userRoot, "--daemon-id", "cold"],
+      env: {},
+    });
+  try {
+    // The previous generation died without process_exit; the new daemon is still loading modules.
+    openDaemonLifecycleLog({ userRoot, daemonId: "cold", pid: deadPid }).record({ event: "process_start" });
+    const result = await ensureLocalDaemonRunning({
+      socketPath: path.join(userRoot, "daemon.sock"),
+      invokingRoot: process.cwd(),
+      launch: spec,
+      probe: async () => false,
+      probeIntervalMs: 1,
+      readyTimeoutMs: 5,
+      spawnDetached: async () => process.pid,
+      onProgress: (entry) => progress.push(entry.message),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.code, "daemon_starting");
+    assert.match(result.hint, new RegExp(`process ${process.pid} is alive`, "u"));
+    assert.equal(progress.length > 0, true);
   } finally {
     rmSync(userRoot, { recursive: true, force: true });
   }
