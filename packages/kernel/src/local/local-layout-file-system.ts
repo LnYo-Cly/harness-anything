@@ -1,6 +1,7 @@
 import {
   constants,
   closeSync,
+  copyFileSync,
   cpSync,
   existsSync,
   fsyncSync,
@@ -39,6 +40,7 @@ export const localEvidenceFileSystem = {
 export const localLedgerBackupFileSystem = {
   cloneMode: constants.COPYFILE_FICLONE,
   copy: cpSync,
+  copyFile: copyFileSync,
   exists: existsSync,
   lstat: lstatSync,
   makeTemporaryDirectory: mkdtempSync,

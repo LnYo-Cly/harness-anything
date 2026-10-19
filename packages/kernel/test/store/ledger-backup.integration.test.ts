@@ -305,9 +305,9 @@ test("backup and restore reject missing or wrong-sized accepted content in gener
       blobs: [{ ...claim, body }],
     });
     store.close();
-    const copy = localLedgerBackupFileSystem.copy;
-    t.mock.method(localLedgerBackupFileSystem, "copy", (...args: Parameters<typeof copy>) => {
-      const result = copy(...args);
+    const read = localLedgerBackupFileSystem.read;
+    t.mock.method(localLedgerBackupFileSystem, "read", (...args: Parameters<typeof read>) => {
+      const result = read(...args);
       if (args[0] === object) rmSync(object);
       return result;
     });

@@ -62,6 +62,7 @@ export function createLedgerBackup(input: {
     sqlitePath = sqliteLedgerPath(input.rootInput, generation),
     sqlitePresent = fileSystem.exists(sqlitePath);
   fileSystem.mkdir(payloadRoot, { recursive: true });
+  writtenDigests.clear();
   try {
     copyWorkingTree(layout.rootDir, layout.authoredRoot, payloadRoot);
     for (const sourcePath of sourcePaths) copySource(layout.rootDir, sourcePath, payloadRoot);
@@ -77,7 +78,7 @@ export function createLedgerBackup(input: {
       files = inventory(payloadRoot).map((backupFile) => {
         const relative = portable(path.relative(payloadRoot, backupFile)),
           vacuumed = /^\.harness\/store\/generations\/[123]\/ledger\.sqlite$/u.test(relative),
-          backup = entryDigest(backupFile);
+          backup = writtenDigests.get(backupFile) ?? entryDigest(backupFile);
         return {
           path: relative,
           size: backup.size,
@@ -277,6 +278,23 @@ function copySource(rootDir: string, sourcePath: string, payloadRoot: string): v
   );
 }
 
+// Digests of the exact bytes this capture wrote. Reopening every just-written file to hash it
+// costs a scanner pass per file on Windows (about half the backup time); large files still rehash.
+// ponytail: module state is safe because a capture is synchronous; pass it through if that changes.
+const writtenDigests = new Map<string, { readonly size: number; readonly sha256: string; readonly symlink: false }>();
+const inMemoryCopyLimit = 64 * 1024 * 1024;
+function readWhole(source: string): Uint8Array | null {
+  try {
+    return fileSystem.read(source);
+  } catch (error) {
+    if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "ERR_FS_FILE_TOO_LARGE")
+      throw error;
+    // Over Node's whole-file limit: the caller copies and rehashes by stream instead.
+    consumeKnownError(error);
+    return null;
+  }
+}
+
 // An entry may vanish at any point after its enumeration — Git's transient gc/maintenance
 // locks under .git/, a write path replacing a temp file (#2543, #2652). Tolerance sits on
 // the copy action itself, because a filter decides before the copy opens the file and
@@ -300,7 +318,15 @@ function copyVanishingTree(
         if (fileSystem.exists(destination)) fileSystem.remove(destination);
         fileSystem.symlink(fileSystem.readLink(source), destination);
       } else {
-        fileSystem.copy(source, destination, { mode: fileSystem.cloneMode });
+        const bytes = stat.size <= inMemoryCopyLimit ? readWhole(source) : null;
+        if (bytes) {
+          fileSystem.write(destination, bytes);
+          writtenDigests.set(destination, {
+            size: bytes.byteLength,
+            sha256: `sha256:${sha256Bytes(bytes)}`,
+            symlink: false,
+          });
+        } else fileSystem.copyFile(source, destination, fileSystem.cloneMode);
       }
       return true;
     } catch (error) {
