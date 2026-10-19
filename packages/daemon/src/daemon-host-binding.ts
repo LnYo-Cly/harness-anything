@@ -4,6 +4,7 @@ import { hostCodedError } from "./daemon-host-errors.ts";
 import { type RepoCellBinding } from "./repo-cell.ts";
 import type { DaemonAuthenticationContext } from "./transport/auth-context.ts";
 import { withWriterEpochFenceDescriptor, type WriterEpochFenceDescriptor } from "./writer-epoch.ts";
+import { isDaemonSocketOwner, localOwnerPersonId } from "./local-owner-binding.ts";
 
 export function localSystemBinding(
   _rootDir: string,
@@ -26,13 +27,13 @@ export async function localSystemActionBinding(
   const declaration = actionDeclarations.find((candidate) => candidate.kind === kind);
   if (!declaration || declaration.residency.scope === "canonical")
     throw hostCodedError("authentication_required", `Action ${kind} requires an authenticated repository principal.`);
-  const daemonUid = process.getuid?.(),
-    ownerUid = auth.unixSocketOwnerBoundary?.ownerUid,
-    isDaemonSocketOwner =
-      auth.transportKind === "unix-socket" &&
-      typeof ownerUid === "number" &&
-      (typeof daemonUid === "number" ? ownerUid === daemonUid : process.platform === "win32" && ownerUid === 0);
-  return isDaemonSocketOwner ? defaultLocalBinding(ownerUid!, null) : principalBinding();
+  return isDaemonSocketOwner(auth)
+    ? defaultLocalBinding(
+        auth.unixSocketOwnerBoundary!.ownerUid,
+        null,
+        localOwnerPersonId(rootDir, auth.unixSocketOwnerBoundary!.ownerUid),
+      )
+    : principalBinding();
 }
 
 export function withDaemonWriterEpochFence(
@@ -48,9 +49,13 @@ export function withDaemonWriterEpochFence(
   };
 }
 
-function defaultLocalBinding(ownerUid: number, executor: RepoCellBinding["actor"]["executor"]): RepoCellBinding {
+function defaultLocalBinding(
+  ownerUid: number,
+  executor: RepoCellBinding["actor"]["executor"],
+  personId = `local-user-${ownerUid}`,
+): RepoCellBinding {
   return {
-    actor: { principal: { personId: `local-user-${ownerUid}` }, executor },
+    actor: { principal: { personId }, executor },
     daemonSocketOwner: true,
     source: "local",
   };
@@ -61,7 +66,16 @@ export function localDefaultBinding(
   auth: DaemonAuthenticationContext,
   executor: RepoCellBinding["actor"]["executor"] = null,
   replicaRead = false,
+  rootDir?: string,
 ): RepoCellBinding {
+  // Without a live Keycloak session the local socket owner still acts, as the person its ledger names.
+  if ((!auth.oidcPrincipal || auth.oidcPrincipal.expiresAt <= Date.now()) && isDaemonSocketOwner(auth)) {
+    const ownerUid = auth.unixSocketOwnerBoundary!.ownerUid;
+    return withSessionEnvironment(defaultLocalBinding(ownerUid, executor, localOwnerPersonId(rootDir, ownerUid)), {
+      ...auth,
+      oidcPrincipal: undefined,
+    });
+  }
   const replicaPrincipal =
     replicaRead &&
     auth.replicaReadPrincipal &&
@@ -135,12 +149,11 @@ async function nodeOwnerBinding(auth: DaemonAuthenticationContext): Promise<Repo
 }
 
 export async function binding(
-  _rootDir: string,
+  rootDir: string,
   auth: DaemonAuthenticationContext,
   executor: RepoCellBinding["actor"]["executor"] = null,
   replicaRead = false,
 ): Promise<RepoCellBinding> {
   if (auth.transportKind === "fleet-tls") return nodeOwnerBinding(auth);
-  if (replicaRead) return localDefaultBinding(auth, executor, true);
-  return localDefaultBinding(auth, executor);
+  return localDefaultBinding(auth, executor, replicaRead, rootDir);
 }

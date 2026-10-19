@@ -52,6 +52,10 @@ export async function evaluateRepoCellAction(input: {
       idempotencyKey: typeof input.action.idempotencyKey === "string" ? input.action.idempotencyKey : input.actionId,
     });
   const credential = input.binding.keycloakAuthorization;
+  // Single-user local mode: without a user session the daemon socket owner holds every repository
+  // grant. The host attaches a center authority to every binding, so the session is the witness.
+  if (!credential?.session && input.binding.daemonSocketOwner === true && input.binding.source === "local")
+    return keycloakDecision(envelope, `canonical:${input.revision}`, "allowed", "daemon_socket_owner");
   if (!credential)
     return authorizeDurableRepoCellAction({
       ...input,

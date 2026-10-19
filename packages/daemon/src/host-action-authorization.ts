@@ -36,14 +36,11 @@ export async function evaluateFleetAction(input: {
       actor: input.binding.actor,
     }),
     credential = input.binding.keycloakAuthorization;
-  if (!credential) {
+  // The host attaches a center authority to every binding; only a user session means Keycloak applies.
+  if (!credential?.session) {
     const declaration = actionDeclarations.find((candidate) => candidate.kind === input.kind);
-    if (
-      input.binding.source === "local" &&
-      input.binding.daemonSocketOwner === true &&
-      declaration &&
-      declaration.residency.scope !== "canonical"
-    )
+    // Single-user local mode: without a user session the socket owner holds every host grant.
+    if (input.binding.source === "local" && input.binding.daemonSocketOwner === true && declaration)
       return {
         ...keycloakDecision(envelope, input.evaluatedAtCut, "allowed", "daemon_socket_owner"),
         policyRef: "daemon-socket-owner@1",
