@@ -532,6 +532,12 @@ function sqlString(value: string): string {
 }
 
 /** Verify every retained source byte before an offline converter opens the copied database. */
+/** The backup itself or anything under it; a root on another drive is outside (relative is absolute there). */
+export function isInsideBackup(backupDir: string, root: string): boolean {
+  const relative = path.relative(backupDir, root);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
 export function readVerifiedLedgerBackup(backupDir: string): LedgerBackupManifestV1 {
   const manifest = readManifest(backupDir);
   verifyManifest(path.join(backupDir, "payload"), manifest);

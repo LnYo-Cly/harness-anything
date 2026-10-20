@@ -2,7 +2,7 @@ import path from "node:path";
 import { localRuntimeStateFileSystem as files } from "../local/local-layout-file-system.ts";
 import { canonicalLedgerCut } from "./task-event-store-contract.ts";
 import { openSqliteEventStore, sqliteLedgerPath } from "./sqlite-event-store.ts";
-import { readVerifiedLedgerBackup, drillLedgerBackup } from "./ledger-backup.ts";
+import { readVerifiedLedgerBackup, drillLedgerBackup, isInsideBackup } from "./ledger-backup.ts";
 import { planCompletionGeneration } from "./completion-generation-plan.ts";
 import { writeCompletionGeneration, verifyCompletionGeneration } from "./completion-generation-target.ts";
 import { publishGenerationThreeActivation } from "./generation-three-activation.ts";
@@ -44,10 +44,8 @@ export function runCompletionGenerationConversion(input: {
   }
   if (!input.destinationRoot || !path.isAbsolute(input.destinationRoot))
     throw new Error("conversion requires an absolute destination");
-  const root = path.resolve(input.destinationRoot),
-    relative = path.relative(backupDir, root);
-  if (!relative || (!relative.startsWith(`..${path.sep}`) && relative !== ".."))
-    throw new Error("destination must be outside immutable backup");
+  const root = path.resolve(input.destinationRoot);
+  if (isInsideBackup(backupDir, root)) throw new Error("destination must be outside immutable backup");
   if (input.mode === "convert")
     drillLedgerBackup({
       backupDir,

@@ -11,7 +11,7 @@ import type { CanonicalEventV1, PersistedCanonicalEventV1 } from "../domain/doc-
 import type { MigrationImportEventV1 } from "../domain/migration-import-event.ts";
 import { sha256Bytes, sha256Text, stableStringify } from "../integrity/stable-hash.ts";
 import { localRuntimeStateFileSystem as files } from "../local/local-layout-file-system.ts";
-import { drillLedgerBackup, readVerifiedLedgerBackup } from "./ledger-backup.ts";
+import { drillLedgerBackup, isInsideBackup, readVerifiedLedgerBackup } from "./ledger-backup.ts";
 import { contentClaims } from "./task-event-store-claims-layout.ts";
 import {
   generationTwoActivationPath,
@@ -72,9 +72,8 @@ export function runGenerationTwoConversion(input: {
     if (!plan.ready) return { plan, active: false as const };
     if (!input.destinationRoot || !path.isAbsolute(input.destinationRoot))
       throw new Error("conversion and verification require an absolute --destination outside the backup");
-    const destinationRoot = path.resolve(input.destinationRoot),
-      relative = path.relative(backupDir, destinationRoot);
-    if (relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".."))
+    const destinationRoot = path.resolve(input.destinationRoot);
+    if (isInsideBackup(backupDir, destinationRoot))
       throw new Error("conversion destination must be outside the immutable backup");
     if (input.mode === "convert") {
       drillLedgerBackup({
