@@ -34,7 +34,9 @@ import { makeLocalVersionControlCommands } from "./local-version-control-command
 const gitMaxBuffer = 256 * 1024 * 1024,
   gitBatchChunkBytes = 64 * 1024 * 1024,
   gitBatchChunkEntries = 4_096,
-  gitTreeArgumentBytes = 8 * 1024;
+  // Windows runs git through `cmd.exe /c`, whose whole command line stops at 8191 characters;
+  // leave room for the git prefix and each path's quotes.
+  gitTreeArgumentBytes = 6 * 1024;
 
 export function makeLocalVersionControlSystem(): VersionControlSystem {
   return makeLocalVersionControlCommands({
@@ -514,7 +516,7 @@ export const localGitObjectRefStore = Object.freeze({
       bytes = 0;
     };
     for (const target of traversal) {
-      const size = Buffer.byteLength(target) + 1;
+      const size = Buffer.byteLength(target) + 3;
       if (bytes + size > gitTreeArgumentBytes) flush();
       batch.push(target);
       bytes += size;
