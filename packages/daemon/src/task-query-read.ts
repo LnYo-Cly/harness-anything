@@ -268,7 +268,7 @@ export function makeTaskQueryReadModel(input: {
       rows: lifecycle.rows.map((row) => {
         const task = row.snapshot.task,
           metadata = task?.metadata,
-          disposition = requiredPackageDisposition(row.taskId, task?.packageDisposition),
+          disposition = taskPackageDisposition(task?.packageDisposition),
           derived = activeDerives.get(`task/${row.taskId}`) ?? [],
           scopes = derived
             .flatMap((edge) => {
@@ -914,12 +914,12 @@ export function requireSameProjectionCut(surface: string, reads: readonly Projec
       throw new Error(`${surface} spans multiple event projection cuts.`);
   return projectionCut(basis);
 }
-export function requiredPackageDisposition(
-  taskId: string,
+// task/v2 leaves packageDisposition optional and the kernel reads absence as "active". Ledgers
+// converted to generation 1 before 1e42d8e55 still carry migrated task/v2 snapshots without it.
+export function taskPackageDisposition(
   disposition: "active" | "archived" | "tombstoned" | undefined,
 ): "active" | "archived" | "tombstoned" {
-  if (disposition !== undefined) return disposition;
-  throw new Error(`Event-backed task projection is missing packageDisposition for ${taskId}.`);
+  return disposition ?? "active";
 }
 /** Attach the kernel's uncovered-cause classification so consumers never re-derive it. */
 function withFreshnessReason<T extends FreshnessReasonInput>(row: T): T & { freshnessReason?: FreshnessReason } {
