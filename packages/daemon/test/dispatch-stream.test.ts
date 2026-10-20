@@ -28,6 +28,7 @@ import {
   readDispatchStreamHeaders,
   readDispatchStreamIncrement,
   readDispatchStreamSummary,
+  readSquadDispatchStreamSummaries,
   scrubProviderValue,
 } from "../src/dispatch-stream.ts";
 import { adoptRuntimes } from "../src/runtime-spawn-adoption.ts";
@@ -231,6 +232,42 @@ test("rebuild enumeration and later worker records retain an archived stream", (
         .find((stream) => stream.header.dispatchId === dispatchId)
         ?.records.some((record) => record.kind === "squad_run_state"),
       true,
+    );
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("squad enumeration reads only streams whose header names a squad, live or archived", () => {
+  const rootDir = mkdtempSync(path.join(tmpdir(), "ha-dispatch-squad-only-"));
+  try {
+    const squadDispatchId = "dispatch_bbbbbbbbbbbbbbbbbbbbbbbb",
+      plainDispatchId = "dispatch_cccccccccccccccccccccccc";
+    for (const [dispatchId, squadId] of [
+      [squadDispatchId, "squad-a"],
+      [plainDispatchId, undefined],
+    ] as const) {
+      openDispatchStream(rootDir, {
+        dispatchId,
+        taskId: "task-squad",
+        executionId: "execution-squad",
+        runtimeSessionId: `runtime_${dispatchId.slice(-24)}`,
+        instanceId: "instance-squad",
+        startedAt: "2026-10-20T00:00:00.000Z",
+        ...(squadId ? { squadId } : {}),
+      });
+      appendRuntimeWorkerRecord(rootDir, dispatchId, {
+        kind: "squad_run_state",
+        squadRunId: "squad_bbbbbbbbbbbbbbbbbbbbbbbb",
+        revision: 1,
+        state: { schema: "squad-run/v1" },
+      });
+    }
+    archiveDispatchStream(rootDir, squadDispatchId);
+
+    assert.deepEqual(
+      readSquadDispatchStreamSummaries(rootDir).map((stream) => stream.header.dispatchId),
+      [squadDispatchId],
     );
   } finally {
     rmSync(rootDir, { recursive: true, force: true });

@@ -449,6 +449,21 @@ export function readDispatchStreamHeaders(rootDir: string, includeArchived = fal
 
 /** Replay every retained stream when rebuilding projections that have no other durable source. */
 export function readAllDispatchStreamSummaries(rootDir: string): readonly DispatchStreamSummary[] {
+  return retainedDispatchIds(rootDir)
+    .map((dispatchId) => readDispatchStreamSummary(rootDir, dispatchId))
+    .filter((stream): stream is DispatchStreamSummary => stream !== null);
+}
+
+/** Squad records live only in a Squad leader's stream, whose header names its squadId; every
+ * other stream is skipped after its header line, so plain dispatch transcripts are never read. */
+export function readSquadDispatchStreamSummaries(rootDir: string): readonly DispatchStreamSummary[] {
+  return retainedDispatchIds(rootDir)
+    .filter((dispatchId) => readDispatchStreamHeader(rootDir, dispatchId)?.squadId)
+    .map((dispatchId) => readDispatchStreamSummary(rootDir, dispatchId))
+    .filter((stream): stream is DispatchStreamSummary => stream !== null);
+}
+
+function retainedDispatchIds(rootDir: string): readonly string[] {
   const root = dispatchStreamRoot(resolveHarnessLayout(rootDir)),
     archive = path.join(root, "archive"),
     dispatchIds = new Set<string>();
@@ -457,9 +472,7 @@ export function readAllDispatchStreamSummaries(rootDir: string): readonly Dispat
     for (const name of readdirSync(directory))
       if (/^dispatch_[a-f0-9]{24}\.jsonl$/u.test(name)) dispatchIds.add(name.slice(0, -6));
   }
-  return [...dispatchIds]
-    .map((dispatchId) => readDispatchStreamSummary(rootDir, dispatchId))
-    .filter((stream): stream is DispatchStreamSummary => stream !== null);
+  return [...dispatchIds];
 }
 
 export function readDispatchStream(

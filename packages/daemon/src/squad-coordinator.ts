@@ -12,7 +12,7 @@ import {
   type AgentRuntimeEventV1,
   type TaskProjection,
 } from "@harness-anything/kernel";
-import { appendRuntimeWorkerRecord } from "./dispatch-stream.ts";
+import { appendRuntimeWorkerRecord, readSquadDispatchStreamSummaries } from "./dispatch-stream.ts";
 import { storedAgentDeclarationOutcome } from "./agent-declaration-resolution.ts";
 import { readTaskDispatches } from "./dispatch-read.ts";
 import type { TaskDispatchRow } from "./protocol/daemon-protocol.contract.ts";
@@ -109,8 +109,9 @@ export function makeSquadCoordinator(input: {
     readonly cancel: (payload: JsonObject, binding: RuntimeBinding) => Promise<JsonObject>;
   };
 }) {
-  const states = new Map(latestSquadStates(input.rootDir)),
-    publicationAcks = squadPublicationAcks(input.rootDir);
+  const streams = readSquadDispatchStreamSummaries(input.rootDir),
+    states = new Map(latestSquadStates(input.rootDir, streams)),
+    publicationAcks = squadPublicationAcks(input.rootDir, streams);
   const start = async (action: JsonObject, binding: RuntimeBinding): Promise<JsonObject> => {
     const taskId = requiredSquadText(action.taskId, "taskId"),
       activeRun = readStates().find(

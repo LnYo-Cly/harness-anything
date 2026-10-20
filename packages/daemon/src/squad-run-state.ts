@@ -1,5 +1,5 @@
 import { isTerminalStatus, type TaskV2 } from "@harness-anything/kernel";
-import { readAllDispatchStreamSummaries } from "./dispatch-stream.ts";
+import { readSquadDispatchStreamSummaries, type DispatchStreamSummary } from "./dispatch-stream.ts";
 import type { RepoTaskAction } from "./repo-cell-types.ts";
 import type { RuntimeBinding } from "./runtime-spawn-types.ts";
 import type { LeaderTrigger, LeaderTurn, WorkerAttempt, WorkerWaitTrigger } from "./squad-leader-decision.ts";
@@ -71,9 +71,12 @@ export function squadState(value: unknown): SquadState | null {
 }
 
 /** The dispatch streams are the squad runs' ledger: the latest state per run, cancellation records applied on top. */
-export function latestSquadStates(rootDir: string): ReadonlyMap<string, SquadState> {
+export function latestSquadStates(
+  rootDir: string,
+  streams: readonly DispatchStreamSummary[] = readSquadDispatchStreamSummaries(rootDir),
+): ReadonlyMap<string, SquadState> {
   const states = new Map<string, SquadState>();
-  for (const stream of readAllDispatchStreamSummaries(rootDir)) {
+  for (const stream of streams) {
     for (const record of stream.records) {
       if (record.kind === "squad_run_cancelled") {
         const squadRunId = record.squadRunId,
@@ -103,9 +106,12 @@ export function latestSquadStates(rootDir: string): ReadonlyMap<string, SquadSta
 }
 
 /** ACKs share the control stream, so a missing ACK always resends the same operation after restart. */
-export function squadPublicationAcks(rootDir: string): Map<string, number> {
+export function squadPublicationAcks(
+  rootDir: string,
+  streams: readonly DispatchStreamSummary[] = readSquadDispatchStreamSummaries(rootDir),
+): Map<string, number> {
   const acks = new Map<string, number>();
-  for (const stream of readAllDispatchStreamSummaries(rootDir))
+  for (const stream of streams)
     for (const record of stream.records)
       if (
         record.kind === "squad_run_publication_ack" &&

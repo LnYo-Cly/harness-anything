@@ -129,6 +129,7 @@ function makeRecoveryFixture(
       runtimeSessionId,
       instanceId: INSTANCE_ID,
       startedAt: "2026-08-27T00:00:00.000Z",
+      squadId: "core-squad",
     });
 
   const state = {
@@ -336,6 +337,7 @@ function makeRecoveryFixture(
             runtimeSessionId,
             instanceId: INSTANCE_ID,
             startedAt: "2026-08-27T00:00:00.000Z",
+            squadId: "core-squad",
           });
           sessions.push({
             ...runtimeSession(runtimeSessionId, null, null, "provider-leader"),
@@ -1233,6 +1235,7 @@ test("rejectedSquadAttemptChildren names only ended runs' rejected children that
       runtimeSessionId: LEADER_SESSION_ID,
       instanceId: INSTANCE_ID,
       startedAt: "2026-08-27T00:00:00.000Z",
+      squadId: "core-squad",
     });
     // A run still working through its triggers keeps its rejected children: the leader may still be re-planning.
     appendRuntimeWorkerRecord(rootDir, LEADER_DISPATCH_ID, {

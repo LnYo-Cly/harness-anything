@@ -38,6 +38,7 @@ test("owner orphan cancellation recovers the latest local control state from arc
     runtimeSessionId: "runtime-parent",
     instanceId: "test",
     startedAt: "2026-10-07T00:00:00Z",
+    squadId: "squad-a",
   });
   appendRuntimeWorkerRecord(rootDir, dispatchId, { kind: "squad_run_state", state });
   archiveDispatchStream(rootDir, dispatchId);
